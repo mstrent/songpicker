@@ -1448,9 +1448,10 @@ textarea {
   color: var(--fg);
 }
 
-/* Prompt editors (collapsed disclosures). Small inline pills shown
-   inside the Suggest card header so they read as form-level AI settings
-   rather than a separate section. */
+/* AI persona / service-flow prompt pills. Always live in the
+   .suggest-header row alongside the heading. The open pill switches to
+   a filled-accent style as a clear "I'm expanded" indicator; the body
+   renders as a separate sub-card below the header. */
 
 .suggest-header {
   display: flex;
@@ -1465,78 +1466,48 @@ textarea {
   margin: 0;
 }
 
-.prompt-editors {
+.prompt-pills {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
   min-width: 0;
-  align-items: flex-start;
-}
-/* display: contents lifts each <details>'s summary + body into the
-   prompt-editors flex container as direct children. That lets the
-   summaries (pills) stay inline together at the top, and the open
-   body wrap to its own row spanning the full width — instead of the
-   open body pushing the other pill below it inside its own details. */
-.prompt-editors .structure-prompt {
-  display: contents;
-}
-.prompt-editors .structure-prompt summary {
-  flex: 0 0 auto;
-}
-.prompt-editors .structure-prompt:not([open]) > .body {
-  display: none;
-}
-.prompt-editors .structure-prompt[open] > .body {
-  flex: 0 0 100%;
-  width: 100%;
-  box-sizing: border-box;
-  order: 10;
-}
-/* When at least one pill is open, the prompt-editors row breaks to its
-   own line inside the .suggest-header. Pills stay together at the top
-   of that row; the open body takes the second row. */
-.suggest-header:has(.structure-prompt[open]) .prompt-editors {
-  flex-basis: 100%;
 }
 
-.structure-prompt {
-  margin: 0;
-}
-.structure-prompt summary {
+.prompt-pill {
   cursor: pointer;
   font-size: 0.75rem;
   color: var(--fg);
-  padding: 0.2rem 0.65rem;
+  padding: 0.22rem 0.7rem;
   border-radius: 999px;
   user-select: none;
-  list-style: none;
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
   background: var(--accent-soft);
   border: 1px solid var(--accent-soft-2);
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease,
+    color 0.15s ease, box-shadow 0.15s ease;
+  font-family: inherit;
+  font-weight: 500;
 }
-.structure-prompt summary::-webkit-details-marker {
-  display: none;
-}
-.structure-prompt summary:hover {
+.prompt-pill:hover {
   background: var(--accent-soft-2);
   border-color: var(--accent);
+  filter: none;
 }
-.structure-prompt summary .chevron {
+.prompt-pill .chevron {
   display: inline-block;
   transition: transform 0.15s ease;
   font-size: 0.85em;
   color: var(--accent);
 }
-.structure-prompt[open] summary .chevron {
+.prompt-pill.is-open .chevron {
   transform: rotate(90deg);
 }
-.structure-prompt summary .gradient-text {
+.prompt-pill .gradient-text {
   font-weight: 600;
 }
-.structure-prompt .source-tag {
+.prompt-pill .source-tag {
   font-size: 0.68rem;
   color: var(--muted);
   font-style: italic;
@@ -1545,7 +1516,45 @@ textarea {
   margin-left: 0.1rem;
   cursor: help;
 }
-.structure-prompt .help {
+/* Open state: solid accent fill + bright text, plus a subtle ring so
+   the active pill clearly stands out from its sibling. */
+.prompt-pill.is-open {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.prompt-pill.is-open .gradient-text {
+  background: none;
+  -webkit-background-clip: initial;
+  background-clip: initial;
+  -webkit-text-fill-color: white;
+  color: white;
+}
+.prompt-pill.is-open .chevron,
+.prompt-pill.is-open .sparkle {
+  color: white;
+}
+.prompt-pill.is-open .source-tag {
+  color: rgba(255, 255, 255, 0.85);
+  border-left-color: rgba(255, 255, 255, 0.35);
+}
+
+/* The body of the open pill sits below .suggest-header, inside the
+   criteria card, styled as a sub-card with an accent left bar so the
+   visual tie to the pill above reads clearly. */
+.prompt-body {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.prompt-body .help {
   color: var(--muted);
   font-size: 0.88rem;
   margin: 0;
@@ -1555,43 +1564,43 @@ textarea {
   display: grid;
   gap: 0.75rem;
 }
-.structure-prompt textarea {
+.prompt-body textarea {
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--border-strong);
   border-radius: 8px;
-  background: var(--bg);
+  background: var(--surface);
   color: var(--fg);
   font-size: 0.92rem;
   font-family: inherit;
   resize: vertical;
   min-height: 6rem;
 }
-.structure-prompt textarea:focus {
+.prompt-body textarea:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
-.structure-prompt .actions {
+.prompt-body .actions {
   display: flex;
   gap: 0.6rem;
   flex-wrap: wrap;
 }
-.structure-prompt .actions button.ghost {
+.prompt-body .actions button.ghost {
   background: transparent;
   color: var(--muted);
   border: 1px solid var(--border-strong);
   font-weight: 500;
 }
-.structure-prompt .actions button.ghost:hover {
+.prompt-body .actions button.ghost:hover {
   color: var(--fg);
   border-color: var(--accent);
   background: var(--accent-soft);
   filter: none;
 }
-.structure-prompt .actions button.ghost.danger:hover {
+.prompt-body .actions button.ghost.danger:hover {
   color: var(--error);
   border-color: var(--error);
   background: var(--error-soft);

@@ -27,7 +27,22 @@ import {
 } from '../lib/cache'
 import { isSongSlot } from '../lib/songSlots'
 import { praiseChartsSearchUrl, spotifySearchUrl } from '../lib/searchLinks'
-import { PromptEditor } from './PromptEditor'
+import { usePromptConfig } from '../lib/usePromptConfig'
+import { PromptBody } from './PromptBody'
+import { PromptPill } from './PromptPill'
+
+type OpenPrompt = 'role' | 'structure' | null
+
+const PROMPT_COPY = {
+  role: {
+    label: 'AI persona',
+    help: "Describe the AI's persona — who it is, how it should think about your service, the kind of church you lead, the theological frame you prefer, etc. The technical JSON-format requirements are added behind the scenes, so you can edit freely without breaking output.",
+  },
+  structure: {
+    label: 'AI service-flow prompt',
+    help: 'Extra context the AI receives on every Suggest call, shaping how songs are distributed across the service (opener, mid-service, closer, etc.).',
+  },
+}
 
 interface CandidateMatch {
   id: string
@@ -132,6 +147,13 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   const themeInitialized = useRef(false)
   const notesInitialized = useRef(false)
   const countInitialized = useRef(false)
+
+  const roleHook = usePromptConfig('role', planId)
+  const structureHook = usePromptConfig('structure', planId)
+  const [openPrompt, setOpenPrompt] = useState<OpenPrompt>(null)
+  function togglePrompt(which: 'role' | 'structure') {
+    setOpenPrompt((prev) => (prev === which ? null : which))
+  }
   // Track whether the user has actually touched the field. We don't want to
   // auto-save the initial seed value (which would treat a never-edited field
   // as a user override, polluting storage).
@@ -663,11 +685,37 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       <section className="criteria">
         <div className="suggest-header">
           <h3>Suggest songs</h3>
-          <div className="prompt-editors">
-            <PromptEditor type="role" planId={planId} />
-            <PromptEditor type="structure" planId={planId} />
+          <div className="prompt-pills">
+            <PromptPill
+              type="role"
+              label={PROMPT_COPY.role.label}
+              source={roleHook.config?.effective.source ?? 'system'}
+              isOpen={openPrompt === 'role'}
+              onToggle={() => togglePrompt('role')}
+            />
+            <PromptPill
+              type="structure"
+              label={PROMPT_COPY.structure.label}
+              source={structureHook.config?.effective.source ?? 'system'}
+              isOpen={openPrompt === 'structure'}
+              onToggle={() => togglePrompt('structure')}
+            />
           </div>
         </div>
+        {openPrompt === 'role' && (
+          <PromptBody
+            label={PROMPT_COPY.role.label}
+            help={PROMPT_COPY.role.help}
+            hook={roleHook}
+          />
+        )}
+        {openPrompt === 'structure' && (
+          <PromptBody
+            label={PROMPT_COPY.structure.label}
+            help={PROMPT_COPY.structure.help}
+            hook={structureHook}
+          />
+        )}
         <label>
           <span className="theme-label">
             <span>
