@@ -265,7 +265,7 @@ textarea {
 }
 
 .plans .plan-link.past {
-  opacity: 0.65;
+  opacity: 0.85;
   box-shadow: none;
 }
 .plans .plan-link.past:hover {
@@ -273,6 +273,48 @@ textarea {
 }
 .plans .plan-link.past .title {
   font-weight: 500;
+}
+
+.past-plans-group {
+  margin-bottom: 1rem;
+}
+.past-plans-group summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.88rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 8px;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px dashed var(--border);
+}
+.past-plans-group summary::-webkit-details-marker {
+  display: none;
+}
+.past-plans-group summary:hover {
+  color: var(--fg);
+  border-color: var(--border-strong);
+  background: var(--surface);
+}
+.past-plans-group summary .chevron {
+  display: inline-block;
+  transition: transform 0.15s ease;
+  font-size: 0.85em;
+  color: var(--muted);
+}
+.past-plans-group[open] summary .chevron {
+  transform: rotate(90deg);
+}
+.past-plans-group summary .past-served-count {
+  color: var(--warm-strong);
+  font-weight: 500;
+}
+.past-plans-list {
+  margin-top: 0.6rem;
+  margin-bottom: 1rem;
 }
 
 .plans .plan-link.led-by-me {
