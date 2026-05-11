@@ -69,7 +69,7 @@ export const searchSongs = httpsCallable<{ query: string }, { songs: Song[] }>(
 
 export const suggestSongs = httpsCallable<
   { theme: string; criteria: string; exclude?: string[]; count?: number },
-  { suggestions: SongSuggestion[] }
+  { suggestions: SongSuggestion[]; provider: string }
 >(functions, 'suggestSongs')
 
 export const commitPlanItems = httpsCallable<

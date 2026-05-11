@@ -34,6 +34,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   const [generating, setGenerating] = useState(false)
   const [generateError, setGenerateError] = useState<string | null>(null)
   const [candidates, setCandidates] = useState<CandidateMatch[]>([])
+  const [provider, setProvider] = useState<string | null>(null)
 
   const themeInitialized = useRef(false)
 
@@ -70,6 +71,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     try {
       const exclude = candidates.map((c) => c.suggestion.title)
       const res = await suggestSongs({ theme, criteria, exclude, count })
+      setProvider(res.data.provider)
 
       const startIndex = candidates.length
       const newOnes: CandidateMatch[] = res.data.suggestions.map((s) => ({
@@ -249,8 +251,17 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
               onChange={(e) => setCount(parseInt(e.target.value, 10) || 8)}
             />
           </label>
-          <button onClick={handleSuggest} disabled={generating || !theme.trim()}>
-            {generating ? 'Generating…' : candidates.length > 0 ? 'Suggest more' : 'Suggest songs'}
+          <button
+            className="ai-button"
+            onClick={handleSuggest}
+            disabled={generating || !theme.trim()}
+          >
+            <span className="sparkle" aria-hidden>✨</span>
+            {generating
+              ? 'Generating…'
+              : candidates.length > 0
+                ? 'Suggest more'
+                : 'Suggest songs'}
           </button>
           {candidates.length > 0 && (
             <button className="ghost" onClick={clearCandidates} disabled={generating}>
@@ -263,7 +274,13 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
 
       {candidates.length > 0 && (
         <section className="candidates">
-          <h3>Candidates ({candidates.length})</h3>
+          <h3 className="ai-heading">
+            <span className="sparkle" aria-hidden>✨</span>
+            <span className="gradient-text">
+              AI candidates ({candidates.length})
+            </span>
+            {provider && <span className="provider-tag">via {providerLabel(provider)}</span>}
+          </h3>
           <ul>
             {candidates.map((c, i) => {
               const matched = c.status === 'matched' && c.song
@@ -319,7 +336,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     )}
                   </div>
                   {c.suggestion.reasoning && (
-                    <div className="reasoning">{c.suggestion.reasoning}</div>
+                    <div className="reasoning">
+                      <span className="sparkle-prefix" aria-hidden>✨</span>
+                      <span>{c.suggestion.reasoning}</span>
+                    </div>
                   )}
                 </li>
               )
@@ -336,6 +356,19 @@ function updateAt<T>(arr: T[], idx: number, fn: (cur: T) => T): T[] {
   const next = arr.slice()
   next[idx] = fn(next[idx])
   return next
+}
+
+function providerLabel(name: string): string {
+  switch (name) {
+    case 'anthropic':
+      return 'Claude Sonnet 4.6'
+    case 'gemini':
+      return 'Gemini 2.5 Flash'
+    case 'openai':
+      return 'GPT-4o'
+    default:
+      return name
+  }
 }
 
 function relativeTime(iso: string): string {
