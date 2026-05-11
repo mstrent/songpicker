@@ -255,6 +255,35 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     return () => clearTimeout(id)
   }, [candidates, messages, sessionLoaded, planId])
 
+  // Reconcile committed candidates with the current PCO service order.
+  // If a slot was cleared (or had a different song committed to it) via
+  // PCO directly, any candidate that still believes it owns that slot
+  // gets reset to uncommitted/pending so the SPA's UI matches PCO state
+  // and the AI no longer sees that song occupying the slot.
+  useEffect(() => {
+    if (!items || !sessionLoaded) return
+    const staleIds: string[] = []
+    for (const c of candidates) {
+      if (c.committedAt == null) continue
+      const slot = items.find((it) => it.id === c.assignedSlotItemId)
+      const stillCommitted =
+        !!slot && !!slot.songId && c.song?.id === slot.songId
+      if (!stillCommitted) staleIds.push(c.id)
+    }
+    if (staleIds.length === 0) return
+    const staleSet = new Set(staleIds)
+    setCandidates((prev) =>
+      prev.map((c) =>
+        staleSet.has(c.id)
+          ? { ...c, committedAt: null, priorSlotTitle: null }
+          : c,
+      ),
+    )
+    appendSystemMessage(
+      `↺ ${staleIds.length} slot${staleIds.length === 1 ? '' : 's'} cleared in Planning Center — matching candidate${staleIds.length === 1 ? '' : 's'} marked uncommitted`,
+    )
+  }, [items, candidates, sessionLoaded])
+
   // Debounced auto-save: persists theme/notes ~600ms after the last keystroke.
   // Saving '' when the value matches the PCO source keeps storage tidy (no
   // override = falls back to source on next load).
