@@ -3,14 +3,32 @@ import {
   getPromptConfig,
   savePromptConfig,
   type PromptConfig,
-  type StructureSource,
+  type PromptSource,
+  type PromptType,
 } from '../lib/api'
 
 interface Props {
+  type: PromptType
   planId: string
 }
 
-function sourceLabel(source: StructureSource): string {
+interface Copy {
+  label: string
+  help: string
+}
+
+const COPY: Record<PromptType, Copy> = {
+  structure: {
+    label: 'AI service-flow prompt',
+    help: 'Extra context the AI receives on every Suggest call, shaping how songs are distributed across the service (opener, mid-service, closer, etc.).',
+  },
+  system: {
+    label: 'AI system prompt',
+    help: "High-level instructions to the model about its role and output format. Edit cautiously — bad changes here can break JSON parsing.",
+  },
+}
+
+function sourceLabel(source: PromptSource): string {
   switch (source) {
     case 'plan':
       return 'Using this plan’s override'
@@ -21,7 +39,8 @@ function sourceLabel(source: StructureSource): string {
   }
 }
 
-export function StructurePrompt({ planId }: Props) {
+export function PromptEditor({ type, planId }: Props) {
+  const copy = COPY[type]
   const [config, setConfig] = useState<PromptConfig | null>(null)
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState<'plan' | 'default' | 'reset' | null>(null)
@@ -30,7 +49,7 @@ export function StructurePrompt({ planId }: Props) {
   async function refresh() {
     setError(null)
     try {
-      const res = await getPromptConfig({ planId })
+      const res = await getPromptConfig({ type, planId })
       setConfig(res.data)
       setDraft(res.data.effective.value)
     } catch (e) {
@@ -40,14 +59,14 @@ export function StructurePrompt({ planId }: Props) {
 
   useEffect(() => {
     void refresh()
-  }, [planId])
+  }, [type, planId])
 
   async function save(scope: 'plan' | 'default') {
     if (!config) return
     setSaving(scope)
     setError(null)
     try {
-      await savePromptConfig({ scope, planId, value: draft })
+      await savePromptConfig({ type, scope, planId, value: draft })
       await refresh()
     } catch (e) {
       setError((e as Error).message)
@@ -60,7 +79,7 @@ export function StructurePrompt({ planId }: Props) {
     setSaving('reset')
     setError(null)
     try {
-      await savePromptConfig({ scope: 'plan', planId, value: '' })
+      await savePromptConfig({ type, scope: 'plan', planId, value: '' })
       await refresh()
     } catch (e) {
       setError((e as Error).message)
@@ -75,7 +94,7 @@ export function StructurePrompt({ planId }: Props) {
         <summary>
           <span className="chevron" aria-hidden>▸</span>
           <span className="sparkle" aria-hidden>✨</span>
-          <span className="gradient-text">AI service-flow prompt</span>
+          <span className="gradient-text">{copy.label}</span>
         </summary>
         <div className="body">Loading…</div>
       </details>
@@ -90,15 +109,11 @@ export function StructurePrompt({ planId }: Props) {
       <summary>
         <span className="chevron" aria-hidden>▸</span>
         <span className="sparkle" aria-hidden>✨</span>
-        <span className="gradient-text">AI service-flow prompt</span>
+        <span className="gradient-text">{copy.label}</span>
         <span className="source-tag">{sourceLabel(config.effective.source)}</span>
       </summary>
       <div className="body">
-        <p className="help">
-          Extra context the AI receives on every Suggest call, shaping how
-          songs are distributed across the service (opener, mid-service,
-          closer, etc.).
-        </p>
+        <p className="help">{copy.help}</p>
         <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}

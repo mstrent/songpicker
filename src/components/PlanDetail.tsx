@@ -12,7 +12,7 @@ import {
 } from '../lib/api'
 import { isSongSlot } from '../lib/songSlots'
 import { praiseChartsSearchUrl, spotifySearchUrl } from '../lib/searchLinks'
-import { StructurePrompt } from './StructurePrompt'
+import { PromptEditor } from './PromptEditor'
 
 interface CandidateMatch {
   suggestion: SongSuggestion
@@ -238,7 +238,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         <p className="muted">No plan notes set in Planning Center.</p>
       )}
 
-      <StructurePrompt planId={planId} />
+      <div className="prompt-editors">
+        <PromptEditor type="structure" planId={planId} />
+        <PromptEditor type="system" planId={planId} />
+      </div>
 
       <section className="criteria">
         <h3>Suggest songs</h3>

@@ -919,7 +919,19 @@ textarea {
   font-weight: 700;
   color: var(--muted);
 }
-/* Structure prompt editor (collapsed disclosure) */
+/* Prompt editors (collapsed disclosures) */
+
+.prompt-editors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 1.25rem 0;
+}
+.prompt-editors .structure-prompt {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
 
 .structure-prompt {
   margin: 1.25rem 0;

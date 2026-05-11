@@ -8,6 +8,7 @@ export interface SuggestRequest {
   theme: string
   criteria: string
   structurePrompt?: string
+  systemPrompt: string
   exclude?: string[]
   count?: number
 }

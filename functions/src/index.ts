@@ -12,12 +12,12 @@ import {
 import { countSongs } from './pco/songSlots'
 import type { NewItem } from './pco/types'
 import {
+  builtInFor,
   clearPlanOverride,
-  DEFAULT_STRUCTURE_PROMPT,
-  loadPromptConfig,
-  resolveStructurePrompt,
+  loadResolved,
   savePlanOverride,
   saveUserDefault,
+  type PromptType,
 } from './prompts'
 import {
   AI_PROVIDER,
@@ -186,14 +186,17 @@ export const suggestSongs = onCall(
         )
     }
 
-    const promptConfig = await loadPromptConfig(uid)
-    const resolved = resolveStructurePrompt(promptConfig, planId)
+    const [structure, system] = await Promise.all([
+      loadResolved(uid, 'structure', planId),
+      loadResolved(uid, 'system', planId),
+    ])
 
     const ai = getAiProvider(provider, apiKey)
     const result = await ai.suggestSongs({
       theme,
       criteria: criteria ?? '',
-      structurePrompt: resolved.value,
+      structurePrompt: structure.effective.value,
+      systemPrompt: system.effective.value,
       exclude,
       count,
     })
@@ -201,30 +204,38 @@ export const suggestSongs = onCall(
       suggestions: result.suggestions,
       debug: result.debug,
       provider,
-      structureSource: resolved.source,
+      structureSource: structure.effective.source,
+      systemSource: system.effective.source,
     }
   },
 )
 
+function parseType(raw: unknown): PromptType {
+  if (raw === 'structure' || raw === 'system') return raw
+  throw new HttpsError('invalid-argument', 'type must be "structure" or "system"')
+}
+
 export const getPromptConfig = onCall(async (req) => {
   const { uid } = requireAllowed(req)
-  const { planId } = req.data as { planId?: string }
-  const config = await loadPromptConfig(uid)
-  return {
-    systemDefault: config.systemDefault,
-    userDefault: config.userDefault,
-    planOverride: planId ? (config.byPlan[planId] ?? '') : '',
-    effective: resolveStructurePrompt(config, planId),
-  }
+  const { type: rawType, planId } = req.data as { type?: unknown; planId?: string }
+  const type = parseType(rawType)
+  return await loadResolved(uid, type, planId)
 })
 
 export const savePromptConfig = onCall(async (req) => {
   const { uid } = requireAllowed(req)
-  const { scope, planId, value } = req.data as {
+  const {
+    type: rawType,
+    scope,
+    planId,
+    value,
+  } = req.data as {
+    type?: unknown
     scope?: 'default' | 'plan'
     planId?: string
     value?: string
   }
+  const type = parseType(rawType)
   if (scope !== 'default' && scope !== 'plan') {
     throw new HttpsError('invalid-argument', 'scope must be "default" or "plan"')
   }
@@ -232,16 +243,16 @@ export const savePromptConfig = onCall(async (req) => {
     throw new HttpsError('invalid-argument', 'value (string) required')
   }
   if (scope === 'default') {
-    await saveUserDefault(uid, value)
+    await saveUserDefault(uid, type, value)
   } else {
     if (!planId) throw new HttpsError('invalid-argument', 'planId required for scope "plan"')
     if (value.trim()) {
-      await savePlanOverride(uid, planId, value)
+      await savePlanOverride(uid, type, planId, value)
     } else {
-      await clearPlanOverride(uid, planId)
+      await clearPlanOverride(uid, type, planId)
     }
   }
-  return { ok: true, systemDefault: DEFAULT_STRUCTURE_PROMPT }
+  return { ok: true, builtIn: builtInFor(type) }
 })
 
 export const commitPlanItems = onCall(async (req) => {

@@ -91,7 +91,8 @@ export const searchSongs = httpsCallable<{ query: string }, { songs: Song[] }>(
   'searchSongs',
 )
 
-export type StructureSource = 'plan' | 'user' | 'system'
+export type PromptType = 'structure' | 'system'
+export type PromptSource = 'plan' | 'user' | 'system'
 
 export const suggestSongs = httpsCallable<
   {
@@ -105,25 +106,26 @@ export const suggestSongs = httpsCallable<
     suggestions: SongSuggestion[]
     provider: string
     debug: AiDebug
-    structureSource: StructureSource
+    structureSource: PromptSource
+    systemSource: PromptSource
   }
 >(functions, 'suggestSongs')
 
 export interface PromptConfig {
-  systemDefault: string
+  builtIn: string
   userDefault: string
   planOverride: string
-  effective: { value: string; source: StructureSource }
+  effective: { value: string; source: PromptSource }
 }
 
-export const getPromptConfig = httpsCallable<{ planId?: string }, PromptConfig>(
-  functions,
-  'getPromptConfig',
-)
+export const getPromptConfig = httpsCallable<
+  { type: PromptType; planId?: string },
+  PromptConfig
+>(functions, 'getPromptConfig')
 
 export const savePromptConfig = httpsCallable<
-  { scope: 'default' | 'plan'; planId?: string; value: string },
-  { ok: boolean; systemDefault: string }
+  { type: PromptType; scope: 'default' | 'plan'; planId?: string; value: string },
+  { ok: boolean; builtIn: string }
 >(functions, 'savePromptConfig')
 
 export const commitPlanItems = httpsCallable<
