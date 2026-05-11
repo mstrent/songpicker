@@ -82,7 +82,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         const idx = startIndex + i
         searchSongs({ query: c.suggestion.title })
           .then((sr) => {
-            const match = pickBestMatch(c.suggestion.title, sr.data.songs)
+            // searchSongs Cloud Function uses PCO's case-insensitive exact
+            // title match (with a parenthetical-stripped retry), so 0 or 1
+            // result; first wins if more.
+            const match = sr.data.songs[0]
             setCandidates((prev) => updateAt(prev, idx, (cur) =>
               match
                 ? { ...cur, status: 'matched', song: match }
@@ -333,25 +336,6 @@ function updateAt<T>(arr: T[], idx: number, fn: (cur: T) => T): T[] {
   const next = arr.slice()
   next[idx] = fn(next[idx])
   return next
-}
-
-function normalize(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/\([^)]*\)/g, '')
-    .replace(/[^a-z0-9 ]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function pickBestMatch(query: string, songs: Song[]): Song | undefined {
-  if (songs.length === 0) return undefined
-  const target = normalize(query)
-  const exact = songs.find((s) => normalize(s.title) === target)
-  if (exact) return exact
-  const prefix = songs.find((s) => normalize(s.title).startsWith(target))
-  if (prefix) return prefix
-  return songs[0]
 }
 
 function relativeTime(iso: string): string {

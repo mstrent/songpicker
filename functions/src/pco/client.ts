@@ -233,31 +233,50 @@ export class PcoClient {
   }
 
   async searchSongs(query: string): Promise<Song[]> {
-    // `q` is PCO's free-text search (matches title/author/themes loosely);
-    // falls back to listing all songs if PCO ignores it for this endpoint.
-    const params = new URLSearchParams({ q: query, per_page: '25' })
-    const json = await this.fetch<
-      JsonApiResponse<{
-        title: string
-        author: string | null
-        ccli_number: string | null
-        themes: string | null
-        hidden: boolean
-        last_scheduled_at: string | null
-        last_scheduled_short_dates: string | null
-      }>
-    >(`/songs?${params}`)
-    const data = Array.isArray(json.data) ? json.data : [json.data]
-    return data.map((d) => ({
-      id: d.id,
-      title: d.attributes.title,
-      author: d.attributes.author,
-      ccliNumber: d.attributes.ccli_number,
-      themes: d.attributes.themes,
-      isHidden: d.attributes.hidden,
-      lastScheduledAt: d.attributes.last_scheduled_at,
-      lastScheduledShortDates: d.attributes.last_scheduled_short_dates,
-    }))
+    // PCO's /songs endpoint silently ignores `q=` and `where[title_like]=`
+    // (verified — both return the default-ordered library regardless of
+    // input). Only `where[title]=` (case-insensitive exact match) actually
+    // filters. Try the title verbatim, then again with parentheticals
+    // stripped to handle AI suggestions like "How Great Is Our God (Hillsong)".
+    const tryTitle = async (title: string): Promise<Song[]> => {
+      const trimmed = title.trim()
+      if (!trimmed) return []
+      const params = new URLSearchParams({
+        'where[title]': trimmed,
+        per_page: '10',
+      })
+      const json = await this.fetch<
+        JsonApiResponse<{
+          title: string
+          author: string | null
+          ccli_number: string | null
+          themes: string | null
+          hidden: boolean
+          last_scheduled_at: string | null
+          last_scheduled_short_dates: string | null
+        }>
+      >(`/songs?${params}`)
+      const data = Array.isArray(json.data) ? json.data : [json.data]
+      return data.map((d) => ({
+        id: d.id,
+        title: d.attributes.title,
+        author: d.attributes.author,
+        ccliNumber: d.attributes.ccli_number,
+        themes: d.attributes.themes,
+        isHidden: d.attributes.hidden,
+        lastScheduledAt: d.attributes.last_scheduled_at,
+        lastScheduledShortDates: d.attributes.last_scheduled_short_dates,
+      }))
+    }
+
+    const direct = await tryTitle(query)
+    if (direct.length > 0) return direct
+
+    const stripped = query.replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim()
+    if (stripped && stripped.toLowerCase() !== query.trim().toLowerCase()) {
+      return tryTitle(stripped)
+    }
+    return []
   }
 
   async createPlanItem(
