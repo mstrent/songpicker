@@ -682,6 +682,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         </section>
       )}
 
+      {items.length > 0 && <hr className="section-divider" aria-hidden />}
+
       <section className="criteria">
         <div className="suggest-header">
           <h3>Suggest songs</h3>

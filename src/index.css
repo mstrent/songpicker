@@ -571,8 +571,26 @@ textarea {
 .plan-detail .plan-right {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 0.75rem;
   min-width: 0;
+}
+
+/* Faint gradient hairline between sections in the left column —
+   bridges the visual gap between service order and Suggest card
+   without imposing a hard horizontal rule. */
+.plan-detail .section-divider {
+  border: 0;
+  height: 1px;
+  width: 60%;
+  margin: 0.25rem auto;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--border-strong) 30%,
+    var(--border-strong) 70%,
+    transparent
+  );
+  opacity: 0.7;
 }
 
 .plan-detail .back {
@@ -1636,7 +1654,7 @@ textarea {
    column so the active candidate list isn't cluttered with strike-throughs.
    Same dashed disclosure style as the past-plans group on the list view. */
 .rejected-pool {
-  margin-top: 0.5rem;
+  margin: 0;
 }
 .rejected-pool summary {
   cursor: pointer;
