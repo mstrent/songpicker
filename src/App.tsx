@@ -63,7 +63,6 @@ export default function App() {
         </h1>
         <div className="who">
           <span className="email">{user.email}</span>
-          {leaderName && <span className="leader-as">as {leaderName}</span>}
           <button onClick={() => logOut()}>Sign out</button>
         </div>
       </header>
