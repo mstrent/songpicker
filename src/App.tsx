@@ -44,7 +44,13 @@ export default function App() {
       void refreshPcoStatus()
       getAdminStatus()
         .then((res) => setIsAdmin(res.data.isAdmin))
-        .catch(() => setIsAdmin(false))
+        .catch((e) => {
+          // Surface the reason — most likely a stale emulator that hasn't
+          // reloaded ADMIN_EMAILS from functions/.env, or the function
+          // hasn't been deployed yet in prod.
+          console.warn('[admin] getAdminStatus failed:', e)
+          setIsAdmin(false)
+        })
     } else {
       setPcoReady(null)
       setIsAdmin(false)
