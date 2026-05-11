@@ -413,7 +413,12 @@ export class PcoClient {
     serviceTypeId: string,
     planId: string,
     itemId: string,
-    opts: { songId?: string; arrangementId?: string; title?: string },
+    opts: {
+      songId?: string
+      arrangementId?: string
+      keyId?: string
+      title?: string
+    },
   ): Promise<void> {
     const data: Record<string, unknown> = {
       type: 'Item',
@@ -423,6 +428,9 @@ export class PcoClient {
     if (opts.songId) relationships.song = { data: { type: 'Song', id: opts.songId } }
     if (opts.arrangementId) {
       relationships.arrangement = { data: { type: 'Arrangement', id: opts.arrangementId } }
+    }
+    if (opts.keyId) {
+      relationships.key = { data: { type: 'Key', id: opts.keyId } }
     }
     if (Object.keys(relationships).length > 0) {
       data.relationships = relationships
@@ -438,6 +446,46 @@ export class PcoClient {
       `/service_types/${serviceTypeId}/plans/${planId}/items/${itemId}`,
       { method: 'PATCH', body },
     )
+  }
+
+  // Look up a song's arrangements (with their keys) so we can fully
+  // populate an Item when committing a pick. PCO Services doesn't expose
+  // a single canonical "default" arrangement flag, so we take the first
+  // returned arrangement (PCO orders by sequence, which puts a song's
+  // primary arrangement first for the vast majority of libraries). For
+  // the key we pick the first Key on that arrangement; if the
+  // arrangement has no Keys, we fall back to its chord_chart_key
+  // attribute as a plain string label.
+  async getSongDefaultArrangementInfo(songId: string): Promise<{
+    arrangementId: string
+    keyId: string | null
+    keyName: string | null
+  } | null> {
+    const json = await this.fetch<
+      JsonApiResponse<{ name: string | null; chord_chart_key: string | null }>
+    >(`/songs/${songId}/arrangements?include=keys&per_page=25`)
+    const data = Array.isArray(json.data) ? json.data : [json.data]
+    if (data.length === 0 || !data[0]) return null
+    const arrangement = data[0]
+    const arrangementId = arrangement.id
+    const chordChartKey = arrangement.attributes.chord_chart_key ?? null
+
+    const keyRel = arrangement.relationships?.keys?.data
+    const keyRefs = Array.isArray(keyRel) ? keyRel : keyRel ? [keyRel] : []
+    if (keyRefs.length === 0) {
+      return { arrangementId, keyId: null, keyName: chordChartKey }
+    }
+    const firstKeyId = keyRefs[0].id
+    const keyInc = (json.included ?? []).find(
+      (inc) => inc.type === 'Key' && inc.id === firstKeyId,
+    )
+    const keyAttrs = (keyInc?.attributes ?? {}) as {
+      name?: string | null
+      starting_key?: string | null
+    }
+    const keyName =
+      keyAttrs.name ?? keyAttrs.starting_key ?? chordChartKey ?? null
+    return { arrangementId, keyId: firstKeyId, keyName }
   }
 
   // Unset both the song and arrangement relationships so the slot reverts

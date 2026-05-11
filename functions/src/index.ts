@@ -408,8 +408,30 @@ export const commitSlot = onCall(async (req) => {
     )
   }
   const client = await pcoForUser(uid)
+  // Look up the song's default arrangement + key so the slot ends up
+  // fully populated — title, song, arrangement, AND key — the way the
+  // PCO web UI does it when a user picks a song. If the lookup fails
+  // (network blip, unusual song with no arrangements) we still commit
+  // the song relationship + title so the pick isn't lost; the user can
+  // fix the arrangement/key manually in PCO.
+  let arrangementId: string | undefined
+  let keyId: string | undefined
+  try {
+    const info = await client.getSongDefaultArrangementInfo(songId)
+    if (info) {
+      arrangementId = info.arrangementId
+      if (info.keyId) keyId = info.keyId
+    }
+  } catch (err) {
+    console.warn(
+      `[commitSlot] arrangement lookup failed for song ${songId}; committing song + title only:`,
+      err,
+    )
+  }
   await client.updatePlanItem(serviceTypeId, planId, itemId, {
     songId,
+    ...(arrangementId ? { arrangementId } : {}),
+    ...(keyId ? { keyId } : {}),
     // Mirror PCO web UI: linking a song sets the item title to match.
     ...(songTitle ? { title: songTitle } : {}),
   })
