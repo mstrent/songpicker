@@ -8,6 +8,7 @@ import type { NewItem } from './pco/types'
 import {
   AI_PROVIDER,
   ALLOWED_EMAIL,
+  ANTHROPIC_API_KEY,
   GEMINI_API_KEY,
   INCLUDED_SERVICE_TYPES,
   PCO_APP_ID,
@@ -100,14 +101,14 @@ export const searchSongs = onCall(
   },
 )
 
-// To add another provider (anthropic, openai, ...):
+// To add another provider (openai, ...):
 //   1. firebase functions:secrets:set <PROVIDER>_API_KEY
 //   2. add the secret to secrets[] below and the imports
 //   3. add a case to the switch
 // Each secret listed in secrets[] must exist in Secret Manager at deploy
 // time, so only bind providers whose keys you've actually set.
 export const suggestSongs = onCall(
-  { secrets: [GEMINI_API_KEY] },
+  { secrets: [ANTHROPIC_API_KEY, GEMINI_API_KEY] },
   async (req) => {
     requireAllowed(req)
     const { theme, criteria, exclude, count } = req.data as {
@@ -121,6 +122,9 @@ export const suggestSongs = onCall(
     const provider = AI_PROVIDER.value()
     let apiKey: string
     switch (provider) {
+      case 'anthropic':
+        apiKey = ANTHROPIC_API_KEY.value()
+        break
       case 'gemini':
         apiKey = GEMINI_API_KEY.value()
         break
