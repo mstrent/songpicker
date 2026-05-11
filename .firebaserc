@@ -1,5 +1,3 @@
 {
-  "projects": {
-    "default": "REPLACE-WITH-YOUR-FIREBASE-PROJECT-ID"
-  }
+  "projects": {}
 }

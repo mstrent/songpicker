@@ -68,9 +68,8 @@ PCO docs: <https://api.planningcenteronline.com/docs>
 ```bash
 firebase login
 firebase projects:create songpicker-yourname   # or use an existing project
+firebase use --add                             # writes your project ID into .firebaserc
 ```
-
-Edit `.firebaserc` to set `default` to your project ID.
 
 In the [Firebase Console](https://console.firebase.google.com/):
 - **Authentication** → enable **Google** sign-in provider.
