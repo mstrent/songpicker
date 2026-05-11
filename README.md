@@ -110,13 +110,16 @@ npm --prefix functions install
 
 ### 5. Local development
 
-Three terminals — fast iteration without redeploying:
+One terminal — runs Vite, the Functions TS watcher, and the Firebase
+emulators side by side with prefixed/colorized output:
 
 ```bash
-npm run dev               # Vite SPA on http://localhost:5173
-npm run dev:functions     # tsc --watch on Cloud Functions
-npm run dev:emulators     # Firebase emulators (functions + firestore)
+nvm use         # picks Node 22 from .nvmrc
+npm run dev     # vite + tsc --watch + emulators
 ```
+
+Ctrl-C kills all three. Individual processes are also available as
+`npm run dev:vite`, `npm run dev:functions`, `npm run dev:emulators`.
 
 Auth stays against the real Firebase project so Google sign-in works
 locally. Functions and Firestore run in the emulator suite.

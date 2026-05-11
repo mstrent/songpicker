@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently -n vite,fns,emu -c cyan,magenta,yellow -k npm:dev:vite npm:dev:functions npm:dev:emulators",
+    "dev:vite": "vite",
     "dev:emulators": "firebase emulators:start --only functions,firestore",
     "dev:functions": "npm --prefix functions run build:watch",
     "build": "tsc -b && vite build",
@@ -23,6 +24,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^9.2.1",
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
