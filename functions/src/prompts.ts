@@ -10,16 +10,57 @@ export const DEFAULT_ROLE_PROMPT = `You suggest contemporary worship songs for a
 // The non-editable technical instructions that constrain output format.
 // These get appended to whatever role the user has configured before being
 // sent as the model's system message. Kept hidden from the UI so users can
-// freely edit the role without breaking JSON parsing.
-const TECHNICAL_REQUIREMENTS = `Reply ONLY with JSON in this exact shape:
+// freely edit the role without breaking JSON parsing. The admin page
+// surfaces this constant read-only for debugging.
+export const TECHNICAL_REQUIREMENTS = `Reply ONLY with JSON in this exact shape:
 {"suggestions":[{"title":"Song Title","author":"Songwriter Name","reasoning":"why this fits","slots":["slot name"]}]}
 
 When a "Service structure" is provided, identify the distinct song roles/slots it describes (e.g. "opener", "mid-service", "closer") and tag each suggestion's "slots" with the slot(s) it would fit — a song may fit multiple slots. Return at least 4 suggestions tagged for each slot, even if that exceeds the user's requested total. When no service structure is provided, omit "slots" or use an empty array.
 
 Do not invent songs that don't exist.`
 
-export function builtInFor(type: PromptType): string {
+export function hardcodedDefaultFor(type: PromptType): string {
   return type === 'role' ? DEFAULT_ROLE_PROMPT : DEFAULT_STRUCTURE_PROMPT
+}
+
+// Admin-owned overrides live in a single global doc; if a type isn't
+// overridden the hardcoded default applies.
+const adminCollection = 'appConfig'
+const adminDocId = 'global'
+
+interface AdminPromptDoc {
+  structure?: string
+  role?: string
+}
+
+export async function loadAdminDefaults(): Promise<{
+  structure: string
+  role: string
+}> {
+  const snap = await getFirestore().doc(`${adminCollection}/${adminDocId}`).get()
+  const data = (snap.exists ? (snap.data() as AdminPromptDoc) : null) ?? {}
+  return {
+    structure: typeof data.structure === 'string' ? data.structure : '',
+    role: typeof data.role === 'string' ? data.role : '',
+  }
+}
+
+export async function saveAdminDefault(
+  type: PromptType,
+  value: string,
+): Promise<void> {
+  await getFirestore()
+    .doc(`${adminCollection}/${adminDocId}`)
+    .set({ [type]: value }, { merge: true })
+}
+
+// Returns the system-wide default for a prompt type: admin override if set,
+// otherwise the hardcoded constant.
+export async function effectiveSystemDefault(type: PromptType): Promise<string> {
+  const admin = await loadAdminDefaults()
+  const candidate = admin[type]
+  if (candidate.trim()) return candidate
+  return hardcodedDefaultFor(type)
 }
 
 // Combine the user-editable role with the always-on technical requirements
@@ -104,13 +145,15 @@ export async function loadResolved(
   type: PromptType,
   planId?: string,
 ): Promise<ResolvedPrompt> {
-  const doc = await loadDoc(uid)
+  const [doc, systemDefault] = await Promise.all([
+    loadDoc(uid),
+    effectiveSystemDefault(type),
+  ])
   const section = doc[type]
-  const builtIn = builtInFor(type)
   const planOverride = planId ? (section.byPlan[planId] ?? '') : ''
   const userDefault = section.default
 
-  let value = builtIn
+  let value = systemDefault
   let source: 'plan' | 'user' | 'system' = 'system'
   if (planOverride.trim()) {
     value = planOverride
@@ -119,7 +162,7 @@ export async function loadResolved(
     value = userDefault
     source = 'user'
   }
-  return { builtIn, userDefault, planOverride, effective: { value, source } }
+  return { builtIn: systemDefault, userDefault, planOverride, effective: { value, source } }
 }
 
 export async function saveUserDefault(

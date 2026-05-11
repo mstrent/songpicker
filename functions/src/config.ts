@@ -14,6 +14,10 @@ export const ANTHROPIC_API_KEY = defineSecret('ANTHROPIC_API_KEY')
 export const ALLOWED_EMAIL = defineString('ALLOWED_EMAIL', { default: '' })
 export const AI_PROVIDER = defineString('AI_PROVIDER', { default: 'gemini' })
 
+// Comma-separated emails of users who can edit the system-wide prompt
+// defaults via the Admin page. Empty disables the admin page entirely.
+export const ADMIN_EMAILS = defineString('ADMIN_EMAILS', { default: '' })
+
 // Comma-separated PCO service type names to include in listPlans.
 // Empty string = include all (no filter).
 // Example: "Sunday Services" or "Sunday Services,Saturday Service"

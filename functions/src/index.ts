@@ -12,17 +12,21 @@ import {
 import { countSongs } from './pco/songSlots'
 import type { NewItem } from './pco/types'
 import {
-  builtInFor,
+  TECHNICAL_REQUIREMENTS,
   clearPlanOverride,
   composeSystemPrompt,
+  hardcodedDefaultFor,
+  loadAdminDefaults,
   loadResolved,
   loadUserTheme,
+  saveAdminDefault,
   savePlanOverride,
   saveUserDefault,
   saveUserTheme,
   type PromptType,
 } from './prompts'
 import {
+  ADMIN_EMAILS,
   AI_PROVIDER,
   ALLOWED_EMAIL,
   ANTHROPIC_API_KEY,
@@ -32,6 +36,22 @@ import {
 
 initializeApp()
 setGlobalOptions({ region: 'us-central1', maxInstances: 10 })
+
+function isAdminEmail(email: string): boolean {
+  const admins = ADMIN_EMAILS.value()
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+  return admins.length > 0 && admins.includes(email.toLowerCase())
+}
+
+function requireAdmin(req: CallableRequest<unknown>): { uid: string; email: string } {
+  const auth = requireAllowed(req)
+  if (!isAdminEmail(auth.email)) {
+    throw new HttpsError('permission-denied', 'Admin only')
+  }
+  return auth
+}
 
 function requireAllowed(req: CallableRequest<unknown>): { uid: string; email: string } {
   const email = req.auth?.token?.email
@@ -267,7 +287,39 @@ export const savePromptConfig = onCall(async (req) => {
       await clearPlanOverride(uid, type, planId)
     }
   }
-  return { ok: true, builtIn: builtInFor(type) }
+  return { ok: true, builtIn: hardcodedDefaultFor(type) }
+})
+
+export const getAdminStatus = onCall(async (req) => {
+  const { email } = requireAllowed(req)
+  return { isAdmin: isAdminEmail(email) }
+})
+
+export const getAdminPromptConfig = onCall(async (req) => {
+  requireAdmin(req)
+  const admin = await loadAdminDefaults()
+  return {
+    structure: {
+      admin: admin.structure,
+      hardcoded: hardcodedDefaultFor('structure'),
+    },
+    role: {
+      admin: admin.role,
+      hardcoded: hardcodedDefaultFor('role'),
+    },
+    technical: TECHNICAL_REQUIREMENTS,
+  }
+})
+
+export const saveAdminPromptConfig = onCall(async (req) => {
+  requireAdmin(req)
+  const { type: rawType, value } = req.data as { type?: unknown; value?: unknown }
+  const type = parseType(rawType)
+  if (typeof value !== 'string') {
+    throw new HttpsError('invalid-argument', 'value (string) required')
+  }
+  await saveAdminDefault(type, value)
+  return { ok: true }
 })
 
 export const commitPlanItems = onCall(async (req) => {

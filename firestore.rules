@@ -34,6 +34,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // System-wide prompt defaults, owned by admins. Admin Cloud Functions
+    // are gated by ADMIN_EMAILS server-side; clients have no direct access.
+    match /appConfig/{doc} {
+      allow read, write: if false;
+    }
+
     match /sessions/{sessionId} {
       allow read: if signedIn() && ownsExisting();
       allow create: if signedIn() && ownsIncoming();

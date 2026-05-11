@@ -2,12 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { onAuthStateChanged, type User } from 'firebase/auth'
 import { auth } from './lib/firebase'
 import { logOut } from './lib/auth'
-import { getPcoStatus } from './lib/api'
+import { getAdminStatus, getPcoStatus } from './lib/api'
 import { config } from './config'
 import { SignIn } from './components/SignIn'
 import { PlanList } from './components/PlanList'
 import { PlanDetail } from './components/PlanDetail'
 import { PcoSetup } from './components/PcoSetup'
+import { AdminPage } from './components/AdminPage'
 
 function useHashRoute(): string {
   const [hash, setHash] = useState(() => window.location.hash)
@@ -22,6 +23,7 @@ function useHashRoute(): string {
 export default function App() {
   const [user, setUser] = useState<User | null | undefined>(undefined)
   const [pcoReady, setPcoReady] = useState<boolean | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
   const hash = useHashRoute()
 
   useEffect(() => onAuthStateChanged(auth, setUser), [])
@@ -38,9 +40,14 @@ export default function App() {
   useEffect(() => {
     if (user) {
       setPcoReady(null)
+      setIsAdmin(false)
       void refreshPcoStatus()
+      getAdminStatus()
+        .then((res) => setIsAdmin(res.data.isAdmin))
+        .catch(() => setIsAdmin(false))
     } else {
       setPcoReady(null)
+      setIsAdmin(false)
     }
   }, [user, refreshPcoStatus])
 
@@ -59,6 +66,7 @@ export default function App() {
   }
 
   const planMatch = hash.match(/^#plan\/([^/]+)\/([^/]+)$/)
+  const onAdmin = hash === '#admin'
 
   // Some Firebase setups end up with user.displayName=null even when Google
   // provides a name via providerData. Fall through to the provider record.
@@ -84,11 +92,25 @@ export default function App() {
         </h1>
         <div className="who">
           <span className="email">{user.email}</span>
+          {isAdmin && (
+            <a className="admin-link" href="#admin" title="System-wide AI defaults">
+              Admin
+            </a>
+          )}
           <button onClick={() => logOut()}>Sign out</button>
         </div>
       </header>
       <main>
-        {pcoReady === null ? (
+        {onAdmin ? (
+          isAdmin ? (
+            <AdminPage />
+          ) : (
+            <div className="centered">
+              <p>Admin access required.</p>
+              <a href="#">← Back</a>
+            </div>
+          )
+        ) : pcoReady === null ? (
           <div>Checking Planning Center connection…</div>
         ) : pcoReady === false ? (
           <PcoSetup onSaved={() => void refreshPcoStatus()} />

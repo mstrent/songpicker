@@ -134,6 +134,27 @@ export const savePromptConfig = httpsCallable<
   { ok: boolean; builtIn: string }
 >(functions, 'savePromptConfig')
 
+export interface AdminPromptConfig {
+  structure: { admin: string; hardcoded: string }
+  role: { admin: string; hardcoded: string }
+  technical: string
+}
+
+export const getAdminStatus = httpsCallable<void, { isAdmin: boolean }>(
+  functions,
+  'getAdminStatus',
+)
+
+export const getAdminPromptConfig = httpsCallable<void, AdminPromptConfig>(
+  functions,
+  'getAdminPromptConfig',
+)
+
+export const saveAdminPromptConfig = httpsCallable<
+  { type: PromptType; value: string },
+  { ok: boolean }
+>(functions, 'saveAdminPromptConfig')
+
 export const commitPlanItems = httpsCallable<
   { serviceTypeId: string; planId: string; items: CommitItem[] },
   { created: number }
