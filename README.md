@@ -101,18 +101,40 @@ ALLOWED_EMAIL=you@example.com
 AI_PROVIDER=anthropic
 ```
 
-### 4. Install + run
+### 4. Install
 
 ```bash
 npm install
 npm --prefix functions install
-npm run dev                          # SPA on http://localhost:5173
-firebase emulators:start             # (optional) Auth + Firestore + Functions locally
 ```
 
-For local dev against emulators, set `VITE_USE_EMULATORS=true` in `.env.local`.
+### 5. Local development
 
-### 5. Deploy
+Three terminals — fast iteration without redeploying:
+
+```bash
+npm run dev               # Vite SPA on http://localhost:5173
+npm run dev:functions     # tsc --watch on Cloud Functions
+npm run dev:emulators     # Firebase emulators (functions + firestore)
+```
+
+Auth stays against the real Firebase project so Google sign-in works
+locally. Functions and Firestore run in the emulator suite.
+
+The Functions emulator reads secrets from `functions/.secret.local`.
+Bootstrap that file once:
+
+```bash
+cp functions/.secret.local.example functions/.secret.local
+firebase functions:secrets:access PCO_APP_ID    # paste output into the file
+firebase functions:secrets:access PCO_SECRET
+firebase functions:secrets:access GEMINI_API_KEY
+```
+
+`.env.development` automatically sets `VITE_USE_EMULATORS=true` for
+`vite dev`, so SPA-side wiring just works.
+
+### 6. Deploy
 
 ```bash
 npm run deploy                       # builds SPA + deploys hosting + functions + firestore rules

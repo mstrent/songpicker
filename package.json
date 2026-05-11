@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:emulators": "firebase emulators:start --only functions,firestore",
+    "dev:functions": "npm --prefix functions run build:watch",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "emulators": "firebase emulators:start",
     "deploy": "npm run build && firebase deploy"
   },
   "dependencies": {
