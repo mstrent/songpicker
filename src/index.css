@@ -754,6 +754,31 @@ textarea {
   border-radius: 999px;
   cursor: help;
 }
+.plan-detail .criteria .reset-btn {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border-strong);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.plan-detail .criteria .reset-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  filter: none;
+}
+.plan-detail .criteria .source-hint {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 0.85em;
+}
 .plan-detail .criteria input[type='text'],
 .plan-detail .criteria textarea {
   width: 100%;

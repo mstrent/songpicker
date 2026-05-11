@@ -291,7 +291,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         <h3>Suggest songs</h3>
         <label>
           <span className="theme-label">
-            Theme
+            <span>
+              Theme <span className="source-hint">· from Planning Center title</span>
+            </span>
             <span
               className="ai-context-marker"
               title="Sent to the AI on every Suggest call"
@@ -300,12 +302,22 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
               ✨
             </span>
             {theme.trim() !== themeSource.trim() && (
-              <span
-                className="edited-flag"
-                title={`Differs from Planning Center: "${themeSource || '(empty)'}"`}
-              >
-                edited
-              </span>
+              <>
+                <span
+                  className="edited-flag"
+                  title={`Differs from Planning Center: "${themeSource || '(empty)'}"`}
+                >
+                  edited
+                </span>
+                <button
+                  type="button"
+                  className="reset-btn"
+                  onClick={() => setTheme(themeSource)}
+                  title="Reset to the Planning Center value"
+                >
+                  ↺ reset
+                </button>
+              </>
             )}
           </span>
           <input
@@ -326,16 +338,26 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
               ✨
             </span>
             {notesText.trim() !== notesSource.trim() && (
-              <span
-                className="edited-flag"
-                title={
-                  notesSource
-                    ? `Differs from Planning Center notes:\n${notesSource}`
-                    : 'No notes set in Planning Center'
-                }
-              >
-                edited
-              </span>
+              <>
+                <span
+                  className="edited-flag"
+                  title={
+                    notesSource
+                      ? `Differs from Planning Center notes:\n${notesSource}`
+                      : 'No notes set in Planning Center'
+                  }
+                >
+                  edited
+                </span>
+                <button
+                  type="button"
+                  className="reset-btn"
+                  onClick={() => setNotesText(notesSource)}
+                  title="Reset to the Planning Center value"
+                >
+                  ↺ reset
+                </button>
+              </>
             )}
           </span>
           <textarea
