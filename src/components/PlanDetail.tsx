@@ -587,16 +587,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         <div className="plan-left">
       {items.length > 0 && (
         <section className="service-order">
-          <h3>
-            Service order
-            <span
-              className="ai-context-marker"
-              title="The service order — including which songs are already picked — is part of the context sent to the AI"
-              aria-hidden
-            >
-              ✨
-            </span>
-          </h3>
+          <h3>Service order</h3>
           <ol>
             {items.map((it) => {
               // Filled = linked to a real song; isSong from shared helper so
@@ -731,13 +722,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             <span>
               Theme <span className="source-hint">· from Planning Center title</span>
             </span>
-            <span
-              className="ai-context-marker"
-              title="Sent to the AI on every Suggest call"
-              aria-hidden
-            >
-              ✨
-            </span>
             {theme.trim() !== themeSource.trim() && (
               <>
                 <span
@@ -776,13 +760,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             <span>
               Context{' '}
               <span className="source-hint">· from Planning Center service notes</span>
-            </span>
-            <span
-              className="ai-context-marker"
-              title="Sent to the AI on every Suggest call"
-              aria-hidden
-            >
-              ✨
             </span>
             {notesText.trim() !== notesSource.trim() && (
               <>
@@ -853,13 +830,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             {messages.length === 0
               ? 'Criteria (mood, tempo, era, must-include, avoid)'
               : 'Refine'}
-            <span
-              className="ai-context-marker"
-              title="Sent to the AI on the next Suggest call"
-              aria-hidden
-            >
-              ✨
-            </span>
           </span>
           <textarea
             rows={messages.length === 0 ? 4 : 2}
