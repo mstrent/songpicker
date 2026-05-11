@@ -110,7 +110,7 @@ export function PlanList({ currentUserName, currentUserEmail }: Props) {
                       } left to pick`
                 }
               >
-                {p.songCounts.filled}/{p.songCounts.total} songs
+                {p.songCounts.filled}/{p.songCounts.total} songs picked
               </span>
             )}
           </div>
