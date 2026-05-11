@@ -681,17 +681,8 @@ textarea {
   font-style: italic;
 }
 
-.service-order .badge {
-  font-size: 0.65rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-weight: 700;
-  padding: 0.15rem 0.55rem;
-  border-radius: 999px;
-}
-.service-order .badge.type-header { background: var(--border); color: var(--muted); }
-.service-order .badge.type-media { background: var(--warm-soft); color: var(--warm-strong); }
-.service-order .badge.type-item { background: var(--border); color: var(--muted); }
+/* Item-type badges removed — they didn't add signal. The visual styling
+   on song slots already distinguishes them from generic items. */
 
 /* criteria editor */
 

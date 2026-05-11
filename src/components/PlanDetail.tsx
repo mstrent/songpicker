@@ -269,6 +269,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                 isSong ? (filled ? ' song-filled' : ' song-empty-slot') : ''
               }`
               const displayTitle = it.title || it.songTitle || ''
+              const showMeta = filled && (it.keyName || it.description || it.notes.length > 0)
               return (
                 <li key={it.id} className={cls}>
                   <span className="seq">{it.sequence}</span>
@@ -289,8 +290,25 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     {isSong && !filled && (
                       <span className="song-empty">Pick a song</span>
                     )}
+                    {showMeta && (
+                      <div className="item-meta">
+                        {it.keyName && (
+                          <span className="meta-chip">
+                            Key <strong>{it.keyName}</strong>
+                          </span>
+                        )}
+                        {it.description && (
+                          <div className="meta-text">{it.description}</div>
+                        )}
+                        {it.notes.map((n, i) => (
+                          <div key={i} className="meta-note">
+                            {n.content}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  {filled && displayTitle ? (
+                  {filled && displayTitle && (
                     <a
                       className="spotify-link"
                       href={spotifySearchUrl(displayTitle)}
@@ -300,10 +318,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     >
                       Spotify ↗
                     </a>
-                  ) : (
-                    !isSong && (
-                      <span className={`badge type-${it.itemType}`}>{it.itemType}</span>
-                    )
                   )}
                 </li>
               )

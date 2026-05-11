@@ -226,20 +226,36 @@ export class PcoClient {
         title: string | null
         item_type: string | null
         sequence: number | null
+        key_name: string | null
+        description: string | null
       }>
     >(
-      `/service_types/${serviceTypeId}/plans/${planId}/items?include=song&order=sequence&per_page=100`,
+      `/service_types/${serviceTypeId}/plans/${planId}/items?include=song,item_notes&order=sequence&per_page=100`,
     )
     const songTitles = new Map<string, string>()
+    const noteContent = new Map<string, string>()
     for (const inc of json.included ?? []) {
       if (inc.type === 'Song') {
         const title = (inc.attributes as { title?: string }).title
         if (title) songTitles.set(inc.id, title)
       }
+      if (inc.type === 'ItemNote') {
+        const a = inc.attributes as { content?: string }
+        if (a.content && a.content.trim()) {
+          noteContent.set(inc.id, a.content.trim())
+        }
+      }
     }
     const data = Array.isArray(json.data) ? json.data : [json.data]
     return data.map((d) => {
       const songId = firstRefId(d.relationships?.song)
+      const noteRel = d.relationships?.item_notes?.data
+      const noteRefs = Array.isArray(noteRel) ? noteRel : noteRel ? [noteRel] : []
+      const notes = noteRefs
+        .map((r) => noteContent.get(r.id))
+        .filter((c): c is string => !!c)
+        .map((content) => ({ content }))
+      const description = d.attributes.description ?? null
       return {
         id: d.id,
         sequence: d.attributes.sequence ?? 0,
@@ -247,6 +263,9 @@ export class PcoClient {
         itemType: d.attributes.item_type ?? 'item',
         songId,
         songTitle: songId ? (songTitles.get(songId) ?? null) : null,
+        keyName: d.attributes.key_name ?? null,
+        description: description && description.trim() ? description.trim() : null,
+        notes,
       }
     })
   }

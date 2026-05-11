@@ -30,6 +30,10 @@ export interface PlanNote {
   category: string | null
 }
 
+export interface ItemNote {
+  content: string
+}
+
 export interface PlanItem {
   id: string
   sequence: number
@@ -37,6 +41,9 @@ export interface PlanItem {
   itemType: string
   songId: string | null
   songTitle: string | null
+  keyName: string | null
+  description: string | null
+  notes: ItemNote[]
 }
 
 export interface Song {
