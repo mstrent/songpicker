@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -n vite,fns,emu -c cyan,magenta,yellow -k npm:dev:vite npm:dev:functions npm:dev:emulators",
+    "dev": "concurrently -n vite,fns,emu -c cyan,magenta,yellow --kill-signal SIGINT npm:dev:vite npm:dev:functions npm:dev:emulators",
     "dev:vite": "vite",
     "dev:emulators": "firebase emulators:start --only functions,firestore --import=.emulator-data --export-on-exit=.emulator-data",
     "dev:functions": "npm --prefix functions run build:watch",
