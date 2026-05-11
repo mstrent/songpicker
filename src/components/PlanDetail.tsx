@@ -543,8 +543,25 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           ← All plans
         </a>
 
-        <div className="title-row">
-          <h2>{plan.title || plan.seriesTitle || '(no title)'}</h2>
+        <h2>{plan.title || plan.seriesTitle || '(no title)'}</h2>
+        <div className="meta">
+          <span className="meta-text">
+            {subtitle && <span>{subtitle} · </span>}
+            {plan.sortDate &&
+              new Date(plan.sortDate).toLocaleDateString(undefined, {
+                weekday: 'long',
+                month: 'long',
+                day: 'numeric',
+                year: 'numeric',
+              })}
+            {(() => {
+              const leaders =
+                plan.teamMembers?.filter((m) => m.position === 'Worship Leader') ?? []
+              return leaders.length > 0 ? (
+                <> · led by {leaders.map((l) => l.name).join(', ')}</>
+              ) : null
+            })()}
+          </span>
           <a
             className="pco-link"
             href={`https://services.planningcenteronline.com/plans/${plan.id}`}
@@ -554,23 +571,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           >
             Open in Planning Center ↗
           </a>
-        </div>
-        <div className="meta">
-          {subtitle && <span>{subtitle} · </span>}
-          {plan.sortDate &&
-            new Date(plan.sortDate).toLocaleDateString(undefined, {
-              weekday: 'long',
-              month: 'long',
-              day: 'numeric',
-              year: 'numeric',
-            })}
-          {(() => {
-            const leaders =
-              plan.teamMembers?.filter((m) => m.position === 'Worship Leader') ?? []
-            return leaders.length > 0 ? (
-              <> · led by {leaders.map((l) => l.name).join(', ')}</>
-            ) : null
-          })()}
         </div>
       </div>
 
