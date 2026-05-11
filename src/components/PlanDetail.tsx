@@ -412,47 +412,51 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
 
   return (
     <div className="plan-detail">
-      <a
-        className="back"
-        href="#"
-        onClick={(e) => {
-          e.preventDefault()
-          window.location.hash = ''
-        }}
-      >
-        ← All plans
-      </a>
-
-      <div className="title-row">
-        <h2>{plan.title || plan.seriesTitle || '(no title)'}</h2>
+      <div className="plan-header">
         <a
-          className="pco-link"
-          href={`https://services.planningcenteronline.com/plans/${plan.id}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          title="Open in Planning Center"
+          className="back"
+          href="#"
+          onClick={(e) => {
+            e.preventDefault()
+            window.location.hash = ''
+          }}
         >
-          Open in Planning Center ↗
+          ← All plans
         </a>
-      </div>
-      <div className="meta">
-        {subtitle && <span>{subtitle} · </span>}
-        {plan.sortDate &&
-          new Date(plan.sortDate).toLocaleDateString(undefined, {
-            weekday: 'long',
-            month: 'long',
-            day: 'numeric',
-            year: 'numeric',
-          })}
-        {(() => {
-          const leaders =
-            plan.teamMembers?.filter((m) => m.position === 'Worship Leader') ?? []
-          return leaders.length > 0 ? (
-            <> · led by {leaders.map((l) => l.name).join(', ')}</>
-          ) : null
-        })()}
+
+        <div className="title-row">
+          <h2>{plan.title || plan.seriesTitle || '(no title)'}</h2>
+          <a
+            className="pco-link"
+            href={`https://services.planningcenteronline.com/plans/${plan.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open in Planning Center"
+          >
+            Open in Planning Center ↗
+          </a>
+        </div>
+        <div className="meta">
+          {subtitle && <span>{subtitle} · </span>}
+          {plan.sortDate &&
+            new Date(plan.sortDate).toLocaleDateString(undefined, {
+              weekday: 'long',
+              month: 'long',
+              day: 'numeric',
+              year: 'numeric',
+            })}
+          {(() => {
+            const leaders =
+              plan.teamMembers?.filter((m) => m.position === 'Worship Leader') ?? []
+            return leaders.length > 0 ? (
+              <> · led by {leaders.map((l) => l.name).join(', ')}</>
+            ) : null
+          })()}
+        </div>
       </div>
 
+      <div className="plan-body">
+        <div className="plan-left">
       {items.length > 0 && (
         <section className="service-order">
           <h3>
@@ -558,7 +562,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           </ol>
         </section>
       )}
+        </div>
 
+        <div className="plan-right">
       <div className="prompt-editors">
         <PromptEditor type="role" planId={planId} />
         <PromptEditor type="structure" planId={planId} />
@@ -989,6 +995,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         </section>
         )
       })()}
+        </div>
+      </div>
     </div>
   )
 }

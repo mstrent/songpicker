@@ -135,6 +135,14 @@ textarea {
   padding: 1.25rem 1.5rem 4rem;
 }
 
+@media (min-width: 1024px) {
+  /* Make room for the plan-detail two-column layout. List view still
+     reads comfortably at this width; cards stretch to fill. */
+  .app {
+    max-width: 1280px;
+  }
+}
+
 .app header {
   display: flex;
   justify-content: space-between;
@@ -522,9 +530,51 @@ textarea {
 
 /* plan detail */
 
+.plan-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+/* Sticky title band — keeps plan name + date visible while you scroll
+   through the service order and candidates. Sits at the top of the
+   viewport (the app header above scrolls away with the page). */
+.plan-detail .plan-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg);
+  padding: 0.5rem 0 0.75rem;
+  margin-top: -0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.plan-detail .plan-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+@media (min-width: 960px) {
+  .plan-detail .plan-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+    gap: 1.5rem;
+    align-items: start;
+  }
+}
+
+.plan-detail .plan-left,
+.plan-detail .plan-right {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  min-width: 0;
+}
+
 .plan-detail .back {
   display: inline-block;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.5rem;
   color: var(--muted);
   text-decoration: none;
   font-size: 0.9rem;
@@ -563,7 +613,6 @@ textarea {
 .plan-detail .meta {
   color: var(--muted);
   font-size: 0.92rem;
-  margin-bottom: 1.75rem;
 }
 
 .plan-detail section {
