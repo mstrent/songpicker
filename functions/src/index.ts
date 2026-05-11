@@ -9,6 +9,7 @@ import {
   AI_PROVIDER,
   ALLOWED_EMAIL,
   GEMINI_API_KEY,
+  INCLUDED_SERVICE_TYPES,
   PCO_APP_ID,
   PCO_SECRET,
 } from './config'
@@ -34,7 +35,14 @@ export const listPlans = onCall(
   { secrets: [PCO_APP_ID, PCO_SECRET] },
   async (req) => {
     requireAllowed(req)
-    const plans = await pco().listAllUpcomingPlans()
+    const allowed = INCLUDED_SERVICE_TYPES.value()
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    const all = await pco().listAllUpcomingPlans()
+    const plans = allowed.length
+      ? all.filter((p) => p.serviceTypeName != null && allowed.includes(p.serviceTypeName))
+      : all
     return { plans }
   },
 )
