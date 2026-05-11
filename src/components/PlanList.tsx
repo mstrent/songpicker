@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react'
 import { listPlans, type Plan } from '../lib/api'
 
-export function PlanList() {
+interface Props {
+  currentUserName: string | null
+}
+
+export function PlanList({ currentUserName }: Props) {
   const [plans, setPlans] = useState<Plan[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -15,14 +19,23 @@ export function PlanList() {
   if (!plans) return <div>Loading plans…</div>
   if (plans.length === 0) return <div>No upcoming plans found.</div>
 
+  const me = currentUserName?.trim().toLowerCase() ?? ''
+
   return (
     <ul className="plans">
       {plans.map((p) => {
         const heading = p.title || p.seriesTitle || '(no title)'
         const sub = p.title && p.seriesTitle ? p.seriesTitle : null
+        const ledByMe =
+          me.length > 0 &&
+          (p.worshipLeaders ?? []).some((n) => n.trim().toLowerCase() === me)
         return (
           <li key={`${p.serviceTypeId}/${p.id}`}>
-            <a className="plan-link" href={`#plan/${p.serviceTypeId}/${p.id}`}>
+            <a
+              className={`plan-link${ledByMe ? ' led-by-me' : ''}`}
+              href={`#plan/${p.serviceTypeId}/${p.id}`}
+            >
+              {ledByMe && <span className="me-flag">You're leading</span>}
               <div className="title">{heading}</div>
               {sub && <div className="series">{sub}</div>}
               <div className="meta-row">
@@ -31,7 +44,11 @@ export function PlanList() {
                 )}
                 {p.sortDate && (
                   <span className="date">
-                    {new Date(p.sortDate).toLocaleDateString()}
+                    {new Date(p.sortDate).toLocaleDateString(undefined, {
+                      weekday: 'short',
+                      month: 'short',
+                      day: 'numeric',
+                    })}
                   </span>
                 )}
                 {p.worshipLeaders && p.worshipLeaders.length > 0 && (

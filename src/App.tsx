@@ -50,11 +50,12 @@ export default function App() {
               window.location.hash = ''
             }}
           >
-            songpicker
+            song<span className="accent">picker</span>
           </a>
         </h1>
         <div className="who">
-          {user.email} <button onClick={() => logOut()}>Sign out</button>
+          <span>{user.email}</span>
+          <button onClick={() => logOut()}>Sign out</button>
         </div>
       </header>
       <main>
@@ -63,7 +64,7 @@ export default function App() {
         ) : (
           <>
             <h2>Upcoming plans</h2>
-            <PlanList />
+            <PlanList currentUserName={user.displayName} />
           </>
         )}
       </main>

@@ -124,10 +124,27 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         ← All plans
       </a>
 
-      <h2>{plan.title || plan.seriesTitle || '(no title)'}</h2>
+      <div className="title-row">
+        <h2>{plan.title || plan.seriesTitle || '(no title)'}</h2>
+        <a
+          className="pco-link"
+          href={`https://services.planningcenteronline.com/plans/${plan.id}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open in Planning Center"
+        >
+          Open in PCO ↗
+        </a>
+      </div>
       <div className="meta">
         {subtitle && <span>{subtitle} · </span>}
-        {plan.sortDate && new Date(plan.sortDate).toLocaleDateString()}
+        {plan.sortDate &&
+          new Date(plan.sortDate).toLocaleDateString(undefined, {
+            weekday: 'long',
+            month: 'long',
+            day: 'numeric',
+            year: 'numeric',
+          })}
         {plan.worshipLeaders && plan.worshipLeaders.length > 0 && (
           <> · led by {plan.worshipLeaders.join(', ')}</>
         )}
@@ -137,19 +154,37 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         <section className="service-order">
           <h3>Service order</h3>
           <ol>
-            {items.map((it) => (
-              <li key={it.id} className={`item type-${it.itemType}`}>
-                <span className="seq">{it.sequence}</span>
-                <span className="ititle">{it.title || '(no title)'}</span>
-                {it.itemType === 'song' &&
-                  (it.songTitle ? (
-                    <span className="song-attached">{it.songTitle}</span>
-                  ) : (
-                    <span className="song-empty">(no song picked)</span>
-                  ))}
-                <span className={`badge type-${it.itemType}`}>{it.itemType}</span>
-              </li>
-            ))}
+            {items.map((it) => {
+              const isSong = it.itemType === 'song'
+              const filled = isSong && it.songId
+              const cls = `item type-${it.itemType}${
+                isSong ? (filled ? ' song-filled' : ' song-empty-slot') : ''
+              }`
+              return (
+                <li key={it.id} className={cls}>
+                  <span className="seq">{it.sequence}</span>
+                  <div className="ibody">
+                    <div className="ititle">{it.title || '(no title)'}</div>
+                    {isSong && (
+                      filled ? (
+                        <a
+                          className="song-attached"
+                          href={`https://services.planningcenteronline.com/songs/${it.songId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Open song in Planning Center"
+                        >
+                          {it.songTitle ?? '(song)'} ↗
+                        </a>
+                      ) : (
+                        <span className="song-empty">Pick a song</span>
+                      )
+                    )}
+                  </div>
+                  {!isSong && <span className={`badge type-${it.itemType}`}>{it.itemType}</span>}
+                </li>
+              )
+            })}
           </ol>
         </section>
       )}
