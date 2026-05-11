@@ -596,10 +596,37 @@ textarea {
   }
 }
 
+/* Hairline gradient divider sitting above each section heading so the
+   sections feel separated without leaving cavernous whitespace. The
+   first section in a column never gets one (service-order on the left,
+   candidates on the right at desktop widths). */
+.plan-detail .suggest-section::before,
+.plan-detail .rejected-pool::before,
+.plan-detail .ai-debug::before,
+.plan-detail .candidates::before {
+  content: '';
+  display: block;
+  height: 1px;
+  margin: 0.4rem 0 0.6rem;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--border) 18%,
+    var(--border) 82%,
+    transparent
+  );
+}
+/* In two-column mode the candidates section is the first child of the
+   right column — it shouldn't carry a divider above it. */
+@media (min-width: 960px) {
+  .plan-detail .candidates::before {
+    content: none;
+  }
+}
+
 /* Suggest section uses the same shape as Service Order / AI Candidates:
    uppercase muted heading on the page background, with the form card
-   sitting below it. No hard divider between sections — the section
-   heading itself is the visual break. */
+   sitting below it. Section break is the gradient hairline above. */
 .suggest-section {
   display: flex;
   flex-direction: column;
