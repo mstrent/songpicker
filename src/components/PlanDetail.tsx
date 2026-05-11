@@ -135,7 +135,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   const [notesText, setNotesText] = useState('')
   const [notesSource, setNotesSource] = useState('')
   const [criteria, setCriteria] = useState('')
-  const [count, setCount] = useState(5)
+  const [minCount, setMinCount] = useState(3)
+  const [maxCount, setMaxCount] = useState(8)
   const [generating, setGenerating] = useState(false)
   const [generateError, setGenerateError] = useState<string | null>(null)
   const [candidates, setCandidates] = useState<CandidateMatch[]>([])
@@ -218,7 +219,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         }
         if (!countInitialized.current) {
           const songSlotCount = ctx.items.filter(isSongSlot).length
-          setCount(Math.max(songSlotCount * 2, 5))
+          // Floor at the number of empty slots so the AI always returns
+          // enough to populate the order; cap min at 3 so very short
+          // services still get some variety.
+          setMinCount(Math.max(songSlotCount, 3))
+          setMaxCount(Math.max(songSlotCount * 2, 8))
           countInitialized.current = true
         }
       })
@@ -272,7 +277,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   // surface the spinner / errors; auto-replacements run quietly in the
   // background.
   async function fetchSuggestions(opts: {
-    count: number
+    minCount: number
+    maxCount: number
     userMessage: string
     addToChat: boolean
   }) {
@@ -313,7 +319,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         theme,
         userMessage: opts.userMessage,
         exclude,
-        count: opts.count,
+        minCount: opts.minCount,
+        maxCount: opts.maxCount,
         planId,
         serviceOrder,
         planNotes: notesText,
@@ -345,13 +352,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         setCriteria('')
       }
 
-      // The "at least 4 per slot" rule in the technical requirements makes
-      // the model over-deliver — for chat-driven calls that's the point,
-      // but for silent auto-replacements (1:1 with rejections) it's
-      // clutter. Hard-cap silent calls to the requested count.
-      const accepted = opts.addToChat
-        ? res.data.suggestions
-        : res.data.suggestions.slice(0, opts.count)
+      // The model can still over-deliver past the requested max — defend
+      // against that on the client and slice down to the user's chosen
+      // upper bound so the candidate list doesn't blow out.
+      const accepted = res.data.suggestions.slice(0, opts.maxCount)
 
       const now = Date.now()
       const newOnes: CandidateMatch[] = accepted.map((s) => ({
@@ -414,7 +418,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   async function handleSuggest() {
     if (!theme.trim() || generating) return
     await fetchSuggestions({
-      count,
+      minCount,
+      maxCount,
       userMessage: criteria,
       addToChat: true,
     })
@@ -429,7 +434,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       replacementTimer.current = null
       if (n <= 0) return
       void fetchSuggestions({
-        count: n,
+        // Auto-replacement is strictly 1:1 with the rejections that
+        // accumulated in the debounce window — pin the range so the
+        // model returns exactly that many replacement songs.
+        minCount: n,
+        maxCount: n,
         userMessage: `(auto-replacement for ${n} rejected song${n === 1 ? '' : 's'})`,
         addToChat: false,
       })
@@ -865,13 +874,37 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         </label>
         <div className="row">
           <label className="inline">
-            <span>How many?</span>
+            <span>Min</span>
             <input
               type="number"
               min={1}
-              max={20}
-              value={count}
-              onChange={(e) => setCount(parseInt(e.target.value, 10) || 8)}
+              max={50}
+              value={minCount}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10)
+                if (!Number.isNaN(v)) {
+                  setMinCount(Math.max(1, v))
+                  if (v > maxCount) setMaxCount(v)
+                }
+              }}
+              title="Minimum number of suggestions the AI should return"
+            />
+          </label>
+          <label className="inline">
+            <span>Max</span>
+            <input
+              type="number"
+              min={1}
+              max={50}
+              value={maxCount}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10)
+                if (!Number.isNaN(v)) {
+                  setMaxCount(Math.max(1, v))
+                  if (v < minCount) setMinCount(v)
+                }
+              }}
+              title="Maximum number of suggestions the AI should return"
             />
           </label>
           <button

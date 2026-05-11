@@ -9,7 +9,12 @@ import type { SongSuggestion, SuggestRequest } from './types'
 // current plan state. So past turns stay short and readable, while the
 // current turn has all the context the model needs to act.
 export function buildUserMessage(req: SuggestRequest): string {
-  const count = req.count ?? 8
+  // Sensible defaults if the caller didn't specify a range — match the old
+  // single-count fallback (8) as a soft upper bound and pin a min of 4.
+  const rawMin = req.minCount ?? 4
+  const rawMax = req.maxCount ?? 8
+  const minCount = Math.max(1, Math.min(rawMin, rawMax))
+  const maxCount = Math.max(minCount, rawMax)
   const parts: string[] = [
     `Theme: ${req.theme}`,
   ]
@@ -29,7 +34,13 @@ export function buildUserMessage(req: SuggestRequest): string {
     parts.push(`Already rejected: ${req.rejectedTitles.join(', ')}`)
   }
   parts.push(`User request: ${req.userMessage || '(none)'}`)
-  parts.push(`Return at least ${count} suggestions.`)
+  if (minCount === maxCount) {
+    parts.push(`Return exactly ${minCount} suggestion${minCount === 1 ? '' : 's'}.`)
+  } else {
+    parts.push(
+      `Return between ${minCount} and ${maxCount} suggestions — stay within this range.`,
+    )
+  }
   if (req.exclude?.length) {
     parts.push(
       `\nDo NOT suggest any of these (already considered): ${req.exclude.join(', ')}`,

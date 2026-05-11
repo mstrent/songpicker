@@ -226,24 +226,26 @@ export const suggestSongs = onCall(
       theme,
       userMessage,
       exclude,
-      count,
       planId,
       serviceOrder,
       planNotes,
       history,
       shortlistedTitles,
       rejectedTitles,
+      minCount,
+      maxCount,
     } = req.data as {
       theme?: string
       userMessage?: string
       exclude?: string[]
-      count?: number
       planId?: string
       serviceOrder?: string
       planNotes?: string
       history?: Array<{ role: 'user' | 'assistant'; content: string }>
       shortlistedTitles?: string[]
       rejectedTitles?: string[]
+      minCount?: number
+      maxCount?: number
     }
     if (!theme) throw new HttpsError('invalid-argument', 'theme required')
 
@@ -280,7 +282,8 @@ export const suggestSongs = onCall(
       rejectedTitles,
       history,
       exclude,
-      count,
+      minCount,
+      maxCount,
     })
     return {
       suggestions: result.suggestions,

@@ -183,7 +183,8 @@ export const suggestSongs = httpsCallable<
     theme: string
     userMessage: string
     exclude?: string[]
-    count?: number
+    minCount?: number
+    maxCount?: number
     planId?: string
     serviceOrder?: string
     planNotes?: string

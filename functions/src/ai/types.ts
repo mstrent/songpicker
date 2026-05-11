@@ -38,7 +38,10 @@ export interface SuggestRequest {
    *  summaries). The current turn's user message is built fresh on the
    *  server and appended to this history. */
   history?: ConversationTurn[]
-  count?: number
+  /** Lower bound on the number of suggestions the model should return. */
+  minCount?: number
+  /** Upper bound on the number of suggestions the model should return. */
+  maxCount?: number
 }
 
 export interface AiDebug {
