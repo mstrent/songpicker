@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   clearSlot,
   commitSlot,
@@ -601,6 +601,47 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     }
   }
 
+  // Drag-and-drop state. Two distinct drag modes:
+  //   - 'candidate': dragging an AI suggestion onto an empty service-
+  //     order slot. Drop assigns + commits in one step.
+  //   - 'slot':      dragging a filled song slot onto the trash zone
+  //     that appears at the top of the page mid-drag. Drop clears.
+  // The drop-target highlights and the floating trash zone are gated on
+  // this state.
+  const [dragKind, setDragKind] = useState<'candidate' | 'slot' | null>(null)
+  // Hovered drop-target ids so we can highlight the specific slot or the
+  // trash zone the user is over, instead of every valid target at once.
+  const [dragOverItemId, setDragOverItemId] = useState<string | null>(null)
+  const [dragOverTrash, setDragOverTrash] = useState(false)
+
+  function endDrag() {
+    setDragKind(null)
+    setDragOverItemId(null)
+    setDragOverTrash(false)
+  }
+
+  // Drop handler for "candidate dragged onto empty slot". Reuses the
+  // commit path, but synthesises a candidate with the new
+  // assignedSlotItemId so commitCandidate sees the slot assignment on
+  // its first read (avoids a setState + read race).
+  async function dropCandidateOnSlot(candidateId: string, slotItemId: string) {
+    const candidate = candidates.find((c) => c.id === candidateId)
+    if (!candidate || !candidate.song) return
+    const slot = (items ?? []).find((it) => it.id === slotItemId)
+    if (!slot || slot.songId) return // only empty song slots accept a drop
+    const withSlot: CandidateMatch = {
+      ...candidate,
+      assignedSlotItemId: slotItemId,
+      committedAt: null,
+    }
+    // Push the assignment into state so the dropdown / "→ slotN" label
+    // also tracks the drop, then run the existing commit flow.
+    setCandidates((prev) =>
+      prev.map((c) => (c.id === candidateId ? withSlot : c)),
+    )
+    await commitCandidate(withSlot)
+  }
+
   async function commitCandidate(c: CandidateMatch) {
     if (!c.assignedSlotItemId || !c.song || c.committedAt) return
     const slot = (items ?? []).find((it) => it.id === c.assignedSlotItemId)
@@ -649,6 +690,35 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
 
   return (
     <div className="plan-detail">
+      {dragKind === 'slot' && (
+        <div
+          className={`slot-trash${dragOverTrash ? ' drag-over' : ''}`}
+          onDragOver={(e) => {
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'move'
+            if (!dragOverTrash) setDragOverTrash(true)
+          }}
+          onDragLeave={() => setDragOverTrash(false)}
+          onDrop={(e) => {
+            e.preventDefault()
+            try {
+              const raw = e.dataTransfer.getData('application/x-songpicker')
+              const data = raw ? JSON.parse(raw) : null
+              if (data?.kind === 'slot' && data.itemId) {
+                void clearPickedSlot(data.itemId)
+              }
+            } finally {
+              endDrag()
+            }
+          }}
+          aria-label="Drop to clear this slot"
+        >
+          <span className="slot-trash-icon" aria-hidden>
+            🗑
+          </span>
+          <span className="slot-trash-label">Drop to clear this slot</span>
+        </div>
+      )}
       <div className="plan-header">
         <a
           className="back"
@@ -715,8 +785,54 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                   it.leaders.length > 0 ||
                   it.songAuthor ||
                   it.songCcli)
+              const dragHandlers: React.HTMLAttributes<HTMLLIElement> = {}
+              const draggable = isSong && filled
+              if (draggable) {
+                dragHandlers.onDragStart = (e) => {
+                  e.dataTransfer.setData(
+                    'application/x-songpicker',
+                    JSON.stringify({ kind: 'slot', itemId: it.id }),
+                  )
+                  e.dataTransfer.effectAllowed = 'move'
+                  setDragKind('slot')
+                }
+                dragHandlers.onDragEnd = endDrag
+              }
+              const isDropTarget =
+                dragKind === 'candidate' && isSong && !filled
+              if (isDropTarget) {
+                dragHandlers.onDragOver = (e) => {
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'move'
+                  if (dragOverItemId !== it.id) setDragOverItemId(it.id)
+                }
+                dragHandlers.onDragLeave = () => {
+                  if (dragOverItemId === it.id) setDragOverItemId(null)
+                }
+                dragHandlers.onDrop = (e) => {
+                  e.preventDefault()
+                  try {
+                    const raw = e.dataTransfer.getData(
+                      'application/x-songpicker',
+                    )
+                    const data = raw ? JSON.parse(raw) : null
+                    if (data?.kind === 'candidate' && data.candidateId) {
+                      void dropCandidateOnSlot(data.candidateId, it.id)
+                    }
+                  } finally {
+                    endDrag()
+                  }
+                }
+              }
               return (
-                <li key={it.id} className={cls}>
+                <li
+                  key={it.id}
+                  className={`${cls}${isDropTarget ? ' drag-target' : ''}${
+                    isDropTarget && dragOverItemId === it.id ? ' drag-over' : ''
+                  }${draggable ? ' is-draggable' : ''}`}
+                  draggable={draggable || undefined}
+                  {...dragHandlers}
+                >
                   <span className="seq">{it.sequence}</span>
                   <div className="ibody">
                     {filled ? (
@@ -1124,10 +1240,24 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           <ul>
             {active.map((c) => {
               const matched = c.matchStatus === 'matched' && c.song
+              const candidateDraggable = !!matched && !c.committedAt
               return (
                 <li
                   key={c.id}
-                  className={`candidate match-${c.matchStatus} decision-${c.decision}`}
+                  className={`candidate match-${c.matchStatus} decision-${c.decision}${
+                    candidateDraggable ? ' is-draggable' : ''
+                  }`}
+                  draggable={candidateDraggable || undefined}
+                  onDragStart={(e) => {
+                    if (!candidateDraggable) return
+                    e.dataTransfer.setData(
+                      'application/x-songpicker',
+                      JSON.stringify({ kind: 'candidate', candidateId: c.id }),
+                    )
+                    e.dataTransfer.effectAllowed = 'move'
+                    setDragKind('candidate')
+                  }}
+                  onDragEnd={endDrag}
                 >
                   <div className="ctitle">
                     {matched ? (

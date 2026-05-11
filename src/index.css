@@ -827,6 +827,71 @@ textarea {
   border-color: var(--error);
 }
 
+/* Drag-and-drop affordances on the service order */
+
+.service-order .item.is-draggable {
+  cursor: grab;
+}
+.service-order .item.is-draggable:active {
+  cursor: grabbing;
+}
+/* When a candidate drag is active, empty song slots become drop
+   targets — a clear accent outline announces the affordance. The over
+   state lifts the soft fill so the user sees exactly which slot they're
+   about to drop on. */
+.service-order .item.drag-target {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+}
+.service-order .item.drag-target.drag-over {
+  background: var(--accent-soft-2);
+  outline-style: solid;
+}
+
+/* Candidate card drag affordance — the whole card is the drag source
+   while it's matched and not yet committed. */
+.candidate.is-draggable {
+  cursor: grab;
+}
+.candidate.is-draggable:active {
+  cursor: grabbing;
+}
+
+/* Floating "drop to clear" zone — appears at the top of the plan
+   detail view ONLY while a filled slot is being dragged. Uses the
+   --error palette to read as a destructive action. */
+.slot-trash {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin: 0 0 0.6rem;
+  padding: 0.7rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--error);
+  background: var(--error-soft);
+  border: 2px dashed var(--error);
+  border-radius: 12px;
+  pointer-events: auto;
+}
+.slot-trash.drag-over {
+  background: var(--error);
+  color: #fff;
+  border-style: solid;
+}
+.slot-trash.drag-over .slot-trash-icon {
+  filter: grayscale(1) brightness(2);
+}
+.slot-trash-icon {
+  font-size: 1.2rem;
+}
+
 .service-order .seq {
   color: var(--muted);
   font-size: 0.78rem;
