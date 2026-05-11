@@ -103,6 +103,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           .map((it) => it.songTitle!),
       ]
       const serviceOrder = buildServiceOrderText(items)
+      const planNotes = buildPlanNotesText(notes)
       const res = await suggestSongs({
         theme,
         criteria,
@@ -110,6 +111,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         count,
         planId,
         serviceOrder,
+        planNotes,
       })
       setProvider(res.data.provider)
       setDebug(res.data.debug ?? null)
@@ -268,7 +270,16 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
 
       {notes.length > 0 ? (
         <section className="notes">
-          <h3>Plan context</h3>
+          <h3>
+            Plan context
+            <span
+              className="ai-context-marker"
+              title="Plan notes from Planning Center are included in the context sent to the AI"
+              aria-hidden
+            >
+              ✨
+            </span>
+          </h3>
           <ul>
             {notes.map((n) => (
               <li key={n.id}>
@@ -500,6 +511,18 @@ function updateAt<T>(arr: T[], idx: number, fn: (cur: T) => T): T[] {
   const next = arr.slice()
   next[idx] = fn(next[idx])
   return next
+}
+
+// Render plan notes as a bullet list for the AI prompt, dropping any
+// empty-content entries. The Planning Center category prefix (Sermon
+// Theme, Scripture, General, etc.) goes ahead of each line so the model
+// can weigh them appropriately.
+function buildPlanNotesText(notes: PlanNote[] | null): string {
+  if (!notes || notes.length === 0) return ''
+  return notes
+    .filter((n) => n.content && n.content.trim())
+    .map((n) => `- ${n.category ? `${n.category}: ` : ''}${n.content.trim()}`)
+    .join('\n')
 }
 
 // Render the plan's items as a human-readable list for the AI prompt.

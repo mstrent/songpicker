@@ -719,7 +719,8 @@ textarea {
 .plan-detail .criteria label > span .ai-context-marker {
   margin-left: 0.15rem;
 }
-.service-order h3 .ai-context-marker {
+.service-order h3 .ai-context-marker,
+.plan-detail .notes h3 .ai-context-marker {
   margin-left: 0.4rem;
 }
 .plan-detail .criteria .edited-flag {

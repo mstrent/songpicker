@@ -14,6 +14,10 @@ export interface SuggestRequest {
    *  filled vs empty song slots. Built on the SPA side from PlanItem[]
    *  and passed through verbatim so the AI sees position context. */
   serviceOrder?: string
+  /** Pre-formatted, human-readable plan notes (sermon theme, scripture,
+   *  general notes, etc.) from Planning Center. Provides extra context
+   *  the worship leader can't easily capture in the theme field alone. */
+  planNotes?: string
   exclude?: string[]
   count?: number
 }

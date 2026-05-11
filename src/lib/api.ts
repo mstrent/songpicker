@@ -108,6 +108,7 @@ export const suggestSongs = httpsCallable<
     count?: number
     planId?: string
     serviceOrder?: string
+    planNotes?: string
   },
   {
     suggestions: SongSuggestion[]

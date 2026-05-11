@@ -203,14 +203,16 @@ export const suggestSongs = onCall(
   { secrets: [ANTHROPIC_API_KEY, GEMINI_API_KEY] },
   async (req) => {
     const { uid } = requireAllowed(req)
-    const { theme, criteria, exclude, count, planId, serviceOrder } = req.data as {
-      theme?: string
-      criteria?: string
-      exclude?: string[]
-      count?: number
-      planId?: string
-      serviceOrder?: string
-    }
+    const { theme, criteria, exclude, count, planId, serviceOrder, planNotes } =
+      req.data as {
+        theme?: string
+        criteria?: string
+        exclude?: string[]
+        count?: number
+        planId?: string
+        serviceOrder?: string
+        planNotes?: string
+      }
     if (!theme) throw new HttpsError('invalid-argument', 'theme required')
 
     const provider = AI_PROVIDER.value()
@@ -241,6 +243,7 @@ export const suggestSongs = onCall(
       structurePrompt: structure.effective.value,
       systemPrompt: composeSystemPrompt(role.effective.value),
       serviceOrder,
+      planNotes,
       exclude,
       count,
     })
