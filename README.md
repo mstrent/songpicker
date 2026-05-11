@@ -15,41 +15,110 @@ AI iteration is stateful but not conversational — each regeneration receives t
 
 ## Stack
 
-- **Frontend**: React + Vite SPA
+- **Frontend**: React + Vite SPA (TypeScript)
 - **Hosting**: Firebase Hosting
-- **Backend**: Firebase Cloud Functions (keeps PCO and AI keys server-side)
-- **Database**: Firestore (per-plan sessions, candidate pool, AI turn log, prompt presets)
-- **Auth**: Firebase Auth — Google sign-in, single-user whitelist
-- **AI**: provider-agnostic (Anthropic Claude + OpenAI), switchable via env var
+- **Backend**: Firebase Cloud Functions (Gen 2, TypeScript) — keeps PCO and AI keys server-side
+- **Database**: Firestore — per-plan sessions, candidate pool, AI turn log, prompt presets
+- **Auth**: Firebase Auth — Google sign-in with single-email allowlist
+- **AI**: provider-agnostic (Anthropic Claude Sonnet 4.6 + OpenAI GPT-4o), switchable via `AI_PROVIDER` param
 - **Planning Center**: Services API v2 with a Personal Access Token
 
 All hosted on Firebase free tier.
+
+## Repo layout
+
+```
+.
+├── src/                  React SPA (Vite)
+│   ├── App.tsx           Auth gate + main shell
+│   ├── components/       SignIn, PlanList, ...
+│   ├── lib/              firebase, auth, api (typed callable wrappers)
+│   └── config.ts         Vite env vars
+├── functions/            Cloud Functions (TypeScript, Gen 2)
+│   └── src/
+│       ├── index.ts      Callable functions: listPlans, getPlanContext,
+│       │                 searchSongs, suggestSongs, commitPlanItems
+│       ├── pco/          PCO API client (no SDK, plain fetch)
+│       └── ai/           Provider-agnostic AI (anthropic, openai)
+├── firebase.json         Hosting + Functions + Firestore + Emulators config
+├── firestore.rules       Per-doc owner-email gate
+├── .firebaserc           Firebase project ID (set this)
+├── .env.example          Client env template (copy to .env.local)
+└── .mcp.json             Project-local Firebase MCP for Claude Code
+```
 
 ## Planning Center API touchpoints
 
 | Endpoint | Use |
 | --- | --- |
 | `GET /service_types` | List service types |
-| `GET /service_types/{id}/plans` | List upcoming plans |
-| `GET /service_types/{id}/plans/{id}` | Plan title, series, sort_date |
-| `GET /service_types/{id}/plans/{id}/notes` | Read sermon theme / scripture from plan notes |
-| `GET /songs` | Search song library; returns `last_scheduled_at`, `themes`, `ccli_number`, etc. |
-| `POST /service_types/{id}/plans/{id}/items` | Insert each chosen song into the plan order |
+| `GET /service_types/{id}/plans?filter=future` | List upcoming plans |
+| `GET /service_types/{id}/plans/{id}/notes?include=plan_note_category` | Read theme/scripture notes |
+| `GET /songs?where[title]=...` | Search song library; returns `last_scheduled_at`, `themes`, `ccli_number` |
+| `POST /service_types/{id}/plans/{id}/items` | Insert a song into the plan order |
 
-Docs: <https://api.planningcenteronline.com/docs>
+PCO docs: <https://api.planningcenteronline.com/docs>
 
-## Local setup
+## First-time setup
 
-> Requires Node 20+. Install via [nvm](https://github.com/nvm-sh/nvm) if you don't have it.
+> Requires Node 20+ (install via [nvm](https://github.com/nvm-sh/nvm) if needed) and the Firebase CLI (`npm install -g firebase-tools`).
+
+### 1. Firebase project
 
 ```bash
-git clone git@github.com:mstrent/songpicker.git
-cd songpicker
-cp .env.example .env.local   # fill in PCO + Firebase + AI keys
+firebase login
+firebase projects:create songpicker-yourname   # or use an existing project
+```
+
+Edit `.firebaserc` to set `default` to your project ID.
+
+In the [Firebase Console](https://console.firebase.google.com/):
+- **Authentication** → enable **Google** sign-in provider.
+- **Firestore Database** → create database (production mode).
+- **Project Settings** → **Your apps** → add a Web app and copy the config.
+
+### 2. Client environment
+
+```bash
+cp .env.example .env.local
+# fill in VITE_FIREBASE_* from Firebase Console + your VITE_ALLOWED_EMAIL
+```
+
+### 3. Cloud Functions secrets
+
+Get a Personal Access Token from <https://api.planningcenteronline.com/oauth/applications> (the bottom "Personal Access Tokens" section). It comes as `application_id:secret`.
+
+```bash
+firebase functions:secrets:set PCO_APP_ID
+firebase functions:secrets:set PCO_SECRET
+firebase functions:secrets:set ANTHROPIC_API_KEY
+firebase functions:secrets:set OPENAI_API_KEY
+```
+
+Set non-secret params for the Functions runtime in `functions/.env`:
+
+```
+ALLOWED_EMAIL=you@example.com
+AI_PROVIDER=anthropic
+```
+
+### 4. Install + run
+
+```bash
 npm install
-npm run dev
+npm --prefix functions install
+npm run dev                          # SPA on http://localhost:5173
+firebase emulators:start             # (optional) Auth + Firestore + Functions locally
+```
+
+For local dev against emulators, set `VITE_USE_EMULATORS=true` in `.env.local`.
+
+### 5. Deploy
+
+```bash
+npm run deploy                       # builds SPA + deploys hosting + functions + firestore rules
 ```
 
 ## Status
 
-Early — repo just initialized. Scaffold to follow.
+Scaffold complete; v1 slice (sign in → list upcoming plans) is wired end-to-end. Candidate-pool UI, drag-to-reorder, and commit flow are next.

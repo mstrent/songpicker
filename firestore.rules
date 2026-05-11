@@ -1,0 +1,44 @@
+rules_version = '2';
+
+// Single-user app: client-side rules require authentication; the server-side
+// allowlist (ALLOWED_EMAIL in Cloud Functions) is the real gate. Rules deny
+// any client write that doesn't carry the owner's email so a stolen token
+// can't be used to scribble into someone else's docs.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function ownsExisting() {
+      return resource != null && resource.data.ownerEmail == request.auth.token.email;
+    }
+
+    function ownsIncoming() {
+      return request.resource.data.ownerEmail == request.auth.token.email;
+    }
+
+    match /sessions/{sessionId} {
+      allow read: if signedIn() && ownsExisting();
+      allow create: if signedIn() && ownsIncoming();
+      allow update, delete: if signedIn() && ownsExisting() && ownsIncoming();
+    }
+
+    match /prompt_presets/{presetId} {
+      allow read: if signedIn() && ownsExisting();
+      allow create: if signedIn() && ownsIncoming();
+      allow update, delete: if signedIn() && ownsExisting() && ownsIncoming();
+    }
+
+    match /sessions/{sessionId}/ai_turns/{turnId} {
+      allow read, write: if signedIn() &&
+        get(/databases/$(database)/documents/sessions/$(sessionId)).data.ownerEmail
+          == request.auth.token.email;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

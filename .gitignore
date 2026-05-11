@@ -11,8 +11,12 @@ functions/lib/
 .env
 .env.local
 .env.*.local
+functions/.env
 .firebaserc.local
 serviceAccountKey*.json
+
+# Claude Code local state
+.claude/
 
 # Editor / OS
 .DS_Store
