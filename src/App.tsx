@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { onAuthStateChanged, type User } from 'firebase/auth'
 import { auth } from './lib/firebase'
 import { logOut } from './lib/auth'
+import { getPcoStatus } from './lib/api'
 import { config } from './config'
 import { SignIn } from './components/SignIn'
 import { PlanList } from './components/PlanList'
 import { PlanDetail } from './components/PlanDetail'
+import { PcoSetup } from './components/PcoSetup'
 
 function useHashRoute(): string {
   const [hash, setHash] = useState(() => window.location.hash)
@@ -19,9 +21,28 @@ function useHashRoute(): string {
 
 export default function App() {
   const [user, setUser] = useState<User | null | undefined>(undefined)
+  const [pcoReady, setPcoReady] = useState<boolean | null>(null)
   const hash = useHashRoute()
 
   useEffect(() => onAuthStateChanged(auth, setUser), [])
+
+  const refreshPcoStatus = useCallback(async () => {
+    try {
+      const res = await getPcoStatus()
+      setPcoReady(res.data.hasCredentials)
+    } catch {
+      setPcoReady(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (user) {
+      setPcoReady(null)
+      void refreshPcoStatus()
+    } else {
+      setPcoReady(null)
+    }
+  }, [user, refreshPcoStatus])
 
   if (user === undefined) return <div className="centered">Loading…</div>
   if (!user) return <SignIn />
@@ -67,7 +88,11 @@ export default function App() {
         </div>
       </header>
       <main>
-        {planMatch ? (
+        {pcoReady === null ? (
+          <div>Checking Planning Center connection…</div>
+        ) : pcoReady === false ? (
+          <PcoSetup onSaved={() => void refreshPcoStatus()} />
+        ) : planMatch ? (
           <PlanDetail serviceTypeId={planMatch[1]} planId={planMatch[2]} />
         ) : (
           <>

@@ -63,6 +63,16 @@ export interface CommitItem {
   songId?: string
 }
 
+export const getPcoStatus = httpsCallable<void, { hasCredentials: boolean }>(
+  functions,
+  'getPcoStatus',
+)
+
+export const savePcoCredentials = httpsCallable<
+  { appId: string; secret: string },
+  { ok: boolean }
+>(functions, 'savePcoCredentials')
+
 export const listPlans = httpsCallable<void, { plans: Plan[] }>(functions, 'listPlans')
 
 export const getPlanContext = httpsCallable<

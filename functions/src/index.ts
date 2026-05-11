@@ -4,6 +4,11 @@ import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/
 
 import { getAiProvider } from './ai'
 import { PcoClient } from './pco/client'
+import {
+  hasPcoCredentials,
+  pcoForUser,
+  savePcoCredentialsForUser,
+} from './pco/credentials'
 import { countSongs } from './pco/songSlots'
 import type { NewItem } from './pco/types'
 import {
@@ -12,112 +17,131 @@ import {
   ANTHROPIC_API_KEY,
   GEMINI_API_KEY,
   INCLUDED_SERVICE_TYPES,
-  PCO_APP_ID,
-  PCO_SECRET,
 } from './config'
 
 initializeApp()
 setGlobalOptions({ region: 'us-central1', maxInstances: 10 })
 
-function requireAllowed(req: CallableRequest<unknown>): string {
+function requireAllowed(req: CallableRequest<unknown>): { uid: string; email: string } {
   const email = req.auth?.token?.email
-  if (!email) throw new HttpsError('unauthenticated', 'Sign in required')
+  const uid = req.auth?.uid
+  if (!email || !uid) throw new HttpsError('unauthenticated', 'Sign in required')
   const allowed = ALLOWED_EMAIL.value()
-  if (allowed && email !== allowed) {
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+  if (allowed.length > 0 && !allowed.includes(email.toLowerCase())) {
     throw new HttpsError('permission-denied', `Not authorized: ${email}`)
   }
-  return email
+  return { uid, email }
 }
 
-function pco(): PcoClient {
-  return new PcoClient(PCO_APP_ID.value(), PCO_SECRET.value())
-}
+// Returns whether the calling user has saved their PCO PAT. SPA uses this
+// to decide whether to show the setup screen or the main app.
+export const getPcoStatus = onCall(async (req) => {
+  const { uid } = requireAllowed(req)
+  return { hasCredentials: await hasPcoCredentials(uid) }
+})
 
-export const listPlans = onCall(
-  { secrets: [PCO_APP_ID, PCO_SECRET] },
-  async (req) => {
-    requireAllowed(req)
-    const allowed = INCLUDED_SERVICE_TYPES.value()
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-    const client = pco()
-    // 4 past plans per service type (~1 month of weekly services) gives
-    // recent-history context alongside the upcoming list.
-    const all = await client.listAllPlans({ past: 4, future: 10 })
-    const filtered = allowed.length
-      ? all.filter((p) => p.serviceTypeName != null && allowed.includes(p.serviceTypeName))
-      : all
-
-    // Enrich each plan with its worship-team roster (name + email + position
-    // + team) so the SPA can do both the "led by …" display and the
-    // "you're serving / leading" highlights without further server calls.
-    // Scoped to worship team only — songpicker's whole job is worship songs,
-    // so other rosters (tech, kids, greeters) are noise here. Matches any
-    // team name containing "worship" (case-insensitive) so "Worship Team",
-    // "Worship Band", etc. all qualify.
-    // Parallel fetch keeps total latency ~one PCO round-trip even with N
-    // plans; per-plan failures are swallowed so one bad plan doesn't blank
-    // the whole list.
-    const plans = await Promise.all(
-      filtered.map(async (p) => {
-        try {
-          const [people, items] = await Promise.all([
-            client.listPlanPeople(p.serviceTypeId, p.id),
-            client.listPlanItems(p.serviceTypeId, p.id),
-          ])
-          const teamMembers = people
-            .filter((pp) => pp.status !== 'D')
-            .filter((pp): pp is typeof pp & { name: string } => !!pp.name)
-            .filter((pp) => /worship/i.test(pp.team ?? ''))
-            .map((pp) => ({
-              name: pp.name,
-              email: pp.email,
-              position: pp.position,
-              team: pp.team,
-            }))
-          const songCounts = countSongs(items)
-          return { ...p, teamMembers, songCounts }
-        } catch {
-          return p
-        }
-      }),
+// Validate that the supplied PCO PAT works by hitting /service_types, then
+// store it in Firestore. Bad creds bubble back to the SPA so the user
+// retries instead of silently saving a wrong key.
+export const savePcoCredentials = onCall(async (req) => {
+  const { uid } = requireAllowed(req)
+  const { appId, secret } = req.data as { appId?: unknown; secret?: unknown }
+  if (typeof appId !== 'string' || typeof secret !== 'string' || !appId.trim() || !secret.trim()) {
+    throw new HttpsError('invalid-argument', 'appId and secret required')
+  }
+  const client = new PcoClient(appId.trim(), secret.trim())
+  try {
+    await client.listServiceTypes()
+  } catch (e) {
+    throw new HttpsError(
+      'failed-precondition',
+      `PCO rejected those credentials: ${(e as Error).message}`,
     )
-    return { plans }
-  },
-)
+  }
+  await savePcoCredentialsForUser(uid, appId.trim(), secret.trim())
+  return { ok: true }
+})
 
-export const getPlanContext = onCall(
-  { secrets: [PCO_APP_ID, PCO_SECRET] },
-  async (req) => {
-    requireAllowed(req)
-    const { serviceTypeId, planId } = req.data as {
-      serviceTypeId?: string
-      planId?: string
-    }
-    if (!serviceTypeId || !planId) {
-      throw new HttpsError('invalid-argument', 'serviceTypeId and planId required')
-    }
-    const client = pco()
-    const [plan, notes, items] = await Promise.all([
-      client.getPlan(serviceTypeId, planId),
-      client.getPlanNotes(serviceTypeId, planId),
-      client.listPlanItems(serviceTypeId, planId),
-    ])
-    return { plan, notes, items }
-  },
-)
+export const listPlans = onCall(async (req) => {
+  const { uid } = requireAllowed(req)
+  const allowed = INCLUDED_SERVICE_TYPES.value()
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const client = await pcoForUser(uid)
+  // 4 past plans per service type (~1 month of weekly services) gives
+  // recent-history context alongside the upcoming list.
+  const all = await client.listAllPlans({ past: 4, future: 10 })
+  const filtered = allowed.length
+    ? all.filter((p) => p.serviceTypeName != null && allowed.includes(p.serviceTypeName))
+    : all
 
-export const searchSongs = onCall(
-  { secrets: [PCO_APP_ID, PCO_SECRET] },
-  async (req) => {
-    requireAllowed(req)
-    const { query } = req.data as { query?: string }
-    if (!query) throw new HttpsError('invalid-argument', 'query required')
-    const songs = await pco().searchSongs(query)
-    return { songs }
-  },
-)
+  // Enrich each plan with its worship-team roster (name + email + position
+  // + team) so the SPA can do both the "led by …" display and the
+  // "you're serving / leading" highlights without further server calls.
+  // Scoped to worship team only — songpicker's whole job is worship songs,
+  // so other rosters (tech, kids, greeters) are noise here. Matches any
+  // team name containing "worship" (case-insensitive) so "Worship Team",
+  // "Worship Band", etc. all qualify.
+  // Parallel fetch keeps total latency ~one PCO round-trip even with N
+  // plans; per-plan failures are swallowed so one bad plan doesn't blank
+  // the whole list.
+  const plans = await Promise.all(
+    filtered.map(async (p) => {
+      try {
+        const [people, items] = await Promise.all([
+          client.listPlanPeople(p.serviceTypeId, p.id),
+          client.listPlanItems(p.serviceTypeId, p.id),
+        ])
+        const teamMembers = people
+          .filter((pp) => pp.status !== 'D')
+          .filter((pp): pp is typeof pp & { name: string } => !!pp.name)
+          .filter((pp) => /worship/i.test(pp.team ?? ''))
+          .map((pp) => ({
+            name: pp.name,
+            email: pp.email,
+            position: pp.position,
+            team: pp.team,
+          }))
+        const songCounts = countSongs(items)
+        return { ...p, teamMembers, songCounts }
+      } catch {
+        return p
+      }
+    }),
+  )
+  return { plans }
+})
+
+export const getPlanContext = onCall(async (req) => {
+  const { uid } = requireAllowed(req)
+  const { serviceTypeId, planId } = req.data as {
+    serviceTypeId?: string
+    planId?: string
+  }
+  if (!serviceTypeId || !planId) {
+    throw new HttpsError('invalid-argument', 'serviceTypeId and planId required')
+  }
+  const client = await pcoForUser(uid)
+  const [plan, notes, items] = await Promise.all([
+    client.getPlan(serviceTypeId, planId),
+    client.getPlanNotes(serviceTypeId, planId),
+    client.listPlanItems(serviceTypeId, planId),
+  ])
+  return { plan, notes, items }
+})
+
+export const searchSongs = onCall(async (req) => {
+  const { uid } = requireAllowed(req)
+  const { query } = req.data as { query?: string }
+  if (!query) throw new HttpsError('invalid-argument', 'query required')
+  const client = await pcoForUser(uid)
+  const songs = await client.searchSongs(query)
+  return { songs }
+})
 
 // To add another provider (openai, ...):
 //   1. firebase functions:secrets:set <PROVIDER>_API_KEY
@@ -163,27 +187,24 @@ export const suggestSongs = onCall(
   },
 )
 
-export const commitPlanItems = onCall(
-  { secrets: [PCO_APP_ID, PCO_SECRET] },
-  async (req) => {
-    requireAllowed(req)
-    const { serviceTypeId, planId, items } = req.data as {
-      serviceTypeId?: string
-      planId?: string
-      items?: NewItem[]
-    }
-    if (!serviceTypeId || !planId || !items?.length) {
-      throw new HttpsError(
-        'invalid-argument',
-        'serviceTypeId, planId, and non-empty items required',
-      )
-    }
-    const client = pco()
-    let created = 0
-    for (const item of items) {
-      await client.createPlanItem(serviceTypeId, planId, item)
-      created += 1
-    }
-    return { created }
-  },
-)
+export const commitPlanItems = onCall(async (req) => {
+  const { uid } = requireAllowed(req)
+  const { serviceTypeId, planId, items } = req.data as {
+    serviceTypeId?: string
+    planId?: string
+    items?: NewItem[]
+  }
+  if (!serviceTypeId || !planId || !items?.length) {
+    throw new HttpsError(
+      'invalid-argument',
+      'serviceTypeId, planId, and non-empty items required',
+    )
+  }
+  const client = await pcoForUser(uid)
+  let created = 0
+  for (const item of items) {
+    await client.createPlanItem(serviceTypeId, planId, item)
+    created += 1
+  }
+  return { created }
+})

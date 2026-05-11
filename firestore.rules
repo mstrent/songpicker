@@ -19,6 +19,13 @@ service cloud.firestore {
       return request.resource.data.ownerEmail == request.auth.token.email;
     }
 
+    // PCO credentials are admin-SDK-only. The savePcoCredentials Cloud
+    // Function writes here; other Cloud Functions read here to act on
+    // behalf of the user. Clients never see these values directly.
+    match /pcoCredentials/{uid} {
+      allow read, write: if false;
+    }
+
     match /sessions/{sessionId} {
       allow read: if signedIn() && ownsExisting();
       allow create: if signedIn() && ownsIncoming();
