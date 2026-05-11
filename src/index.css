@@ -552,7 +552,23 @@ textarea {
 .plan-detail .plan-body {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  /* Single-column mode: plan-left / plan-right are display: contents so
+     their children flatten into this flex container — this gap then is
+     the inter-section spacing. */
+  gap: 0.4rem;
+}
+.plan-detail .plan-left,
+.plan-detail .plan-right {
+  display: contents;
+}
+/* In single-column mode push the rejected pool and the AI debug panel
+   to the very bottom of the page, after the candidates list. Both live
+   in plan-left in the DOM (so they stay with the form in two-column
+   mode), but on narrow viewports the reading flow wants candidates
+   before these inspection panels. */
+.plan-detail .rejected-pool,
+.plan-detail .ai-debug {
+  order: 1;
 }
 
 @media (min-width: 960px) {
@@ -565,14 +581,19 @@ textarea {
     gap: 1.5rem;
     align-items: start;
   }
-}
-
-.plan-detail .plan-left,
-.plan-detail .plan-right {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  min-width: 0;
+  .plan-detail .plan-left,
+  .plan-detail .plan-right {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    min-width: 0;
+  }
+  /* Two-column mode: keep natural DOM order — rejected pool + AI debug
+     panel sit at the bottom of the left column. */
+  .plan-detail .rejected-pool,
+  .plan-detail .ai-debug {
+    order: unset;
+  }
 }
 
 /* Suggest section uses the same shape as Service Order / AI Candidates:
