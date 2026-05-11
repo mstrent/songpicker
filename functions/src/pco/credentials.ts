@@ -15,7 +15,7 @@ export async function loadPcoCredentials(uid: string): Promise<{ appId: string; 
   if (!snap.exists) {
     throw new HttpsError(
       'failed-precondition',
-      'PCO credentials not set. Add them from the songpicker setup screen.',
+      'Planning Center credentials not set. Add them from the songpicker setup screen.',
     )
   }
   const data = snap.data() as { appId?: unknown; secret?: unknown } | undefined
@@ -26,7 +26,7 @@ export async function loadPcoCredentials(uid: string): Promise<{ appId: string; 
     !data.appId ||
     !data.secret
   ) {
-    throw new HttpsError('failed-precondition', 'PCO credentials malformed; please re-enter.')
+    throw new HttpsError('failed-precondition', 'Planning Center credentials malformed; please re-enter.')
   }
   return { appId: data.appId, secret: data.secret }
 }

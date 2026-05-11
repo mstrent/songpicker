@@ -139,7 +139,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           rel="noopener noreferrer"
           title="Open in Planning Center"
         >
-          Open in PCO ↗
+          Open in Planning Center ↗
         </a>
       </div>
       <div className="meta">
@@ -214,7 +214,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           </ul>
         </section>
       ) : (
-        <p className="muted">No plan notes set in PCO.</p>
+        <p className="muted">No plan notes set in Planning Center.</p>
       )}
 
       <section className="criteria">
@@ -303,7 +303,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                   </div>
                   <div className="cstatus">
                     {c.status === 'checking' && (
-                      <span className="badge checking">checking PCO…</span>
+                      <span className="badge checking">checking library…</span>
                     )}
                     {matched && (
                       <>

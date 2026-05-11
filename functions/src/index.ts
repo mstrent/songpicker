@@ -58,7 +58,7 @@ export const savePcoCredentials = onCall(async (req) => {
   } catch (e) {
     throw new HttpsError(
       'failed-precondition',
-      `PCO rejected those credentials: ${(e as Error).message}`,
+      `Planning Center rejected those credentials: ${(e as Error).message}`,
     )
   }
   await savePcoCredentialsForUser(uid, appId.trim(), secret.trim())

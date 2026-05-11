@@ -60,7 +60,7 @@ export class PcoClient {
     })
     if (!res.ok) {
       const body = await res.text()
-      throw new Error(`PCO ${res.status} ${path}: ${body.slice(0, 500)}`)
+      throw new Error(`Planning Center ${res.status} ${path}: ${body.slice(0, 500)}`)
     }
     return res.json() as Promise<T>
   }
