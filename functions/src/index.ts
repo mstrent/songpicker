@@ -46,9 +46,13 @@ export const listPlans = onCall(
       ? all.filter((p) => p.serviceTypeName != null && allowed.includes(p.serviceTypeName))
       : all
 
-    // Enrich each plan with everyone on its roster (name + email + position
+    // Enrich each plan with its worship-team roster (name + email + position
     // + team) so the SPA can do both the "led by …" display and the
-    // "you're serving / leading" highlight without further server calls.
+    // "you're serving / leading" highlights without further server calls.
+    // Scoped to worship team only — songpicker's whole job is worship songs,
+    // so other rosters (tech, kids, greeters) are noise here. Matches any
+    // team name containing "worship" (case-insensitive) so "Worship Team",
+    // "Worship Band", etc. all qualify.
     // Parallel fetch keeps total latency ~one PCO round-trip even with N
     // plans; per-plan failures are swallowed so one bad plan doesn't blank
     // the whole list.
@@ -59,6 +63,7 @@ export const listPlans = onCall(
           const teamMembers = people
             .filter((pp) => pp.status !== 'D')
             .filter((pp): pp is typeof pp & { name: string } => !!pp.name)
+            .filter((pp) => /worship/i.test(pp.team ?? ''))
             .map((pp) => ({
               name: pp.name,
               email: pp.email,
