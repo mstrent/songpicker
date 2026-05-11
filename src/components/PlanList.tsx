@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { listPlans, type Plan } from '../lib/api'
+import { namesMatch } from '../lib/names'
 
 interface Props {
   currentUserName: string | null
@@ -19,16 +20,14 @@ export function PlanList({ currentUserName }: Props) {
   if (!plans) return <div>Loading plans…</div>
   if (plans.length === 0) return <div>No upcoming plans found.</div>
 
-  const me = currentUserName?.trim().toLowerCase() ?? ''
-
   return (
     <ul className="plans">
       {plans.map((p) => {
         const heading = p.title || p.seriesTitle || '(no title)'
         const sub = p.title && p.seriesTitle ? p.seriesTitle : null
-        const ledByMe =
-          me.length > 0 &&
-          (p.worshipLeaders ?? []).some((n) => n.trim().toLowerCase() === me)
+        const ledByMe = (p.worshipLeaders ?? []).some((n) =>
+          namesMatch(n, currentUserName),
+        )
         return (
           <li key={`${p.serviceTypeId}/${p.id}`}>
             <a
