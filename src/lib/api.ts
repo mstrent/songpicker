@@ -43,7 +43,7 @@ export const listPlans = httpsCallable<void, { plans: Plan[] }>(functions, 'list
 
 export const getPlanContext = httpsCallable<
   { serviceTypeId: string; planId: string },
-  { notes: PlanNote[] }
+  { plan: Plan; notes: PlanNote[] }
 >(functions, 'getPlanContext')
 
 export const searchSongs = httpsCallable<{ query: string }, { songs: Song[] }>(

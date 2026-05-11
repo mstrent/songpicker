@@ -17,15 +17,21 @@ export function PlanList() {
 
   return (
     <ul className="plans">
-      {plans.map((p) => (
-        <li key={p.id}>
-          <div className="title">{p.title || '(untitled)'}</div>
-          {p.seriesTitle && <div className="series">{p.seriesTitle}</div>}
-          {p.sortDate && (
-            <div className="date">{new Date(p.sortDate).toLocaleDateString()}</div>
-          )}
-        </li>
-      ))}
+      {plans.map((p) => {
+        const heading = p.title || p.seriesTitle || '(no title)'
+        const sub = p.title && p.seriesTitle ? p.seriesTitle : null
+        return (
+          <li key={`${p.serviceTypeId}/${p.id}`}>
+            <a className="plan-link" href={`#plan/${p.serviceTypeId}/${p.id}`}>
+              <div className="title">{heading}</div>
+              {sub && <div className="series">{sub}</div>}
+              {p.sortDate && (
+                <div className="date">{new Date(p.sortDate).toLocaleDateString()}</div>
+              )}
+            </a>
+          </li>
+        )
+      })}
     </ul>
   )
 }

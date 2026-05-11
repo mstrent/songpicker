@@ -50,8 +50,12 @@ export const getPlanContext = onCall(
     if (!serviceTypeId || !planId) {
       throw new HttpsError('invalid-argument', 'serviceTypeId and planId required')
     }
-    const notes = await pco().getPlanNotes(serviceTypeId, planId)
-    return { notes }
+    const client = pco()
+    const [plan, notes] = await Promise.all([
+      client.getPlan(serviceTypeId, planId),
+      client.getPlanNotes(serviceTypeId, planId),
+    ])
+    return { plan, notes }
   },
 )
 

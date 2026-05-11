@@ -87,6 +87,24 @@ export class PcoClient {
     return all.flat().sort((a, b) => (a.sortDate ?? '').localeCompare(b.sortDate ?? ''))
   }
 
+  async getPlan(serviceTypeId: string, planId: string): Promise<Plan> {
+    const json = await this.fetch<
+      JsonApiResponse<{
+        title: string | null
+        series_title: string | null
+        sort_date: string | null
+      }>
+    >(`/service_types/${serviceTypeId}/plans/${planId}`)
+    const d = Array.isArray(json.data) ? json.data[0] : json.data
+    return {
+      id: d.id,
+      serviceTypeId,
+      title: d.attributes.title,
+      seriesTitle: d.attributes.series_title,
+      sortDate: d.attributes.sort_date,
+    }
+  }
+
   async getPlanNotes(serviceTypeId: string, planId: string): Promise<PlanNote[]> {
     const json = await this.fetch<JsonApiResponse<{ content: string }>>(
       `/service_types/${serviceTypeId}/plans/${planId}/notes?include=plan_note_category&per_page=100`,
@@ -108,7 +126,9 @@ export class PcoClient {
   }
 
   async searchSongs(query: string): Promise<Song[]> {
-    const params = new URLSearchParams({ 'where[title]': query, per_page: '25' })
+    // `q` is PCO's free-text search (matches title/author/themes loosely);
+    // falls back to listing all songs if PCO ignores it for this endpoint.
+    const params = new URLSearchParams({ q: query, per_page: '25' })
     const json = await this.fetch<
       JsonApiResponse<{
         title: string
