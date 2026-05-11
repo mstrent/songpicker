@@ -607,6 +607,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     // Capture the slot's title BEFORE we overwrite it with the song
     // name, so a later clear can restore it.
     const priorSlotTitle = slot?.title ?? ''
+    const slotTitle = slot?.title ?? 'slot'
     try {
       await commitSlot({
         serviceTypeId,
@@ -617,6 +618,17 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         // what its web UI does on song-link).
         songTitle: c.song.title,
       })
+      // Refresh the service order FIRST so items show the slot as
+      // filled before we mark the candidate as committed. Doing the
+      // setCandidates(committed) call before this refresh let the
+      // reconciliation effect see new-candidates-against-old-items,
+      // mistake the commit for stale, and immediately reset
+      // committedAt back to null. Batching both setItems and
+      // setCandidates after the refresh resolves keeps state in
+      // sync within a single render.
+      invalidatePlanContext(serviceTypeId, planId)
+      const fresh = await loadPlanContext(serviceTypeId, planId)
+      setItems(fresh.items)
       setCandidates((prev) =>
         prev.map((x) =>
           x.id === c.id
@@ -624,13 +636,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             : x,
         ),
       )
-      appendSystemMessage(
-        `↗ Committed “${c.suggestion.title}” → ${slot?.title ?? 'slot'}`,
-      )
-      // Refresh service order so the slot flips from empty to filled.
-      invalidatePlanContext(serviceTypeId, planId)
-      const fresh = await loadPlanContext(serviceTypeId, planId)
-      setItems(fresh.items)
+      appendSystemMessage(`↗ Committed “${c.suggestion.title}” → ${slotTitle}`)
     } catch (e) {
       setGenerateError((e as Error).message)
     }
