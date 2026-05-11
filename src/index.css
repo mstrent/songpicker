@@ -927,36 +927,49 @@ textarea {
 .structure-prompt summary {
   cursor: pointer;
   font-size: 0.9rem;
-  color: var(--muted);
-  padding: 0.5rem 0.85rem;
-  border: 1px dashed var(--border);
-  border-radius: 8px;
+  color: var(--fg);
+  padding: 0.5rem 0.95rem;
+  border-radius: 999px;
   user-select: none;
   list-style: none;
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-soft-2);
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 .structure-prompt summary::-webkit-details-marker {
   display: none;
 }
 .structure-prompt summary:hover {
-  color: var(--fg);
-  border-color: var(--border-strong);
-  background: var(--surface);
+  background: var(--accent-soft-2);
+  border-color: var(--accent);
 }
 .structure-prompt summary .chevron {
   display: inline-block;
   transition: transform 0.15s ease;
   font-size: 0.85em;
+  color: var(--accent);
 }
 .structure-prompt[open] summary .chevron {
   transform: rotate(90deg);
+}
+.structure-prompt summary .gradient-text {
+  font-weight: 600;
 }
 .structure-prompt .source-tag {
   font-size: 0.75rem;
   color: var(--muted);
   font-style: italic;
+  padding-left: 0.35rem;
+  border-left: 1px solid var(--border-strong);
+  margin-left: 0.2rem;
+}
+.structure-prompt .help {
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin: 0;
 }
 .structure-prompt .body {
   margin-top: 0.75rem;

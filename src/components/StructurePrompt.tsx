@@ -71,10 +71,11 @@ export function StructurePrompt({ planId }: Props) {
 
   if (!config) {
     return (
-      <details className="structure-prompt">
+      <details className="structure-prompt ai-affordance">
         <summary>
           <span className="chevron" aria-hidden>▸</span>
-          <span>Service flow</span>
+          <span className="sparkle" aria-hidden>✨</span>
+          <span className="gradient-text">AI service-flow prompt</span>
         </summary>
         <div className="body">Loading…</div>
       </details>
@@ -85,13 +86,19 @@ export function StructurePrompt({ planId }: Props) {
   const hasPlanOverride = !!config.planOverride.trim()
 
   return (
-    <details className="structure-prompt">
+    <details className="structure-prompt ai-affordance">
       <summary>
         <span className="chevron" aria-hidden>▸</span>
-        <span>Service flow</span>
+        <span className="sparkle" aria-hidden>✨</span>
+        <span className="gradient-text">AI service-flow prompt</span>
         <span className="source-tag">{sourceLabel(config.effective.source)}</span>
       </summary>
       <div className="body">
+        <p className="help">
+          Extra context the AI receives on every Suggest call, shaping how
+          songs are distributed across the service (opener, mid-service,
+          closer, etc.).
+        </p>
         <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
