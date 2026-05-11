@@ -91,10 +91,40 @@ export const searchSongs = httpsCallable<{ query: string }, { songs: Song[] }>(
   'searchSongs',
 )
 
+export type StructureSource = 'plan' | 'user' | 'system'
+
 export const suggestSongs = httpsCallable<
-  { theme: string; criteria: string; exclude?: string[]; count?: number },
-  { suggestions: SongSuggestion[]; provider: string; debug: AiDebug }
+  {
+    theme: string
+    criteria: string
+    exclude?: string[]
+    count?: number
+    planId?: string
+  },
+  {
+    suggestions: SongSuggestion[]
+    provider: string
+    debug: AiDebug
+    structureSource: StructureSource
+  }
 >(functions, 'suggestSongs')
+
+export interface PromptConfig {
+  systemDefault: string
+  userDefault: string
+  planOverride: string
+  effective: { value: string; source: StructureSource }
+}
+
+export const getPromptConfig = httpsCallable<{ planId?: string }, PromptConfig>(
+  functions,
+  'getPromptConfig',
+)
+
+export const savePromptConfig = httpsCallable<
+  { scope: 'default' | 'plan'; planId?: string; value: string },
+  { ok: boolean; systemDefault: string }
+>(functions, 'savePromptConfig')
 
 export const commitPlanItems = httpsCallable<
   { serviceTypeId: string; planId: string; items: CommitItem[] },

@@ -7,6 +7,7 @@ export interface SongSuggestion {
 export interface SuggestRequest {
   theme: string
   criteria: string
+  structurePrompt?: string
   exclude?: string[]
   count?: number
 }

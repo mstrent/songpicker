@@ -26,6 +26,14 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Per-user prompt config (default structure prompt + per-plan overrides).
+    // Read/write through Cloud Functions only, like pcoCredentials, so the
+    // SPA goes through the typed savePromptConfig callable rather than
+    // touching Firestore directly.
+    match /userPrompts/{uid} {
+      allow read, write: if false;
+    }
+
     match /sessions/{sessionId} {
       allow read: if signedIn() && ownsExisting();
       allow create: if signedIn() && ownsIncoming();

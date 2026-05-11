@@ -12,6 +12,14 @@ import {
 import { countSongs } from './pco/songSlots'
 import type { NewItem } from './pco/types'
 import {
+  clearPlanOverride,
+  DEFAULT_STRUCTURE_PROMPT,
+  loadPromptConfig,
+  resolveStructurePrompt,
+  savePlanOverride,
+  saveUserDefault,
+} from './prompts'
+import {
   AI_PROVIDER,
   ALLOWED_EMAIL,
   ANTHROPIC_API_KEY,
@@ -152,12 +160,13 @@ export const searchSongs = onCall(async (req) => {
 export const suggestSongs = onCall(
   { secrets: [ANTHROPIC_API_KEY, GEMINI_API_KEY] },
   async (req) => {
-    requireAllowed(req)
-    const { theme, criteria, exclude, count } = req.data as {
+    const { uid } = requireAllowed(req)
+    const { theme, criteria, exclude, count, planId } = req.data as {
       theme?: string
       criteria?: string
       exclude?: string[]
       count?: number
+      planId?: string
     }
     if (!theme) throw new HttpsError('invalid-argument', 'theme required')
 
@@ -176,16 +185,64 @@ export const suggestSongs = onCall(
           `Provider "${provider}" not wired. Bind its secret in suggestSongs and add a case here.`,
         )
     }
+
+    const promptConfig = await loadPromptConfig(uid)
+    const resolved = resolveStructurePrompt(promptConfig, planId)
+
     const ai = getAiProvider(provider, apiKey)
     const result = await ai.suggestSongs({
       theme,
       criteria: criteria ?? '',
+      structurePrompt: resolved.value,
       exclude,
       count,
     })
-    return { suggestions: result.suggestions, debug: result.debug, provider }
+    return {
+      suggestions: result.suggestions,
+      debug: result.debug,
+      provider,
+      structureSource: resolved.source,
+    }
   },
 )
+
+export const getPromptConfig = onCall(async (req) => {
+  const { uid } = requireAllowed(req)
+  const { planId } = req.data as { planId?: string }
+  const config = await loadPromptConfig(uid)
+  return {
+    systemDefault: config.systemDefault,
+    userDefault: config.userDefault,
+    planOverride: planId ? (config.byPlan[planId] ?? '') : '',
+    effective: resolveStructurePrompt(config, planId),
+  }
+})
+
+export const savePromptConfig = onCall(async (req) => {
+  const { uid } = requireAllowed(req)
+  const { scope, planId, value } = req.data as {
+    scope?: 'default' | 'plan'
+    planId?: string
+    value?: string
+  }
+  if (scope !== 'default' && scope !== 'plan') {
+    throw new HttpsError('invalid-argument', 'scope must be "default" or "plan"')
+  }
+  if (typeof value !== 'string') {
+    throw new HttpsError('invalid-argument', 'value (string) required')
+  }
+  if (scope === 'default') {
+    await saveUserDefault(uid, value)
+  } else {
+    if (!planId) throw new HttpsError('invalid-argument', 'planId required for scope "plan"')
+    if (value.trim()) {
+      await savePlanOverride(uid, planId, value)
+    } else {
+      await clearPlanOverride(uid, planId)
+    }
+  }
+  return { ok: true, systemDefault: DEFAULT_STRUCTURE_PROMPT }
+})
 
 export const commitPlanItems = onCall(async (req) => {
   const { uid } = requireAllowed(req)

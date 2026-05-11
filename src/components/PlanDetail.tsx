@@ -12,6 +12,7 @@ import {
 } from '../lib/api'
 import { isSongSlot } from '../lib/songSlots'
 import { praiseChartsSearchUrl, spotifySearchUrl } from '../lib/searchLinks'
+import { StructurePrompt } from './StructurePrompt'
 
 interface CandidateMatch {
   suggestion: SongSuggestion
@@ -74,7 +75,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setGenerateError(null)
     try {
       const exclude = candidates.map((c) => c.suggestion.title)
-      const res = await suggestSongs({ theme, criteria, exclude, count })
+      const res = await suggestSongs({ theme, criteria, exclude, count, planId })
       setProvider(res.data.provider)
       setDebug(res.data.debug ?? null)
 
@@ -236,6 +237,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       ) : (
         <p className="muted">No plan notes set in Planning Center.</p>
       )}
+
+      <StructurePrompt planId={planId} />
 
       <section className="criteria">
         <h3>Suggest songs</h3>

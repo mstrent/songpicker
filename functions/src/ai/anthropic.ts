@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { buildUserMessage } from './userMessage'
 import type { AiProvider, SongSuggestion, SuggestRequest, SuggestResult } from './types'
 
 const SYSTEM_PROMPT = `You suggest contemporary worship songs for a church service.
@@ -18,12 +19,7 @@ export class AnthropicProvider implements AiProvider {
   }
 
   async suggestSongs(req: SuggestRequest): Promise<SuggestResult> {
-    const count = req.count ?? 8
-    const exclude = req.exclude?.length
-      ? `\n\nDo NOT suggest any of these (already considered): ${req.exclude.join(', ')}`
-      : ''
-    const userMessage = `Theme: ${req.theme}\nCriteria: ${req.criteria || '(none)'}\nReturn ${count} suggestions.${exclude}`
-
+    const userMessage = buildUserMessage(req)
     const res = await this.client.messages.create({
       model: MODEL,
       max_tokens: 2000,
