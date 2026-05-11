@@ -39,6 +39,14 @@ export default function App() {
 
   const planMatch = hash.match(/^#plan\/([^/]+)\/([^/]+)$/)
 
+  // Some Firebase setups end up with user.displayName=null even when Google
+  // provides a name via providerData. Fall through to the provider record.
+  const leaderName =
+    user.displayName ||
+    user.providerData.find((p) => p.providerId === 'google.com')?.displayName ||
+    user.providerData[0]?.displayName ||
+    ''
+
   return (
     <div className="app">
       <header>
@@ -55,6 +63,7 @@ export default function App() {
         </h1>
         <div className="who">
           <span className="email">{user.email}</span>
+          {leaderName && <span className="leader-as">as {leaderName}</span>}
           <button onClick={() => logOut()}>Sign out</button>
         </div>
       </header>
@@ -64,7 +73,7 @@ export default function App() {
         ) : (
           <>
             <h2>Upcoming plans</h2>
-            <PlanList currentUserName={user.displayName} />
+            <PlanList currentUserName={leaderName} />
           </>
         )}
       </main>

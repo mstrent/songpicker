@@ -163,6 +163,9 @@ textarea {
 .app header .who .email {
   font-variant-numeric: tabular-nums;
 }
+.app header .who .leader-as {
+  font-style: italic;
+}
 .app header .who button {
   background: transparent;
   color: var(--muted);
