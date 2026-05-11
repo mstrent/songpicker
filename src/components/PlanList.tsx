@@ -27,6 +27,10 @@ export function PlanList({ currentUserName, currentUserEmail }: Props) {
     (myEmail.length > 0 && m.email != null && m.email.toLowerCase() === myEmail) ||
     namesMatch(m.name, currentUserName)
 
+  const todayMidnight = new Date()
+  todayMidnight.setHours(0, 0, 0, 0)
+  const todayTs = todayMidnight.getTime()
+
   return (
     <ul className="plans">
       {plans.map((p) => {
@@ -47,10 +51,13 @@ export function PlanList({ currentUserName, currentUserEmail }: Props) {
             )
           : []
         const stateClass = ledByMe ? ' led-by-me' : onTeam ? ' on-team' : ''
+        const past = !!(
+          p.sortDate && new Date(p.sortDate).getTime() < todayTs
+        )
         return (
           <li key={`${p.serviceTypeId}/${p.id}`}>
             <a
-              className={`plan-link${stateClass}`}
+              className={`plan-link${stateClass}${past ? ' past' : ''}`}
               href={`#plan/${p.serviceTypeId}/${p.id}`}
             >
               {ledByMe && <span className="me-flag">You're leading</span>}

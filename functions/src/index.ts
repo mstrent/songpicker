@@ -41,7 +41,9 @@ export const listPlans = onCall(
       .map((s) => s.trim())
       .filter(Boolean)
     const client = pco()
-    const all = await client.listAllUpcomingPlans()
+    // 4 past plans per service type (~1 month of weekly services) gives
+    // recent-history context alongside the upcoming list.
+    const all = await client.listAllPlans({ past: 4, future: 10 })
     const filtered = allowed.length
       ? all.filter((p) => p.serviceTypeName != null && allowed.includes(p.serviceTypeName))
       : all

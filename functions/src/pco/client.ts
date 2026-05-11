@@ -75,12 +75,12 @@ export class PcoClient {
 
   async listPlans(
     serviceType: ServiceType,
-    opts: { future?: boolean; perPage?: number } = {},
+    opts: { filter?: 'future' | 'past'; perPage?: number; order?: string } = {},
   ): Promise<Plan[]> {
     const params = new URLSearchParams()
-    if (opts.future) params.set('filter', 'future')
+    if (opts.filter) params.set('filter', opts.filter)
     params.set('per_page', String(opts.perPage ?? 10))
-    params.set('order', 'sort_date')
+    params.set('order', opts.order ?? 'sort_date')
 
     const json = await this.fetch<
       JsonApiResponse<{
@@ -101,12 +101,31 @@ export class PcoClient {
     }))
   }
 
-  async listAllUpcomingPlans(): Promise<Plan[]> {
+  async listAllPlans(
+    opts: { past?: number; future?: number } = {},
+  ): Promise<Plan[]> {
     const types = await this.listServiceTypes()
-    const all = await Promise.all(
-      types.map((t) => this.listPlans(t, { future: true, perPage: 10 })),
+    const future = opts.future ?? 10
+    const past = opts.past ?? 0
+
+    const futureFetches = types.map((t) =>
+      this.listPlans(t, { filter: 'future', perPage: future, order: 'sort_date' }),
     )
-    return all.flat().sort((a, b) => (a.sortDate ?? '').localeCompare(b.sortDate ?? ''))
+    const pastFetches =
+      past > 0
+        ? types.map((t) =>
+            this.listPlans(t, { filter: 'past', perPage: past, order: '-sort_date' }),
+          )
+        : []
+
+    const [futureResults, pastResults] = await Promise.all([
+      Promise.all(futureFetches),
+      Promise.all(pastFetches),
+    ])
+
+    return [...pastResults.flat(), ...futureResults.flat()].sort((a, b) =>
+      (a.sortDate ?? '').localeCompare(b.sortDate ?? ''),
+    )
   }
 
   async getPlan(serviceTypeId: string, planId: string): Promise<Plan> {

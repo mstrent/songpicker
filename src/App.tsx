@@ -71,7 +71,7 @@ export default function App() {
           <PlanDetail serviceTypeId={planMatch[1]} planId={planMatch[2]} />
         ) : (
           <>
-            <h2>Upcoming plans</h2>
+            <h2>Recent and upcoming</h2>
             <PlanList currentUserName={leaderName} currentUserEmail={user.email} />
           </>
         )}
