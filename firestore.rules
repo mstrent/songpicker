@@ -40,6 +40,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Per-user picker session state per plan (candidate pool, decisions,
+    // future conversation history). Read/write through callables only.
+    match /pickerSessions/{uid}/plans/{planId} {
+      allow read, write: if false;
+    }
+
     match /sessions/{sessionId} {
       allow read: if signedIn() && ownsExisting();
       allow create: if signedIn() && ownsIncoming();

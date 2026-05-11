@@ -892,9 +892,53 @@ textarea {
   padding: 0.85rem 1rem;
   box-shadow: var(--shadow-sm);
 }
-.candidate.matched { border-left: 3px solid var(--success); }
-.candidate.unmatched { border-left: 3px solid var(--warm); }
-.candidate.error { border-left: 3px solid var(--error); }
+.candidate.match-matched { border-left: 3px solid var(--success); }
+.candidate.match-unmatched { border-left: 3px solid var(--warm); }
+.candidate.match-error { border-left: 3px solid var(--error); }
+
+/* Decision states layered on top of the match colour. */
+.candidate.decision-shortlist {
+  background: linear-gradient(90deg, var(--success-soft) 0%, var(--surface) 60%);
+  border-left-width: 5px;
+}
+.candidate.decision-reject {
+  opacity: 0.55;
+}
+.candidate.decision-reject .ctitle {
+  text-decoration: line-through;
+}
+
+.candidate .decision-row {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+.candidate .decision-btn {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border-strong);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.candidate .decision-btn:hover {
+  filter: none;
+}
+.candidate .decision-shortlist:hover,
+.candidate .decision-shortlist.on {
+  background: var(--success-soft);
+  color: var(--success);
+  border-color: var(--success);
+}
+.candidate .decision-reject:hover,
+.candidate .decision-reject.on {
+  background: var(--error-soft);
+  color: var(--error);
+  border-color: var(--error);
+}
 
 .candidate .ctitle {
   font-weight: 600;

@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  loadSession,
+  saveSession,
   savePlanNotes,
   savePlanTheme,
   searchSongs,
   suggestSongs,
   type AiDebug,
+  type Decision,
+  type MatchStatus,
+  type PersistedCandidate,
   type Plan,
   type PlanItem,
   type PlanNote,
+  type SessionMessage,
   type Song,
   type SongSuggestion,
 } from '../lib/api'
@@ -17,10 +23,72 @@ import { praiseChartsSearchUrl, spotifySearchUrl } from '../lib/searchLinks'
 import { PromptEditor } from './PromptEditor'
 
 interface CandidateMatch {
+  id: string
   suggestion: SongSuggestion
-  status: 'checking' | 'matched' | 'unmatched' | 'error'
+  matchStatus: MatchStatus
   song?: Song
   error?: string
+  decision: Decision
+  addedAt: number
+}
+
+function newCandidateId(): string {
+  // crypto.randomUUID is on every modern browser; fall back just in case.
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID()
+  }
+  return `c_${Date.now()}_${Math.random().toString(36).slice(2)}`
+}
+
+function toPersisted(c: CandidateMatch): PersistedCandidate {
+  return {
+    id: c.id,
+    title: c.suggestion.title,
+    author: c.suggestion.author ?? null,
+    reasoning: c.suggestion.reasoning ?? null,
+    slots: c.suggestion.slots ?? [],
+    matchStatus:
+      c.matchStatus === 'checking' ? 'unmatched' : c.matchStatus, // pending lookups are saved as unmatched
+    song: c.song
+      ? {
+          id: c.song.id,
+          title: c.song.title,
+          lastScheduledAt: c.song.lastScheduledAt,
+          lastScheduledShortDates: c.song.lastScheduledShortDates,
+        }
+      : null,
+    error: c.error ?? null,
+    decision: c.decision,
+    addedAt: c.addedAt,
+  }
+}
+
+function fromPersisted(p: PersistedCandidate): CandidateMatch {
+  return {
+    id: p.id,
+    suggestion: {
+      title: p.title,
+      author: p.author ?? undefined,
+      reasoning: p.reasoning ?? undefined,
+      slots: p.slots,
+    },
+    matchStatus: p.matchStatus,
+    song: p.song
+      ? {
+          id: p.song.id,
+          title: p.song.title,
+          author: null,
+          ccliNumber: null,
+          themes: null,
+          isHidden: false,
+          lastScheduledAt: p.song.lastScheduledAt,
+          lastScheduledShortDates: p.song.lastScheduledShortDates,
+        }
+      : undefined,
+    error: p.error ?? undefined,
+    decision: p.decision,
+    addedAt: p.addedAt,
+  }
 }
 
 interface Props {
@@ -43,6 +111,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   const [generating, setGenerating] = useState(false)
   const [generateError, setGenerateError] = useState<string | null>(null)
   const [candidates, setCandidates] = useState<CandidateMatch[]>([])
+  const [messages, setMessages] = useState<SessionMessage[]>([])
+  const [sessionLoaded, setSessionLoaded] = useState(false)
   const [provider, setProvider] = useState<string | null>(null)
   const [debug, setDebug] = useState<AiDebug | null>(null)
 
@@ -68,6 +138,23 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     countInitialized.current = false
     userTouchedTheme.current = false
     userTouchedNotes.current = false
+
+    setCandidates([])
+    setMessages([])
+    setSessionLoaded(false)
+    setProvider(null)
+    setDebug(null)
+
+    // Load the persisted candidate pool + future chat history for this plan.
+    // Survives page refreshes and lets iteration span multiple sittings.
+    loadSession({ planId })
+      .then((res) => {
+        if (cancelled) return
+        setCandidates(res.data.candidates.map(fromPersisted))
+        setMessages(res.data.messages)
+        setSessionLoaded(true)
+      })
+      .catch(() => !cancelled && setSessionLoaded(true))
 
     loadPlanContext(serviceTypeId, planId)
       .then((ctx) => {
@@ -101,6 +188,20 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       cancelled = true
     }
   }, [serviceTypeId, planId])
+
+  // Debounced auto-save: persists candidate pool + messages ~700ms after
+  // the latest change. Only fires once the session has finished loading
+  // so we don't blow away unread state with an empty array.
+  useEffect(() => {
+    if (!sessionLoaded) return
+    const id = setTimeout(() => {
+      void saveSession({
+        planId,
+        session: { candidates: candidates.map(toPersisted), messages },
+      }).catch(() => {})
+    }, 700)
+    return () => clearTimeout(id)
+  }, [candidates, messages, sessionLoaded, planId])
 
   // Debounced auto-save: persists theme/notes ~600ms after the last keystroke.
   // Saving '' when the value matches the PCO source keeps storage tidy (no
@@ -140,7 +241,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       void savePlanNotes({ planId, notes: notesText }).catch(() => {})
 
       // Also exclude already-picked songs in the plan so the AI doesn't
-      // re-suggest what's already filled in.
+      // re-suggest what's already filled in. Rejected candidates are
+      // explicitly fed back so the model knows we said "not that one".
+      const rejected = candidates.filter((c) => c.decision === 'reject')
       const exclude = [
         ...candidates.map((c) => c.suggestion.title),
         ...(items ?? [])
@@ -150,7 +253,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       const serviceOrder = buildServiceOrderText(items)
       const res = await suggestSongs({
         theme,
-        criteria,
+        criteria: criteria + (rejected.length > 0
+          ? `\n\nAvoid suggestions similar to these (the user already rejected them): ${rejected.map((c) => c.suggestion.title).join(', ')}`
+          : ''),
         exclude,
         count,
         planId,
@@ -160,30 +265,37 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       setProvider(res.data.provider)
       setDebug(res.data.debug ?? null)
 
-      const startIndex = candidates.length
+      const now = Date.now()
       const newOnes: CandidateMatch[] = res.data.suggestions.map((s) => ({
+        id: newCandidateId(),
         suggestion: s,
-        status: 'checking',
+        matchStatus: 'checking',
+        decision: 'pending',
+        addedAt: now,
       }))
       setCandidates((prev) => [...prev, ...newOnes])
 
-      newOnes.forEach((c, i) => {
-        const idx = startIndex + i
+      newOnes.forEach((c) => {
         searchSongs({ query: c.suggestion.title })
           .then((sr) => {
-            // searchSongs Cloud Function uses PCO's case-insensitive exact
-            // title match (with a parenthetical-stripped retry), so 0 or 1
-            // result; first wins if more.
             const match = sr.data.songs[0]
-            setCandidates((prev) => updateAt(prev, idx, (cur) =>
-              match
-                ? { ...cur, status: 'matched', song: match }
-                : { ...cur, status: 'unmatched' },
-            ))
+            setCandidates((prev) =>
+              prev.map((cur) =>
+                cur.id === c.id
+                  ? match
+                    ? { ...cur, matchStatus: 'matched', song: match }
+                    : { ...cur, matchStatus: 'unmatched' }
+                  : cur,
+              ),
+            )
           })
           .catch((e: Error) => {
             setCandidates((prev) =>
-              updateAt(prev, idx, (cur) => ({ ...cur, status: 'error', error: e.message })),
+              prev.map((cur) =>
+                cur.id === c.id
+                  ? { ...cur, matchStatus: 'error', error: e.message }
+                  : cur,
+              ),
             )
           })
       })
@@ -196,7 +308,18 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
 
   function clearCandidates() {
     setCandidates([])
+    setMessages([])
     setDebug(null)
+  }
+
+  function setDecision(id: string, next: Decision) {
+    setCandidates((prev) =>
+      prev.map((c) =>
+        c.id === id
+          ? { ...c, decision: c.decision === next ? 'pending' : next }
+          : c,
+      ),
+    )
   }
 
   if (loadError) return <div className="error">Error loading plan: {loadError}</div>
@@ -503,10 +626,13 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             {provider && <span className="provider-tag">via {providerLabel(provider)}</span>}
           </h3>
           <ul>
-            {candidates.map((c, i) => {
-              const matched = c.status === 'matched' && c.song
+            {candidates.map((c) => {
+              const matched = c.matchStatus === 'matched' && c.song
               return (
-                <li key={i} className={`candidate ${c.status}`}>
+                <li
+                  key={c.id}
+                  className={`candidate match-${c.matchStatus} decision-${c.decision}`}
+                >
                   <div className="ctitle">
                     {matched ? (
                       <a
@@ -535,7 +661,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     </div>
                   )}
                   <div className="cstatus">
-                    {c.status === 'checking' && (
+                    {c.matchStatus === 'checking' && (
                       <span className="badge checking">checking library…</span>
                     )}
                     {matched && (
@@ -556,7 +682,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                         )}
                       </>
                     )}
-                    {c.status === 'unmatched' && (
+                    {c.matchStatus === 'unmatched' && (
                       <>
                         <span className="badge unmatched">not in library</span>
                         <a
@@ -570,7 +696,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                         </a>
                       </>
                     )}
-                    {c.status === 'error' && (
+                    {c.matchStatus === 'error' && (
                       <span className="badge error" title={c.error}>
                         lookup failed
                       </span>
@@ -591,6 +717,32 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       <span>{c.suggestion.reasoning}</span>
                     </div>
                   )}
+                  <div className="decision-row">
+                    <button
+                      type="button"
+                      className={`decision-btn decision-shortlist${c.decision === 'shortlist' ? ' on' : ''}`}
+                      onClick={() => setDecision(c.id, 'shortlist')}
+                      title={
+                        c.decision === 'shortlist'
+                          ? 'Click again to undo'
+                          : 'Shortlist this song'
+                      }
+                    >
+                      ✓ Shortlist
+                    </button>
+                    <button
+                      type="button"
+                      className={`decision-btn decision-reject${c.decision === 'reject' ? ' on' : ''}`}
+                      onClick={() => setDecision(c.id, 'reject')}
+                      title={
+                        c.decision === 'reject'
+                          ? 'Click again to undo'
+                          : 'Reject this song'
+                      }
+                    >
+                      ✗ Reject
+                    </button>
+                  </div>
                 </li>
               )
             })}
@@ -623,12 +775,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   )
 }
 
-function updateAt<T>(arr: T[], idx: number, fn: (cur: T) => T): T[] {
-  if (!arr[idx]) return arr
-  const next = arr.slice()
-  next[idx] = fn(next[idx])
-  return next
-}
 
 // Render Planning Center plan notes as the editable seed text. Plain
 // newline-separated note content — no category labels (noise) and no

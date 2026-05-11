@@ -29,6 +29,11 @@ import {
   type PromptType,
 } from './prompts'
 import {
+  loadPickerSession,
+  savePickerSession,
+  type PickerSession,
+} from './sessions'
+import {
   ADMIN_EMAILS,
   AI_PROVIDER,
   ALLOWED_EMAIL,
@@ -345,6 +350,25 @@ export const saveAdminPromptConfig = onCall(async (req) => {
     throw new HttpsError('invalid-argument', 'value (string) required')
   }
   await saveAdminDefault(type, value)
+  return { ok: true }
+})
+
+export const loadSession = onCall(async (req) => {
+  const { uid } = requireAllowed(req)
+  const { planId } = req.data as { planId?: string }
+  if (!planId) throw new HttpsError('invalid-argument', 'planId required')
+  return await loadPickerSession(uid, planId)
+})
+
+export const saveSession = onCall(async (req) => {
+  const { uid } = requireAllowed(req)
+  const { planId, session } = req.data as {
+    planId?: string
+    session?: PickerSession
+  }
+  if (!planId) throw new HttpsError('invalid-argument', 'planId required')
+  if (!session) throw new HttpsError('invalid-argument', 'session required')
+  await savePickerSession(uid, planId, session)
   return { ok: true }
 })
 

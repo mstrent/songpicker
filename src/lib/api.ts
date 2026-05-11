@@ -111,6 +111,51 @@ export const savePlanNotes = httpsCallable<
   { ok: boolean }
 >(functions, 'savePlanNotes')
 
+export type MatchStatus = 'checking' | 'matched' | 'unmatched' | 'error'
+export type Decision = 'pending' | 'shortlist' | 'reject'
+
+export interface PersistedSongRef {
+  id: string
+  title: string
+  lastScheduledAt: string | null
+  lastScheduledShortDates: string | null
+}
+
+export interface PersistedCandidate {
+  id: string
+  title: string
+  author: string | null
+  reasoning: string | null
+  slots: string[]
+  matchStatus: MatchStatus
+  song: PersistedSongRef | null
+  error: string | null
+  decision: Decision
+  addedAt: number
+}
+
+export interface SessionMessage {
+  id: string
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  timestamp: number
+}
+
+export interface PickerSession {
+  candidates: PersistedCandidate[]
+  messages: SessionMessage[]
+}
+
+export const loadSession = httpsCallable<{ planId: string }, PickerSession>(
+  functions,
+  'loadSession',
+)
+
+export const saveSession = httpsCallable<
+  { planId: string; session: PickerSession },
+  { ok: boolean }
+>(functions, 'saveSession')
+
 export const searchSongs = httpsCallable<{ query: string }, { songs: Song[] }>(
   functions,
   'searchSongs',
