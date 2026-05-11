@@ -701,6 +701,27 @@ textarea {
   align-items: center;
   gap: 0.5rem;
 }
+
+/* ✨ marker on UI elements whose content is sent to the AI as part of the
+   Suggest context. Subtle but visually consistent with the rest of the
+   AI affordances (gradient sparkle, same icon). */
+.ai-context-marker {
+  display: inline-block;
+  background: var(--ai-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  font-size: 0.85em;
+  cursor: help;
+  line-height: 1;
+}
+.plan-detail .criteria label > span .ai-context-marker {
+  margin-left: 0.15rem;
+}
+.service-order h3 .ai-context-marker {
+  margin-left: 0.4rem;
+}
 .plan-detail .criteria .edited-flag {
   display: inline-block;
   background: var(--warm-soft);

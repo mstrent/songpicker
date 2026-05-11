@@ -203,12 +203,13 @@ export const suggestSongs = onCall(
   { secrets: [ANTHROPIC_API_KEY, GEMINI_API_KEY] },
   async (req) => {
     const { uid } = requireAllowed(req)
-    const { theme, criteria, exclude, count, planId } = req.data as {
+    const { theme, criteria, exclude, count, planId, serviceOrder } = req.data as {
       theme?: string
       criteria?: string
       exclude?: string[]
       count?: number
       planId?: string
+      serviceOrder?: string
     }
     if (!theme) throw new HttpsError('invalid-argument', 'theme required')
 
@@ -239,6 +240,7 @@ export const suggestSongs = onCall(
       criteria: criteria ?? '',
       structurePrompt: structure.effective.value,
       systemPrompt: composeSystemPrompt(role.effective.value),
+      serviceOrder,
       exclude,
       count,
     })

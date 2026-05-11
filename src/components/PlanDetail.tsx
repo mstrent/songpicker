@@ -94,8 +94,23 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       patchCachedTheme(serviceTypeId, planId, theme)
       void savePlanTheme({ planId, theme }).catch(() => {})
 
-      const exclude = candidates.map((c) => c.suggestion.title)
-      const res = await suggestSongs({ theme, criteria, exclude, count, planId })
+      // Also exclude already-picked songs in the plan so the AI doesn't
+      // re-suggest what's already filled in.
+      const exclude = [
+        ...candidates.map((c) => c.suggestion.title),
+        ...(items ?? [])
+          .filter((it) => it.songId && it.songTitle)
+          .map((it) => it.songTitle!),
+      ]
+      const serviceOrder = buildServiceOrderText(items)
+      const res = await suggestSongs({
+        theme,
+        criteria,
+        exclude,
+        count,
+        planId,
+        serviceOrder,
+      })
       setProvider(res.data.provider)
       setDebug(res.data.debug ?? null)
 
@@ -188,7 +203,16 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
 
       {items.length > 0 && (
         <section className="service-order">
-          <h3>Service order</h3>
+          <h3>
+            Service order
+            <span
+              className="ai-context-marker"
+              title="The service order — including which songs are already picked — is part of the context sent to the AI"
+              aria-hidden
+            >
+              ✨
+            </span>
+          </h3>
           <ol>
             {items.map((it) => {
               // Filled = linked to a real song; isSong from shared helper so
@@ -268,6 +292,13 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         <label>
           <span className="theme-label">
             Theme
+            <span
+              className="ai-context-marker"
+              title="Sent to the AI on every Suggest call"
+              aria-hidden
+            >
+              ✨
+            </span>
             {theme.trim() !== themeSource.trim() && (
               <span
                 className="edited-flag"
@@ -285,7 +316,16 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           />
         </label>
         <label>
-          <span>Criteria (mood, tempo, era, must-include, avoid)</span>
+          <span>
+            Criteria (mood, tempo, era, must-include, avoid)
+            <span
+              className="ai-context-marker"
+              title="Sent to the AI on every Suggest call"
+              aria-hidden
+            >
+              ✨
+            </span>
+          </span>
           <textarea
             rows={4}
             value={criteria}
@@ -460,6 +500,24 @@ function updateAt<T>(arr: T[], idx: number, fn: (cur: T) => T): T[] {
   const next = arr.slice()
   next[idx] = fn(next[idx])
   return next
+}
+
+// Render the plan's items as a human-readable list for the AI prompt.
+// Empty song slots get an explicit "(empty — needs a pick)" marker so the
+// model can see exactly which positions in the order need filling.
+function buildServiceOrderText(items: PlanItem[] | null): string {
+  if (!items || items.length === 0) return ''
+  return items
+    .map((it) => {
+      const songSlot = isSongSlot(it)
+      const base = `${it.sequence}. ${it.title || '(no title)'}`
+      if (!songSlot) return base
+      if (it.songId) {
+        return `${base} — picked: ${it.songTitle ?? '(song)'}`
+      }
+      return `${base} — (empty, needs a pick)`
+    })
+    .join('\n')
 }
 
 function providerLabel(name: string): string {

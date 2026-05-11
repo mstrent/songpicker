@@ -12,6 +12,9 @@ export function buildUserMessage(req: SuggestRequest): string {
   if (req.structurePrompt && req.structurePrompt.trim()) {
     parts.push(`Service structure: ${req.structurePrompt.trim()}`)
   }
+  if (req.serviceOrder && req.serviceOrder.trim()) {
+    parts.push(`Current service order:\n${req.serviceOrder.trim()}`)
+  }
   parts.push(`Return at least ${count} suggestions.`)
   if (req.exclude?.length) {
     parts.push(
