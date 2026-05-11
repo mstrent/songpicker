@@ -282,38 +282,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         </section>
       )}
 
-      <section className="notes">
-        <h3>
-          Plan context
-          <span
-            className="ai-context-marker"
-            title="Sent to the AI on every Suggest call"
-            aria-hidden
-          >
-            ✨
-          </span>
-          {notesText.trim() !== notesSource.trim() && (
-            <span
-              className="edited-flag"
-              title={
-                notesSource
-                  ? `Differs from Planning Center notes:\n${notesSource}`
-                  : 'No notes set in Planning Center'
-              }
-            >
-              edited
-            </span>
-          )}
-        </h3>
-        <textarea
-          className="notes-editor"
-          value={notesText}
-          onChange={(e) => setNotesText(e.target.value)}
-          rows={Math.min(8, Math.max(3, notesText.split('\n').length + 1))}
-          placeholder="Sermon theme, scripture, anything else worth flagging to the AI."
-        />
-      </section>
-
       <div className="prompt-editors">
         <PromptEditor type="role" planId={planId} />
         <PromptEditor type="structure" planId={planId} />
@@ -345,6 +313,36 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             value={theme}
             onChange={(e) => setTheme(e.target.value)}
             placeholder="What is the service about?"
+          />
+        </label>
+        <label>
+          <span className="theme-label">
+            Context from service notes
+            <span
+              className="ai-context-marker"
+              title="Sent to the AI on every Suggest call"
+              aria-hidden
+            >
+              ✨
+            </span>
+            {notesText.trim() !== notesSource.trim() && (
+              <span
+                className="edited-flag"
+                title={
+                  notesSource
+                    ? `Differs from Planning Center notes:\n${notesSource}`
+                    : 'No notes set in Planning Center'
+                }
+              >
+                edited
+              </span>
+            )}
+          </span>
+          <textarea
+            rows={Math.min(8, Math.max(3, notesText.split('\n').length + 1))}
+            value={notesText}
+            onChange={(e) => setNotesText(e.target.value)}
+            placeholder="Sermon theme, scripture, anything else worth flagging to the AI."
           />
         </label>
         <label>
@@ -534,14 +532,14 @@ function updateAt<T>(arr: T[], idx: number, fn: (cur: T) => T): T[] {
   return next
 }
 
-// Render Planning Center plan notes as the editable seed text. Same shape
-// the AI eventually receives — bullet list with category prefixes — so
-// the source-of-truth comparison for the "edited" flag is meaningful.
+// Render Planning Center plan notes as the editable seed text. Plain
+// bullet list of note content — category labels ("General", etc.) get
+// dropped because they don't add anything the AI couldn't infer.
 function formatNotesSource(notes: PlanNote[] | null): string {
   if (!notes || notes.length === 0) return ''
   return notes
     .filter((n) => n.content && n.content.trim())
-    .map((n) => `- ${n.category ? `${n.category}: ` : ''}${n.content.trim()}`)
+    .map((n) => `- ${n.content.trim()}`)
     .join('\n')
 }
 
