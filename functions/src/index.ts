@@ -418,10 +418,11 @@ export const commitSlot = onCall(async (req) => {
 
 export const clearSlot = onCall(async (req) => {
   const { uid } = requireAllowed(req)
-  const { serviceTypeId, planId, itemId } = req.data as {
+  const { serviceTypeId, planId, itemId, title } = req.data as {
     serviceTypeId?: string
     planId?: string
     itemId?: string
+    title?: string
   }
   if (!serviceTypeId || !planId || !itemId) {
     throw new HttpsError(
@@ -430,7 +431,7 @@ export const clearSlot = onCall(async (req) => {
     )
   }
   const client = await pcoForUser(uid)
-  await client.clearPlanItemSong(serviceTypeId, planId, itemId)
+  await client.clearPlanItemSong(serviceTypeId, planId, itemId, title)
   return { ok: true }
 })
 

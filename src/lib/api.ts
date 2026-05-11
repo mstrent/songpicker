@@ -136,6 +136,12 @@ export interface PersistedCandidate {
   addedAt: number
   assignedSlotItemId: string | null
   committedAt: number | null
+  /** Title the PCO item had before this candidate was committed to it.
+   *  Captured at commit time so a later "clear" can restore the slot
+   *  title (otherwise it stays as the song name forever). Null on
+   *  uncommitted candidates and on candidates persisted before this
+   *  field existed. */
+  priorSlotTitle: string | null
 }
 
 export interface SessionMessage {
@@ -175,7 +181,16 @@ export const commitSlot = httpsCallable<
 >(functions, 'commitSlot')
 
 export const clearSlot = httpsCallable<
-  { serviceTypeId: string; planId: string; itemId: string },
+  {
+    serviceTypeId: string
+    planId: string
+    itemId: string
+    /** Title to PATCH onto the item alongside clearing the song. Used to
+     *  revert the title that the prior commit overwrote with the song
+     *  name — caller passes the stored prior title or a "Song N"
+     *  fallback. */
+    title?: string
+  },
   { ok: boolean }
 >(functions, 'clearSlot')
 

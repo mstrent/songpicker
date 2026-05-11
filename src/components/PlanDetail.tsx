@@ -55,6 +55,10 @@ interface CandidateMatch {
   addedAt: number
   assignedSlotItemId: string | null
   committedAt: number | null
+  /** Title the slot had right before this candidate was committed. Used
+   *  by clearPickedSlot to restore that title in PCO instead of leaving
+   *  the song name behind. */
+  priorSlotTitle: string | null
 }
 
 function newCandidateId(): string {
@@ -87,6 +91,7 @@ function toPersisted(c: CandidateMatch): PersistedCandidate {
     addedAt: c.addedAt,
     assignedSlotItemId: c.assignedSlotItemId,
     committedAt: c.committedAt,
+    priorSlotTitle: c.priorSlotTitle,
   }
 }
 
@@ -117,6 +122,7 @@ function fromPersisted(p: PersistedCandidate): CandidateMatch {
     addedAt: p.addedAt,
     assignedSlotItemId: p.assignedSlotItemId,
     committedAt: p.committedAt,
+    priorSlotTitle: p.priorSlotTitle ?? null,
   }
 }
 
@@ -367,6 +373,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         addedAt: now,
         assignedSlotItemId: null,
         committedAt: null,
+        priorSlotTitle: null,
       }))
       setCandidates((prev) => [...prev, ...newOnes])
 
@@ -507,24 +514,53 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     )
   }
 
+  // Generate the SPA's fallback slot title for a given song-slot item —
+  // "Song N" where N is its 1-based position among song slots in the
+  // current service order. Used when clearing a committed slot for which
+  // we have no stored prior title (e.g. session candidates were cleared,
+  // or the candidate predates the priorSlotTitle field).
+  function fallbackSlotTitle(itemId: string): string {
+    const songSlotItems = (items ?? []).filter(isSongSlot)
+    const idx = songSlotItems.findIndex((s) => s.id === itemId)
+    return idx >= 0 ? `Song ${idx + 1}` : 'Song'
+  }
+
   async function clearPickedSlot(itemId: string) {
     const slot = (items ?? []).find((it) => it.id === itemId)
     if (!slot || !slot.songId) return
     const clearedSongTitle = slot.songTitle ?? '(song)'
+    // Prefer the title we captured when we committed to this slot;
+    // otherwise fall back to the "Song N" convention so the slot
+    // doesn't keep the song name as its label.
+    const committedCandidate = candidates.find(
+      (c) =>
+        c.assignedSlotItemId === itemId &&
+        c.committedAt != null &&
+        c.priorSlotTitle &&
+        c.priorSlotTitle.trim() !== '',
+    )
+    const restoreTitle =
+      committedCandidate?.priorSlotTitle?.trim() || fallbackSlotTitle(itemId)
     try {
-      await clearSlot({ serviceTypeId, planId, itemId })
+      await clearSlot({ serviceTypeId, planId, itemId, title: restoreTitle })
       // Any candidate that was committed (or just assigned) to this slot
       // should drop back to an uncommitted/unassigned state — the slot
-      // it pointed at no longer holds anything.
+      // it pointed at no longer holds anything. Also clear the captured
+      // priorSlotTitle since the slot's title has now been restored.
       setCandidates((prev) =>
         prev.map((c) =>
           c.assignedSlotItemId === itemId
-            ? { ...c, assignedSlotItemId: null, committedAt: null }
+            ? {
+                ...c,
+                assignedSlotItemId: null,
+                committedAt: null,
+                priorSlotTitle: null,
+              }
             : c,
         ),
       )
       appendSystemMessage(
-        `↶ Cleared "${clearedSongTitle}" from ${slot.title || 'slot'} — the AI will treat this slot as open again`,
+        `↶ Cleared "${clearedSongTitle}" from ${restoreTitle} — the AI will treat this slot as open again`,
       )
       // Refresh the service order so the slot flips back to empty in
       // the SPA (and in the AI's next service-order context).
@@ -539,6 +575,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   async function commitCandidate(c: CandidateMatch) {
     if (!c.assignedSlotItemId || !c.song || c.committedAt) return
     const slot = (items ?? []).find((it) => it.id === c.assignedSlotItemId)
+    // Capture the slot's title BEFORE we overwrite it with the song
+    // name, so a later clear can restore it.
+    const priorSlotTitle = slot?.title ?? ''
     try {
       await commitSlot({
         serviceTypeId,
@@ -551,7 +590,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       })
       setCandidates((prev) =>
         prev.map((x) =>
-          x.id === c.id ? { ...x, committedAt: Date.now() } : x,
+          x.id === c.id
+            ? { ...x, committedAt: Date.now(), priorSlotTitle }
+            : x,
         ),
       )
       appendSystemMessage(

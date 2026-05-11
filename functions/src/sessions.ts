@@ -25,6 +25,10 @@ export interface PersistedCandidate {
   assignedSlotItemId: string | null
   /** Epoch ms when this assignment was successfully committed to PCO. */
   committedAt: number | null
+  /** PCO item title at commit time, before we overwrote it with the
+   *  song name. Lets a later "clear" restore the original slot label
+   *  instead of leaving the song name behind. */
+  priorSlotTitle: string | null
 }
 
 export interface Message {
@@ -76,6 +80,8 @@ function sanitizeCandidate(raw: unknown): PersistedCandidate | null {
     assignedSlotItemId:
       typeof c.assignedSlotItemId === 'string' ? c.assignedSlotItemId : null,
     committedAt: typeof c.committedAt === 'number' ? c.committedAt : null,
+    priorSlotTitle:
+      typeof c.priorSlotTitle === 'string' ? c.priorSlotTitle : null,
   }
 }
 

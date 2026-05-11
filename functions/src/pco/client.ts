@@ -443,22 +443,28 @@ export class PcoClient {
   // Unset both the song and arrangement relationships so the slot reverts
   // to "empty" in Planning Center. Used when the user wants to retry a
   // pick — clearing the slot lets the AI propose new options for that
-  // role on the next Suggest call.
+  // role on the next Suggest call. When `title` is provided it's PATCHed
+  // alongside the cleared relationships so the slot's title reverts (to
+  // the title it had before the song was committed, or to a "Song N"
+  // fallback computed by the caller).
   async clearPlanItemSong(
     serviceTypeId: string,
     planId: string,
     itemId: string,
+    title?: string,
   ): Promise<void> {
-    const body = JSON.stringify({
-      data: {
-        type: 'Item',
-        id: itemId,
-        relationships: {
-          song: { data: null },
-          arrangement: { data: null },
-        },
+    const data: Record<string, unknown> = {
+      type: 'Item',
+      id: itemId,
+      relationships: {
+        song: { data: null },
+        arrangement: { data: null },
       },
-    })
+    }
+    if (title !== undefined) {
+      data.attributes = { title }
+    }
+    const body = JSON.stringify({ data })
     await this.fetch(
       `/service_types/${serviceTypeId}/plans/${planId}/items/${itemId}`,
       { method: 'PATCH', body },
