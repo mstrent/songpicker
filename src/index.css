@@ -657,7 +657,10 @@ textarea {
 }
 
 .plan-detail section {
-  margin: 1.75rem 0;
+  /* The plan-left / plan-right flex containers control inter-section
+     spacing via `gap`; section margins would stack on top of that and
+     inflate the breaks. */
+  margin: 0;
 }
 .plan-detail h3 {
   font-size: 0.78rem;

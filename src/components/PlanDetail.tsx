@@ -933,6 +933,29 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           </details>
         )
       })()}
+
+      {debug && (
+        <details className="ai-debug">
+          <summary>
+            <span className="chevron" aria-hidden>▸</span>
+            <span>Context sent to AI</span>
+          </summary>
+          <div className="debug-body">
+            <div className="debug-row">
+              <span className="debug-label">Model</span>
+              <code>{debug.model}</code>
+            </div>
+            <div className="debug-row">
+              <span className="debug-label">System prompt</span>
+              <pre>{debug.systemPrompt}</pre>
+            </div>
+            <div className="debug-row">
+              <span className="debug-label">User message</span>
+              <pre>{debug.userMessage}</pre>
+            </div>
+          </div>
+        </details>
+      )}
         </div>
 
         <div className="plan-right">
@@ -1170,28 +1193,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             })}
           </ul>
           {/* end candidates list */}
-          {debug && (
-            <details className="ai-debug">
-              <summary>
-                <span className="chevron" aria-hidden>▸</span>
-                <span>Context sent to AI</span>
-              </summary>
-              <div className="debug-body">
-                <div className="debug-row">
-                  <span className="debug-label">Model</span>
-                  <code>{debug.model}</code>
-                </div>
-                <div className="debug-row">
-                  <span className="debug-label">System prompt</span>
-                  <pre>{debug.systemPrompt}</pre>
-                </div>
-                <div className="debug-row">
-                  <span className="debug-label">User message</span>
-                  <pre>{debug.userMessage}</pre>
-                </div>
-              </div>
-            </details>
-          )}
         </section>
         )
       })()}
