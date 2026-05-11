@@ -31,6 +31,17 @@ const COPY: Record<PromptType, Copy> = {
 function sourceLabel(source: PromptSource): string {
   switch (source) {
     case 'plan':
+      return 'this plan'
+    case 'user':
+      return 'yours'
+    case 'system':
+      return 'default'
+  }
+}
+
+function sourceTooltip(source: PromptSource): string {
+  switch (source) {
+    case 'plan':
       return 'Using this plan’s override'
     case 'user':
       return 'Using your saved default'
@@ -110,7 +121,12 @@ export function PromptEditor({ type, planId }: Props) {
         <span className="chevron" aria-hidden>▸</span>
         <span className="sparkle" aria-hidden>✨</span>
         <span className="gradient-text">{copy.label}</span>
-        <span className="source-tag">{sourceLabel(config.effective.source)}</span>
+        <span
+          className="source-tag"
+          title={sourceTooltip(config.effective.source)}
+        >
+          {sourceLabel(config.effective.source)}
+        </span>
       </summary>
       <div className="body">
         <p className="help">{copy.help}</p>

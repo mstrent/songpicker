@@ -624,13 +624,14 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         </section>
       )}
 
-      <div className="prompt-editors">
-        <PromptEditor type="role" planId={planId} />
-        <PromptEditor type="structure" planId={planId} />
-      </div>
-
       <section className="criteria">
-        <h3>Suggest songs</h3>
+        <div className="suggest-header">
+          <h3>Suggest songs</h3>
+          <div className="prompt-editors">
+            <PromptEditor type="role" planId={planId} />
+            <PromptEditor type="structure" planId={planId} />
+          </div>
+        </div>
         <label>
           <span className="theme-label">
             <span>

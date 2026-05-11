@@ -1436,34 +1436,47 @@ textarea {
   color: var(--fg);
 }
 
-/* Prompt editors (collapsed disclosures) */
+/* Prompt editors (collapsed disclosures). Small inline pills shown
+   inside the Suggest card header so they read as form-level AI settings
+   rather than a separate section. */
+
+.suggest-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.25rem;
+}
+.suggest-header h3 {
+  margin: 0;
+}
 
 .prompt-editors {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.6rem;
-  margin: 1.25rem 0;
+  gap: 0.4rem;
 }
 .prompt-editors .structure-prompt {
   margin: 0;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
 }
 
 .structure-prompt {
-  margin: 1.25rem 0;
+  margin: 0;
 }
 .structure-prompt summary {
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.75rem;
   color: var(--fg);
-  padding: 0.5rem 0.95rem;
+  padding: 0.2rem 0.65rem;
   border-radius: 999px;
   user-select: none;
   list-style: none;
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.35rem;
   background: var(--accent-soft);
   border: 1px solid var(--accent-soft-2);
   transition: background 0.15s ease, border-color 0.15s ease;
@@ -1488,12 +1501,13 @@ textarea {
   font-weight: 600;
 }
 .structure-prompt .source-tag {
-  font-size: 0.75rem;
+  font-size: 0.68rem;
   color: var(--muted);
   font-style: italic;
-  padding-left: 0.35rem;
+  padding-left: 0.3rem;
   border-left: 1px solid var(--border-strong);
-  margin-left: 0.2rem;
+  margin-left: 0.1rem;
+  cursor: help;
 }
 .structure-prompt .help {
   color: var(--muted);
