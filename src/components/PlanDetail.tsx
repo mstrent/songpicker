@@ -269,7 +269,12 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                 isSong ? (filled ? ' song-filled' : ' song-empty-slot') : ''
               }`
               const displayTitle = it.title || it.songTitle || ''
-              const showMeta = filled && (it.keyName || it.description || it.notes.length > 0)
+              const showMeta =
+                filled &&
+                (it.keyName ||
+                  it.description ||
+                  it.notes.length > 0 ||
+                  it.leaders.length > 0)
               return (
                 <li key={it.id} className={cls}>
                   <span className="seq">{it.sequence}</span>
@@ -292,11 +297,21 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     )}
                     {showMeta && (
                       <div className="item-meta">
-                        {it.keyName && (
-                          <span className="meta-chip">
-                            Key <strong>{it.keyName}</strong>
-                          </span>
-                        )}
+                        <div className="meta-chips">
+                          {it.keyName && (
+                            <span className="meta-chip">
+                              Key <strong>{it.keyName}</strong>
+                            </span>
+                          )}
+                          {it.leaders.map((leader, i) => (
+                            <span key={i} className="meta-chip leader-chip">
+                              <span className="leader-icon" aria-hidden>
+                                ♪
+                              </span>
+                              {leader}
+                            </span>
+                          ))}
+                        </div>
                         {it.description && (
                           <div className="meta-text">{it.description}</div>
                         )}

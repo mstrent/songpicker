@@ -49,6 +49,7 @@ export interface PlanItem {
   keyName: string | null
   description: string | null
   notes: ItemNote[]
+  leaders: string[]
 }
 
 export interface PlanNote {

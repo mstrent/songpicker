@@ -684,6 +684,53 @@ textarea {
 /* Item-type badges removed — they didn't add signal. The visual styling
    on song slots already distinguishes them from generic items. */
 
+.service-order .item-meta {
+  margin-top: 0.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.service-order .item-meta .meta-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.service-order .item-meta .meta-chip {
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 0.05rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.service-order .item-meta .meta-chip strong {
+  font-weight: 700;
+}
+.service-order .item-meta .leader-chip {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.service-order .item-meta .leader-icon {
+  font-size: 0.9em;
+}
+.service-order .item-meta .meta-text {
+  color: var(--fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.service-order .item-meta .meta-note {
+  border-left: 2px solid var(--border-strong);
+  padding-left: 0.55rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* criteria editor */
 
 .plan-detail .criteria {

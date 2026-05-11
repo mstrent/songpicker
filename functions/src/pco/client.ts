@@ -230,22 +230,53 @@ export class PcoClient {
         description: string | null
       }>
     >(
-      `/service_types/${serviceTypeId}/plans/${planId}/items?include=song,item_notes&order=sequence&per_page=100`,
+      `/service_types/${serviceTypeId}/plans/${planId}/items?include=song,item_notes,item_assignments,item_assignments.assignable&order=sequence&per_page=100`,
     )
     const songTitles = new Map<string, string>()
     const noteContent = new Map<string, string>()
+    // Two-pass over included so we can resolve ItemAssignment -> Person
+    // (or TeamPosition) regardless of arrival order. Persons get their
+    // display name from full_name; TeamPositions fall back to the
+    // position name with a "(position)" marker.
+    const personNames = new Map<string, string>()
+    const teamPositionNames = new Map<string, string>()
+    const assignmentTargets = new Map<
+      string,
+      { type: string; id: string }
+    >()
+
     for (const inc of json.included ?? []) {
       if (inc.type === 'Song') {
         const title = (inc.attributes as { title?: string }).title
         if (title) songTitles.set(inc.id, title)
-      }
-      if (inc.type === 'ItemNote') {
+      } else if (inc.type === 'ItemNote') {
         const a = inc.attributes as { content?: string }
         if (a.content && a.content.trim()) {
           noteContent.set(inc.id, a.content.trim())
         }
+      } else if (inc.type === 'Person') {
+        const a = inc.attributes as {
+          full_name?: string
+          first_name?: string
+          last_name?: string
+          name?: string
+        }
+        const name =
+          a.full_name ??
+          a.name ??
+          [a.first_name, a.last_name].filter(Boolean).join(' ').trim() ??
+          null
+        if (name) personNames.set(inc.id, name)
+      } else if (inc.type === 'TeamPosition') {
+        const name = (inc.attributes as { name?: string }).name
+        if (name) teamPositionNames.set(inc.id, name)
+      } else if (inc.type === 'ItemAssignment') {
+        const assignable = inc.relationships?.assignable?.data
+        const ref = Array.isArray(assignable) ? assignable[0] : assignable
+        if (ref) assignmentTargets.set(inc.id, { type: ref.type, id: ref.id })
       }
     }
+
     const data = Array.isArray(json.data) ? json.data : [json.data]
     return data.map((d) => {
       const songId = firstRefId(d.relationships?.song)
@@ -255,6 +286,26 @@ export class PcoClient {
         .map((r) => noteContent.get(r.id))
         .filter((c): c is string => !!c)
         .map((content) => ({ content }))
+
+      const assignRel = d.relationships?.item_assignments?.data
+      const assignRefs = Array.isArray(assignRel)
+        ? assignRel
+        : assignRel
+          ? [assignRel]
+          : []
+      const leaders = assignRefs
+        .map((r) => assignmentTargets.get(r.id))
+        .filter((t): t is { type: string; id: string } => !!t)
+        .map((t) => {
+          if (t.type === 'Person') return personNames.get(t.id) ?? null
+          if (t.type === 'TeamPosition') {
+            const pos = teamPositionNames.get(t.id)
+            return pos ? `${pos} (position)` : null
+          }
+          return null
+        })
+        .filter((n): n is string => !!n)
+
       const description = d.attributes.description ?? null
       return {
         id: d.id,
@@ -266,6 +317,7 @@ export class PcoClient {
         keyName: d.attributes.key_name ?? null,
         description: description && description.trim() ? description.trim() : null,
         notes,
+        leaders,
       }
     })
   }
