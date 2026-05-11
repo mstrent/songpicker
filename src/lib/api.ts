@@ -54,6 +54,7 @@ export interface SongSuggestion {
   title: string
   author?: string
   reasoning?: string
+  slots?: string[]
 }
 
 export interface AiDebug {

@@ -34,7 +34,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
 
   const [theme, setTheme] = useState('')
   const [criteria, setCriteria] = useState('')
-  const [count, setCount] = useState(8)
+  const [count, setCount] = useState(5)
   const [generating, setGenerating] = useState(false)
   const [generateError, setGenerateError] = useState<string | null>(null)
   const [candidates, setCandidates] = useState<CandidateMatch[]>([])
@@ -42,6 +42,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   const [debug, setDebug] = useState<AiDebug | null>(null)
 
   const themeInitialized = useRef(false)
+  const countInitialized = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -50,6 +51,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setNotes(null)
     setItems(null)
     themeInitialized.current = false
+    countInitialized.current = false
 
     getPlanContext({ serviceTypeId, planId })
       .then((res) => {
@@ -60,6 +62,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         if (!themeInitialized.current) {
           setTheme(res.data.plan.seriesTitle ?? res.data.plan.title ?? '')
           themeInitialized.current = true
+        }
+        if (!countInitialized.current) {
+          const songSlotCount = res.data.items.filter(isSongSlot).length
+          setCount(Math.max(songSlotCount * 2, 5))
+          countInitialized.current = true
         }
       })
       .catch((e: Error) => !cancelled && setLoadError(e.message))
@@ -327,6 +334,15 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       <span className="author"> — {c.suggestion.author}</span>
                     )}
                   </div>
+                  {c.suggestion.slots && c.suggestion.slots.length > 0 && (
+                    <div className="slot-tags">
+                      {c.suggestion.slots.map((s, si) => (
+                        <span key={si} className="slot-tag">
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <div className="cstatus">
                     {c.status === 'checking' && (
                       <span className="badge checking">checking library…</span>

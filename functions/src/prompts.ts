@@ -12,8 +12,11 @@ export const DEFAULT_ROLE_PROMPT = `You suggest contemporary worship songs for a
 // sent as the model's system message. Kept hidden from the UI so users can
 // freely edit the role without breaking JSON parsing.
 const TECHNICAL_REQUIREMENTS = `Reply ONLY with JSON in this exact shape:
-{"suggestions":[{"title":"Song Title","author":"Songwriter Name","reasoning":"why this fits"}]}
-Return exactly the requested count. Do not invent songs that don't exist.`
+{"suggestions":[{"title":"Song Title","author":"Songwriter Name","reasoning":"why this fits","slots":["slot name"]}]}
+
+When a "Service structure" is provided, identify the distinct song roles/slots it describes (e.g. "opener", "mid-service", "closer") and tag each suggestion's "slots" with the slot(s) it would fit — a song may fit multiple slots. Return at least 4 suggestions tagged for each slot, even if that exceeds the user's requested total. When no service structure is provided, omit "slots" or use an empty array.
+
+Do not invent songs that don't exist.`
 
 export function builtInFor(type: PromptType): string {
   return type === 'role' ? DEFAULT_ROLE_PROMPT : DEFAULT_STRUCTURE_PROMPT

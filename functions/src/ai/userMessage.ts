@@ -12,7 +12,7 @@ export function buildUserMessage(req: SuggestRequest): string {
   if (req.structurePrompt && req.structurePrompt.trim()) {
     parts.push(`Service structure: ${req.structurePrompt.trim()}`)
   }
-  parts.push(`Return ${count} suggestions.`)
+  parts.push(`Return at least ${count} suggestions.`)
   if (req.exclude?.length) {
     parts.push(
       `\nDo NOT suggest any of these (already considered): ${req.exclude.join(', ')}`,
