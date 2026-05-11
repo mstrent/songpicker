@@ -1,4 +1,12 @@
-import type { NewItem, Plan, PlanNote, ServiceType, Song } from './types'
+import type {
+  NewItem,
+  Plan,
+  PlanItem,
+  PlanNote,
+  PlanPerson,
+  ServiceType,
+  Song,
+} from './types'
 
 const BASE_URL = 'https://api.planningcenteronline.com/services/v2'
 
@@ -108,6 +116,54 @@ export class PcoClient {
       seriesTitle: d.attributes.series_title,
       sortDate: d.attributes.sort_date,
     }
+  }
+
+  async listPlanPeople(serviceTypeId: string, planId: string): Promise<PlanPerson[]> {
+    const json = await this.fetch<
+      JsonApiResponse<{
+        name: string | null
+        team_position_name: string | null
+        status: string | null
+      }>
+    >(`/service_types/${serviceTypeId}/plans/${planId}/team_members?per_page=100`)
+    const data = Array.isArray(json.data) ? json.data : [json.data]
+    return data.map((d) => ({
+      id: d.id,
+      name: d.attributes.name,
+      position: d.attributes.team_position_name,
+      status: d.attributes.status,
+    }))
+  }
+
+  async listPlanItems(serviceTypeId: string, planId: string): Promise<PlanItem[]> {
+    const json = await this.fetch<
+      JsonApiResponse<{
+        title: string | null
+        item_type: string | null
+        sequence: number | null
+      }>
+    >(
+      `/service_types/${serviceTypeId}/plans/${planId}/items?include=song&order=sequence&per_page=100`,
+    )
+    const songTitles = new Map<string, string>()
+    for (const inc of json.included ?? []) {
+      if (inc.type === 'Song') {
+        const title = (inc.attributes as { title?: string }).title
+        if (title) songTitles.set(inc.id, title)
+      }
+    }
+    const data = Array.isArray(json.data) ? json.data : [json.data]
+    return data.map((d) => {
+      const songId = d.relationships?.song?.data?.id ?? null
+      return {
+        id: d.id,
+        sequence: d.attributes.sequence ?? 0,
+        title: d.attributes.title ?? '',
+        itemType: d.attributes.item_type ?? 'item',
+        songId,
+        songTitle: songId ? (songTitles.get(songId) ?? null) : null,
+      }
+    })
   }
 
   async getPlanNotes(serviceTypeId: string, planId: string): Promise<PlanNote[]> {

@@ -10,6 +10,23 @@ export interface Plan {
   title: string | null
   seriesTitle: string | null
   sortDate: string | null
+  worshipLeaders?: string[]
+}
+
+export interface PlanPerson {
+  id: string
+  name: string | null
+  position: string | null
+  status: string | null
+}
+
+export interface PlanItem {
+  id: string
+  sequence: number
+  title: string
+  itemType: string
+  songId: string | null
+  songTitle: string | null
 }
 
 export interface PlanNote {

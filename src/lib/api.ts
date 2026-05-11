@@ -8,12 +8,22 @@ export interface Plan {
   title: string | null
   seriesTitle: string | null
   sortDate: string | null
+  worshipLeaders?: string[]
 }
 
 export interface PlanNote {
   id: string
   content: string
   category: string | null
+}
+
+export interface PlanItem {
+  id: string
+  sequence: number
+  title: string
+  itemType: string
+  songId: string | null
+  songTitle: string | null
 }
 
 export interface Song {
@@ -44,7 +54,7 @@ export const listPlans = httpsCallable<void, { plans: Plan[] }>(functions, 'list
 
 export const getPlanContext = httpsCallable<
   { serviceTypeId: string; planId: string },
-  { plan: Plan; notes: PlanNote[] }
+  { plan: Plan; notes: PlanNote[]; items: PlanItem[] }
 >(functions, 'getPlanContext')
 
 export const searchSongs = httpsCallable<{ query: string }, { songs: Song[] }>(

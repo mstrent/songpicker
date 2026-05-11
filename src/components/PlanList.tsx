@@ -34,6 +34,9 @@ export function PlanList() {
                     {new Date(p.sortDate).toLocaleDateString()}
                   </span>
                 )}
+                {p.worshipLeaders && p.worshipLeaders.length > 0 && (
+                  <span className="leaders">led by {p.worshipLeaders.join(', ')}</span>
+                )}
               </div>
             </a>
           </li>

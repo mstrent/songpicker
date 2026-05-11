@@ -39,10 +39,29 @@ export const listPlans = onCall(
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean)
-    const all = await pco().listAllUpcomingPlans()
-    const plans = allowed.length
+    const client = pco()
+    const all = await client.listAllUpcomingPlans()
+    const filtered = allowed.length
       ? all.filter((p) => p.serviceTypeName != null && allowed.includes(p.serviceTypeName))
       : all
+
+    // Enrich each plan with its worship leader(s). Parallel fetch keeps total
+    // latency ~one PCO round-trip even with N plans. Failures per-plan are
+    // swallowed so a single bad plan doesn't blank the whole list.
+    const plans = await Promise.all(
+      filtered.map(async (p) => {
+        try {
+          const people = await client.listPlanPeople(p.serviceTypeId, p.id)
+          const worshipLeaders = people
+            .filter((pp) => pp.position === 'Worship Leader' && pp.status !== 'D')
+            .map((pp) => pp.name)
+            .filter((n): n is string => !!n)
+          return { ...p, worshipLeaders }
+        } catch {
+          return p
+        }
+      }),
+    )
     return { plans }
   },
 )
@@ -59,11 +78,12 @@ export const getPlanContext = onCall(
       throw new HttpsError('invalid-argument', 'serviceTypeId and planId required')
     }
     const client = pco()
-    const [plan, notes] = await Promise.all([
+    const [plan, notes, items] = await Promise.all([
       client.getPlan(serviceTypeId, planId),
       client.getPlanNotes(serviceTypeId, planId),
+      client.listPlanItems(serviceTypeId, planId),
     ])
-    return { plan, notes }
+    return { plan, notes, items }
   },
 )
 

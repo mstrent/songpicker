@@ -4,6 +4,7 @@ import {
   searchSongs,
   suggestSongs,
   type Plan,
+  type PlanItem,
   type PlanNote,
   type Song,
   type SongSuggestion,
@@ -24,6 +25,7 @@ interface Props {
 export function PlanDetail({ serviceTypeId, planId }: Props) {
   const [plan, setPlan] = useState<Plan | null>(null)
   const [notes, setNotes] = useState<PlanNote[] | null>(null)
+  const [items, setItems] = useState<PlanItem[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const [theme, setTheme] = useState('')
@@ -40,6 +42,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setLoadError(null)
     setPlan(null)
     setNotes(null)
+    setItems(null)
     themeInitialized.current = false
 
     getPlanContext({ serviceTypeId, planId })
@@ -47,6 +50,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         if (cancelled) return
         setPlan(res.data.plan)
         setNotes(res.data.notes)
+        setItems(res.data.items)
         if (!themeInitialized.current) {
           setTheme(res.data.plan.seriesTitle ?? res.data.plan.title ?? '')
           themeInitialized.current = true
@@ -103,7 +107,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   }
 
   if (loadError) return <div className="error">Error loading plan: {loadError}</div>
-  if (!plan || !notes) return <div>Loading plan…</div>
+  if (!plan || !notes || !items) return <div>Loading plan…</div>
 
   const subtitle = plan.title && plan.seriesTitle ? plan.seriesTitle : null
 
@@ -124,7 +128,31 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       <div className="meta">
         {subtitle && <span>{subtitle} · </span>}
         {plan.sortDate && new Date(plan.sortDate).toLocaleDateString()}
+        {plan.worshipLeaders && plan.worshipLeaders.length > 0 && (
+          <> · led by {plan.worshipLeaders.join(', ')}</>
+        )}
       </div>
+
+      {items.length > 0 && (
+        <section className="service-order">
+          <h3>Service order</h3>
+          <ol>
+            {items.map((it) => (
+              <li key={it.id} className={`item type-${it.itemType}`}>
+                <span className="seq">{it.sequence}</span>
+                <span className="ititle">{it.title || '(no title)'}</span>
+                {it.itemType === 'song' &&
+                  (it.songTitle ? (
+                    <span className="song-attached">{it.songTitle}</span>
+                  ) : (
+                    <span className="song-empty">(no song picked)</span>
+                  ))}
+                <span className={`badge type-${it.itemType}`}>{it.itemType}</span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
 
       {notes.length > 0 ? (
         <section className="notes">

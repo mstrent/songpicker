@@ -122,6 +122,7 @@ button:hover { filter: brightness(1.1); }
   margin-top: 0.4rem;
   color: var(--muted);
   font-size: 0.8rem;
+  flex-wrap: wrap;
 }
 .plans .service-type {
   border: 1px solid var(--border);
@@ -129,6 +130,7 @@ button:hover { filter: brightness(1.1); }
   padding: 0.05rem 0.5rem;
 }
 .plans .date { color: var(--muted); }
+.plans .leaders { color: var(--muted); }
 
 .error { color: var(--error); }
 .muted { color: var(--muted); }
@@ -219,6 +221,55 @@ button:hover { filter: brightness(1.1); }
   background: transparent;
   color: var(--muted);
   border: 1px solid var(--border);
+}
+
+.service-order ol {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.35rem;
+  counter-reset: item;
+}
+.service-order .item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.service-order .seq {
+  color: var(--muted);
+  font-size: 0.8rem;
+  min-width: 1.5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.service-order .ititle {
+  flex: 1;
+  font-weight: 500;
+}
+.service-order .song-attached {
+  color: var(--accent);
+  font-size: 0.9rem;
+}
+.service-order .song-empty {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-style: italic;
+}
+.service-order .badge {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.service-order .badge.type-song { background: rgba(90, 59, 255, 0.15); color: var(--accent); }
+.service-order .badge.type-header { background: var(--border); color: var(--muted); }
+.service-order .badge.type-media { background: rgba(255, 152, 0, 0.15); color: #b26a00; }
+.service-order .badge.type-item { background: var(--border); color: var(--muted); }
+@media (prefers-color-scheme: dark) {
+  .service-order .badge.type-media { background: rgba(255, 152, 0, 0.2); color: #ffb74d; }
 }
 
 .candidates ul {
