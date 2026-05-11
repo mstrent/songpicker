@@ -329,7 +329,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         </label>
         <label>
           <span className="theme-label">
-            Context from service notes
+            <span>
+              Context{' '}
+              <span className="source-hint">· from Planning Center service notes</span>
+            </span>
             <span
               className="ai-context-marker"
               title="Sent to the AI on every Suggest call"
@@ -555,14 +558,14 @@ function updateAt<T>(arr: T[], idx: number, fn: (cur: T) => T): T[] {
 }
 
 // Render Planning Center plan notes as the editable seed text. Plain
-// bullet list of note content — category labels ("General", etc.) get
-// dropped because they don't add anything the AI couldn't infer.
+// newline-separated note content — no category labels (noise) and no
+// bullet markers (awkward for single notes, the AI handles either way).
 function formatNotesSource(notes: PlanNote[] | null): string {
   if (!notes || notes.length === 0) return ''
   return notes
     .filter((n) => n.content && n.content.trim())
-    .map((n) => `- ${n.content.trim()}`)
-    .join('\n')
+    .map((n) => n.content.trim())
+    .join('\n\n')
 }
 
 // Render the plan's items as a human-readable list for the AI prompt.
