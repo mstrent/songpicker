@@ -73,7 +73,7 @@ export default function App() {
         ) : (
           <>
             <h2>Upcoming plans</h2>
-            <PlanList currentUserName={leaderName} />
+            <PlanList currentUserName={leaderName} currentUserEmail={user.email} />
           </>
         )}
       </main>

@@ -3,6 +3,11 @@ export interface ServiceType {
   name: string | null
 }
 
+export interface WorshipLeader {
+  name: string
+  email: string | null
+}
+
 export interface Plan {
   id: string
   serviceTypeId: string
@@ -10,7 +15,7 @@ export interface Plan {
   title: string | null
   seriesTitle: string | null
   sortDate: string | null
-  worshipLeaders?: string[]
+  worshipLeaders?: WorshipLeader[]
 }
 
 export interface PlanPerson {
@@ -18,6 +23,7 @@ export interface PlanPerson {
   name: string | null
   position: string | null
   status: string | null
+  email: string | null
 }
 
 export interface PlanItem {

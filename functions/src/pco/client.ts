@@ -10,16 +10,29 @@ import type {
 
 const BASE_URL = 'https://api.planningcenteronline.com/services/v2'
 
+interface JsonApiRef {
+  id: string
+  type: string
+}
+
 interface JsonApiResource<A = Record<string, unknown>> {
   id: string
   type: string
   attributes: A
-  relationships?: Record<string, { data?: { id: string; type: string } | null }>
+  relationships?: Record<string, { data?: JsonApiRef | JsonApiRef[] | null }>
 }
 
 interface JsonApiResponse<A = Record<string, unknown>> {
   data: JsonApiResource<A> | JsonApiResource<A>[]
   included?: JsonApiResource[]
+}
+
+function firstRefId(
+  rel: { data?: JsonApiRef | JsonApiRef[] | null } | undefined,
+): string | null {
+  const d = rel?.data
+  if (!d) return null
+  return Array.isArray(d) ? (d[0]?.id ?? null) : d.id
 }
 
 export class PcoClient {
@@ -125,14 +138,45 @@ export class PcoClient {
         team_position_name: string | null
         status: string | null
       }>
-    >(`/service_types/${serviceTypeId}/plans/${planId}/team_members?per_page=100`)
+    >(
+      `/service_types/${serviceTypeId}/plans/${planId}/team_members?include=person.emails&per_page=100`,
+    )
+
+    // Build email_id -> address lookup, preferring `primary` ones.
+    const emailById = new Map<string, { address: string; primary: boolean }>()
+    for (const inc of json.included ?? []) {
+      if (inc.type === 'Email') {
+        const a = inc.attributes as { address?: string; primary?: boolean }
+        if (a.address) {
+          emailById.set(inc.id, { address: a.address, primary: !!a.primary })
+        }
+      }
+    }
+
+    // Build person_id -> email (primary if any, else first).
+    const personEmail = new Map<string, string>()
+    for (const inc of json.included ?? []) {
+      if (inc.type !== 'Person') continue
+      const rel = inc.relationships?.emails?.data
+      const refs = Array.isArray(rel) ? rel : rel ? [rel] : []
+      const candidates = refs
+        .map((r) => emailById.get(r.id))
+        .filter((e): e is { address: string; primary: boolean } => !!e)
+      const pick = candidates.find((c) => c.primary) ?? candidates[0]
+      if (pick) personEmail.set(inc.id, pick.address.toLowerCase())
+    }
+
     const data = Array.isArray(json.data) ? json.data : [json.data]
-    return data.map((d) => ({
-      id: d.id,
-      name: d.attributes.name,
-      position: d.attributes.team_position_name,
-      status: d.attributes.status,
-    }))
+    return data.map((d) => {
+      const personId = firstRefId(d.relationships?.person)
+      return {
+        id: d.id,
+        name: d.attributes.name,
+        position: d.attributes.team_position_name,
+        status: d.attributes.status,
+        email: personId ? (personEmail.get(personId) ?? null) : null,
+      }
+    })
   }
 
   async listPlanItems(serviceTypeId: string, planId: string): Promise<PlanItem[]> {
@@ -154,7 +198,7 @@ export class PcoClient {
     }
     const data = Array.isArray(json.data) ? json.data : [json.data]
     return data.map((d) => {
-      const songId = d.relationships?.song?.data?.id ?? null
+      const songId = firstRefId(d.relationships?.song)
       return {
         id: d.id,
         sequence: d.attributes.sequence ?? 0,
@@ -178,12 +222,14 @@ export class PcoClient {
       }
     }
     const data = Array.isArray(json.data) ? json.data : [json.data]
-    return data.map((d) => ({
-      id: d.id,
-      content: d.attributes.content,
-      category:
-        categories.get(d.relationships?.plan_note_category?.data?.id ?? '') ?? null,
-    }))
+    return data.map((d) => {
+      const catId = firstRefId(d.relationships?.plan_note_category)
+      return {
+        id: d.id,
+        content: d.attributes.content,
+        category: catId ? (categories.get(catId) ?? null) : null,
+      }
+    })
   }
 
   async searchSongs(query: string): Promise<Song[]> {

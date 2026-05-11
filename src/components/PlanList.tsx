@@ -4,9 +4,10 @@ import { namesMatch } from '../lib/names'
 
 interface Props {
   currentUserName: string | null
+  currentUserEmail: string | null
 }
 
-export function PlanList({ currentUserName }: Props) {
+export function PlanList({ currentUserName, currentUserEmail }: Props) {
   const [plans, setPlans] = useState<Plan[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -20,13 +21,18 @@ export function PlanList({ currentUserName }: Props) {
   if (!plans) return <div>Loading plans…</div>
   if (plans.length === 0) return <div>No upcoming plans found.</div>
 
+  const myEmail = currentUserEmail?.trim().toLowerCase() ?? ''
+
   return (
     <ul className="plans">
       {plans.map((p) => {
         const heading = p.title || p.seriesTitle || '(no title)'
         const sub = p.title && p.seriesTitle ? p.seriesTitle : null
-        const ledByMe = (p.worshipLeaders ?? []).some((n) =>
-          namesMatch(n, currentUserName),
+        const leaders = p.worshipLeaders ?? []
+        const ledByMe = leaders.some(
+          (l) =>
+            (myEmail && l.email && l.email.toLowerCase() === myEmail) ||
+            namesMatch(l.name, currentUserName),
         )
         return (
           <li key={`${p.serviceTypeId}/${p.id}`}>
@@ -50,8 +56,10 @@ export function PlanList({ currentUserName }: Props) {
                     })}
                   </span>
                 )}
-                {p.worshipLeaders && p.worshipLeaders.length > 0 && (
-                  <span className="leaders">led by {p.worshipLeaders.join(', ')}</span>
+                {leaders.length > 0 && (
+                  <span className="leaders">
+                    led by {leaders.map((l) => l.name).join(', ')}
+                  </span>
                 )}
               </div>
             </a>

@@ -146,7 +146,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             year: 'numeric',
           })}
         {plan.worshipLeaders && plan.worshipLeaders.length > 0 && (
-          <> · led by {plan.worshipLeaders.join(', ')}</>
+          <> · led by {plan.worshipLeaders.map((l) => l.name).join(', ')}</>
         )}
       </div>
 

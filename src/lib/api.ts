@@ -1,6 +1,11 @@
 import { httpsCallable } from 'firebase/functions'
 import { functions } from './firebase'
 
+export interface WorshipLeader {
+  name: string
+  email: string | null
+}
+
 export interface Plan {
   id: string
   serviceTypeId: string
@@ -8,7 +13,7 @@ export interface Plan {
   title: string | null
   seriesTitle: string | null
   sortDate: string | null
-  worshipLeaders?: string[]
+  worshipLeaders?: WorshipLeader[]
 }
 
 export interface PlanNote {

@@ -45,17 +45,19 @@ export const listPlans = onCall(
       ? all.filter((p) => p.serviceTypeName != null && allowed.includes(p.serviceTypeName))
       : all
 
-    // Enrich each plan with its worship leader(s). Parallel fetch keeps total
-    // latency ~one PCO round-trip even with N plans. Failures per-plan are
-    // swallowed so a single bad plan doesn't blank the whole list.
+    // Enrich each plan with its worship leader(s) — name + email so the SPA
+    // can match by email (definitive) before falling back to fuzzy name.
+    // Parallel fetch keeps total latency ~one PCO round-trip even with N
+    // plans; per-plan failures are swallowed so one bad plan doesn't blank
+    // the whole list.
     const plans = await Promise.all(
       filtered.map(async (p) => {
         try {
           const people = await client.listPlanPeople(p.serviceTypeId, p.id)
           const worshipLeaders = people
             .filter((pp) => pp.position === 'Worship Leader' && pp.status !== 'D')
-            .map((pp) => pp.name)
-            .filter((n): n is string => !!n)
+            .filter((pp): pp is typeof pp & { name: string } => !!pp.name)
+            .map((pp) => ({ name: pp.name, email: pp.email }))
           return { ...p, worshipLeaders }
         } catch {
           return p
