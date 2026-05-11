@@ -155,13 +155,17 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           <h3>Service order</h3>
           <ol>
             {items.map((it) => {
-              // PCO's item_type is often a generic "item" even for song slots
-              // (depends on how the planner set it up). Fall back to a title
-              // heuristic so titles like "Song 1" / "Closing song" still
-              // visually pop as song slots.
+              // Definitive signal a slot is filled: it has a song link.
+              const filled = it.songId != null
+              // For empty slots we still need to know "is this meant to hold
+              // a song?". PCO's item_type is "song" when the planner used the
+              // dedicated song type — but many plans here use plain "item"
+              // and just title the row "Song 1" / "Closing song", so a title
+              // fallback is needed to flag those as empty song slots.
               const isSong =
-                it.itemType === 'song' || /\bsong\b/i.test(it.title)
-              const filled = isSong && it.songId
+                filled ||
+                (it.itemType ?? '').toLowerCase() === 'song' ||
+                /\bsong\b/i.test(it.title)
               const cls = `item type-${it.itemType}${
                 isSong ? (filled ? ' song-filled' : ' song-empty-slot') : ''
               }`
