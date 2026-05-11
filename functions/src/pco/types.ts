@@ -46,6 +46,9 @@ export interface PlanItem {
   itemType: string
   songId: string | null
   songTitle: string | null
+  songAuthor: string | null
+  songCcli: string | null
+  arrangementName: string | null
   keyName: string | null
   description: string | null
   notes: ItemNote[]

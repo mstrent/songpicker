@@ -426,7 +426,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                 (it.keyName ||
                   it.description ||
                   it.notes.length > 0 ||
-                  it.leaders.length > 0)
+                  it.leaders.length > 0 ||
+                  it.songAuthor ||
+                  it.songCcli ||
+                  it.arrangementName)
               return (
                 <li key={it.id} className={cls}>
                   <span className="seq">{it.sequence}</span>
@@ -464,6 +467,19 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                             </span>
                           ))}
                         </div>
+                        {(it.songAuthor || it.arrangementName || it.songCcli) && (
+                          <div className="meta-credits">
+                            {it.songAuthor && (
+                              <span>by <strong>{it.songAuthor}</strong></span>
+                            )}
+                            {it.arrangementName && (
+                              <span> · arrangement: {it.arrangementName}</span>
+                            )}
+                            {it.songCcli && (
+                              <span> · CCLI {it.songCcli}</span>
+                            )}
+                          </div>
+                        )}
                         {it.description && (
                           <div className="meta-text">{it.description}</div>
                         )}
@@ -733,6 +749,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                         ) : (
                           <span className="last-played">never played</span>
                         )}
+                        {c.song!.ccliNumber && (
+                          <span className="last-played" title="CCLI number">
+                            · CCLI {c.song!.ccliNumber}
+                          </span>
+                        )}
                       </>
                     )}
                     {c.matchStatus === 'unmatched' && (
@@ -842,7 +863,9 @@ function formatNotesSource(notes: PlanNote[] | null): string {
 
 // Render the plan's items as a human-readable list for the AI prompt.
 // Empty song slots get an explicit "(empty — needs a pick)" marker so the
-// model can see exactly which positions in the order need filling.
+// model can see exactly which positions in the order need filling. Filled
+// song slots include author + CCLI + arrangement when available to
+// disambiguate same-titled songs (multiple "Surrender"s exist).
 function buildServiceOrderText(items: PlanItem[] | null): string {
   if (!items || items.length === 0) return ''
   return items
@@ -851,11 +874,20 @@ function buildServiceOrderText(items: PlanItem[] | null): string {
       const base = `${it.sequence}. ${it.title || '(no title)'}`
       if (!songSlot) return base
       if (it.songId) {
-        return `${base} — picked: ${it.songTitle ?? '(song)'}`
+        const disamb = formatSongDisamb(it)
+        return `${base} — picked: ${it.songTitle ?? '(song)'}${disamb ? ` ${disamb}` : ''}`
       }
       return `${base} — (empty, needs a pick)`
     })
     .join('\n')
+}
+
+function formatSongDisamb(it: PlanItem): string {
+  const parts: string[] = []
+  if (it.songAuthor) parts.push(`by ${it.songAuthor}`)
+  if (it.arrangementName) parts.push(`arrangement: ${it.arrangementName}`)
+  if (it.songCcli) parts.push(`CCLI ${it.songCcli}`)
+  return parts.length > 0 ? `(${parts.join(', ')})` : ''
 }
 
 function providerLabel(name: string): string {

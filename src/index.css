@@ -719,6 +719,15 @@ textarea {
 .service-order .item-meta .leader-icon {
   font-size: 0.9em;
 }
+.service-order .item-meta .meta-credits {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.service-order .item-meta .meta-credits strong {
+  color: var(--fg);
+  font-weight: 600;
+}
 .service-order .item-meta .meta-text {
   color: var(--fg);
   white-space: pre-wrap;
