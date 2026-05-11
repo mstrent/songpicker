@@ -141,7 +141,15 @@ export async function loadUserNotes(
   planId: string,
 ): Promise<string> {
   const doc = await loadDoc(uid)
-  return doc.notes[planId] ?? ''
+  const raw = doc.notes[planId] ?? ''
+  // Strip leading "- <Category>: " prefixes from each bullet. An earlier
+  // version of formatNotesSource emitted those when seeding the editor;
+  // they're noise. Once the user saves again, the stored value will be
+  // prefix-free naturally.
+  return raw
+    .split('\n')
+    .map((line) => line.replace(/^(-\s*)[A-Z][A-Za-z\s]*:\s*/, '$1'))
+    .join('\n')
 }
 
 export async function saveUserNotes(
