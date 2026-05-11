@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  clearSlot,
   commitSlot,
   loadSession,
   saveSession,
@@ -506,6 +507,35 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     )
   }
 
+  async function clearPickedSlot(itemId: string) {
+    const slot = (items ?? []).find((it) => it.id === itemId)
+    if (!slot || !slot.songId) return
+    const clearedSongTitle = slot.songTitle ?? '(song)'
+    try {
+      await clearSlot({ serviceTypeId, planId, itemId })
+      // Any candidate that was committed (or just assigned) to this slot
+      // should drop back to an uncommitted/unassigned state — the slot
+      // it pointed at no longer holds anything.
+      setCandidates((prev) =>
+        prev.map((c) =>
+          c.assignedSlotItemId === itemId
+            ? { ...c, assignedSlotItemId: null, committedAt: null }
+            : c,
+        ),
+      )
+      appendSystemMessage(
+        `↶ Cleared "${clearedSongTitle}" from ${slot.title || 'slot'} — the AI will treat this slot as open again`,
+      )
+      // Refresh the service order so the slot flips back to empty in
+      // the SPA (and in the AI's next service-order context).
+      invalidatePlanContext(serviceTypeId, planId)
+      const fresh = await loadPlanContext(serviceTypeId, planId)
+      setItems(fresh.items)
+    } catch (e) {
+      setGenerateError((e as Error).message)
+    }
+  }
+
   async function commitCandidate(c: CandidateMatch) {
     if (!c.assignedSlotItemId || !c.song || c.committedAt) return
     const slot = (items ?? []).find((it) => it.id === c.assignedSlotItemId)
@@ -674,6 +704,16 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     >
                       Spotify ↗
                     </a>
+                  )}
+                  {filled && isSong && (
+                    <button
+                      type="button"
+                      className="clear-slot-btn"
+                      onClick={() => clearPickedSlot(it.id)}
+                      title="Remove this song from the slot in Planning Center and reopen it for new suggestions"
+                    >
+                      × clear
+                    </button>
                   )}
                 </li>
               )

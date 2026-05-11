@@ -411,6 +411,24 @@ export const commitSlot = onCall(async (req) => {
   return { ok: true }
 })
 
+export const clearSlot = onCall(async (req) => {
+  const { uid } = requireAllowed(req)
+  const { serviceTypeId, planId, itemId } = req.data as {
+    serviceTypeId?: string
+    planId?: string
+    itemId?: string
+  }
+  if (!serviceTypeId || !planId || !itemId) {
+    throw new HttpsError(
+      'invalid-argument',
+      'serviceTypeId, planId, and itemId required',
+    )
+  }
+  const client = await pcoForUser(uid)
+  await client.clearPlanItemSong(serviceTypeId, planId, itemId)
+  return { ok: true }
+})
+
 export const commitPlanItems = onCall(async (req) => {
   const { uid } = requireAllowed(req)
   const { serviceTypeId, planId, items } = req.data as {

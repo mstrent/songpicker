@@ -165,6 +165,11 @@ export const commitSlot = httpsCallable<
   { ok: boolean }
 >(functions, 'commitSlot')
 
+export const clearSlot = httpsCallable<
+  { serviceTypeId: string; planId: string; itemId: string },
+  { ok: boolean }
+>(functions, 'clearSlot')
+
 export const searchSongs = httpsCallable<{ query: string }, { songs: Song[] }>(
   functions,
   'searchSongs',

@@ -796,6 +796,23 @@ textarea {
   border-radius: 8px;
   background: var(--surface);
 }
+.service-order .clear-slot-btn {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border-strong);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.service-order .clear-slot-btn:hover {
+  background: var(--error-soft);
+  color: var(--error);
+  border-color: var(--error);
+}
 
 .service-order .seq {
   color: var(--muted);
