@@ -596,13 +596,14 @@ textarea {
   }
 }
 
-/* Hairline gradient divider sitting above each section heading so the
-   sections feel separated without leaving cavernous whitespace. The
-   first section in a column never gets one (service-order on the left,
-   candidates on the right at desktop widths). */
+/* Hairline gradient divider above the major content sections so they
+   feel separated without cavernous whitespace. Only used between the
+   service-order block and the suggest form (and between candidates and
+   the suggest form in single-column mode). The collapsed
+   rejected-pool and ai-debug disclosures down at the bottom don't
+   need their own dividers — they're small, secondary, and already
+   visually distinct from the form above them. */
 .plan-detail .suggest-section::before,
-.plan-detail .rejected-pool::before,
-.plan-detail .ai-debug::before,
 .plan-detail .candidates::before {
   content: '';
   display: block;
