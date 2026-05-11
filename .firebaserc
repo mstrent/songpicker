@@ -1,3 +1,7 @@
 {
-  "projects": {}
+  "projects": {
+    "songpicker": "songpicker-mtrent"
+  },
+  "targets": {},
+  "etags": {}
 }
