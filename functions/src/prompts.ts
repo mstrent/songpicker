@@ -17,7 +17,11 @@ export const TECHNICAL_REQUIREMENTS = `Reply ONLY with JSON in this exact shape:
 
 The chorusSnippet should be one or two recognisable lines from the song's chorus so the user can confirm which song this is at a glance — different songs share titles, but rarely lyrics. Keep it under 100 characters. Quote the actual chorus, don't paraphrase. If you genuinely don't know the lyrics, omit the field rather than invent.
 
-When a "Service structure" is provided, identify the distinct song roles/slots it describes (e.g. "opener", "mid-service", "closer") and tag each suggestion's "slots" with the slot(s) it would fit — a song may fit multiple slots. Within the user's requested min–max range, try to cover every slot with at least 3 options so the user has real choice; only fall below that when the requested maximum doesn't leave room. Never exceed the requested maximum. When no service structure is provided, omit "slots" or use an empty array.
+When a "Service structure" is provided, identify the distinct song roles/slots it describes (e.g. "opener", "mid-service", "closer") and tag each suggestion's "slots" with the slot(s) it would fit — a song may fit multiple slots.
+
+Cross-reference these slots against the "Current service order" (when provided). Any slot whose corresponding service-order item is already filled (shown as `— picked: <title>`) is DONE — do not propose songs for it. Focus all suggestions on the slots whose service-order items are still marked `(empty, needs a pick)`.
+
+Within the user's requested min–max range, try to cover every unfilled slot with at least 3 options so the user has real choice; only fall below that when the requested maximum doesn't leave room. Never exceed the requested maximum. When no service structure is provided, omit "slots" or use an empty array.
 
 Do not invent songs that don't exist.`
 
