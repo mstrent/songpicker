@@ -1,7 +1,9 @@
 export interface SongSuggestion {
   title: string
   author?: string
-  reasoning?: string
+  /** 1–2 line snippet from the chorus to help the user identify the song
+   *  at a glance (different "Surrender"s have different lyrics). */
+  chorusSnippet?: string
   slots?: string[]
 }
 

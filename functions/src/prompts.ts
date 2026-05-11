@@ -13,7 +13,9 @@ export const DEFAULT_ROLE_PROMPT = `You suggest contemporary worship songs for a
 // freely edit the role without breaking JSON parsing. The admin page
 // surfaces this constant read-only for debugging.
 export const TECHNICAL_REQUIREMENTS = `Reply ONLY with JSON in this exact shape:
-{"suggestions":[{"title":"Song Title","author":"Songwriter Name","reasoning":"why this fits","slots":["slot name"]}]}
+{"suggestions":[{"title":"Song Title","author":"Songwriter Name","chorusSnippet":"1-2 memorable lines from the chorus","slots":["slot name"]}]}
+
+The chorusSnippet should be one or two recognisable lines from the song's chorus so the user can confirm which song this is at a glance — different songs share titles, but rarely lyrics. Keep it under 100 characters. Quote the actual chorus, don't paraphrase. If you genuinely don't know the lyrics, omit the field rather than invent.
 
 When a "Service structure" is provided, identify the distinct song roles/slots it describes (e.g. "opener", "mid-service", "closer") and tag each suggestion's "slots" with the slot(s) it would fit — a song may fit multiple slots. Return at least 4 suggestions tagged for each slot, even if that exceeds the user's requested total. When no service structure is provided, omit "slots" or use an empty array.
 

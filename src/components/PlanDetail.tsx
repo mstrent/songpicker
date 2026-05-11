@@ -54,7 +54,7 @@ function toPersisted(c: CandidateMatch): PersistedCandidate {
     id: c.id,
     title: c.suggestion.title,
     author: c.suggestion.author ?? null,
-    reasoning: c.suggestion.reasoning ?? null,
+    chorusSnippet: c.suggestion.chorusSnippet ?? null,
     slots: c.suggestion.slots ?? [],
     matchStatus:
       c.matchStatus === 'checking' ? 'unmatched' : c.matchStatus, // pending lookups are saved as unmatched
@@ -80,7 +80,7 @@ function fromPersisted(p: PersistedCandidate): CandidateMatch {
     suggestion: {
       title: p.title,
       author: p.author ?? undefined,
-      reasoning: p.reasoning ?? undefined,
+      chorusSnippet: p.chorusSnippet ?? undefined,
       slots: p.slots,
     },
     matchStatus: p.matchStatus,
@@ -137,6 +137,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   // as a user override, polluting storage).
   const userTouchedTheme = useRef(false)
   const userTouchedNotes = useRef(false)
+  // Debounced auto-replacement after Reject clicks. Rejecting multiple
+  // candidates in quick succession coalesces into a single call for N
+  // replacements rather than N independent calls.
+  const replacementTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingReplacements = useRef(0)
 
   useEffect(() => {
     let cancelled = false
@@ -239,24 +244,26 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     return () => clearTimeout(id)
   }, [notesText, notesSource, serviceTypeId, planId])
 
-  async function handleSuggest() {
-    if (!theme.trim() || generating) return
-    setGenerating(true)
-    setGenerateError(null)
-    try {
-      // Persist user edits so future visits to this plan start with what
-      // they typed rather than re-defaulting from PCO. Best-effort — a
-      // save failure doesn't block the suggest. Patch the SPA cache too
-      // so a back-and-return doesn't show stale.
+  // Core suggestion fetcher used by both the user-driven Suggest button and
+  // the silent auto-replacement after rejections. The `addToChat` flag
+  // splits the two behaviours: user-driven calls record a chat turn and
+  // surface the spinner / errors; auto-replacements run quietly in the
+  // background.
+  async function fetchSuggestions(opts: {
+    count: number
+    userMessage: string
+    addToChat: boolean
+  }) {
+    if (!theme.trim()) return
+    if (opts.addToChat) {
+      setGenerating(true)
+      setGenerateError(null)
       patchCachedTheme(serviceTypeId, planId, theme)
       void savePlanTheme({ planId, theme }).catch(() => {})
       patchCachedNotes(serviceTypeId, planId, notesText)
       void savePlanNotes({ planId, notes: notesText }).catch(() => {})
-
-      // Don't auto-suggest titles already filled in PCO or already in the
-      // candidate pool. Rejected/shortlisted state is communicated via
-      // structured fields so the model can reason with it; not in the
-      // exclude list, which is for hard "no repeats".
+    }
+    try {
       const exclude = [
         ...candidates.map((c) => c.suggestion.title),
         ...(items ?? [])
@@ -269,14 +276,17 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       const rejectedTitles = candidates
         .filter((c) => c.decision === 'reject')
         .map((c) => c.suggestion.title)
-
       const serviceOrder = buildServiceOrderText(items)
-      const history = messages.map((m) => ({ role: m.role === 'system' ? 'user' : m.role, content: m.content }))
+      const history = messages.map((m) => ({
+        role: m.role === 'system' ? 'user' : m.role,
+        content: m.content,
+      }))
+
       const res = await suggestSongs({
         theme,
-        userMessage: criteria,
+        userMessage: opts.userMessage,
         exclude,
-        count,
+        count: opts.count,
         planId,
         serviceOrder,
         planNotes: notesText,
@@ -284,27 +294,29 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         shortlistedTitles,
         rejectedTitles,
       })
-      setProvider(res.data.provider)
-      setDebug(res.data.debug ?? null)
 
-      // Append the typed input + the model's summary as the new turn.
-      const turnTs = Date.now()
-      const userMsg: SessionMessage = {
-        id: newCandidateId(),
-        role: 'user',
-        content: criteria.trim() || '(initial request)',
-        timestamp: turnTs,
+      if (opts.addToChat) {
+        setProvider(res.data.provider)
+        setDebug(res.data.debug ?? null)
+        const turnTs = Date.now()
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: newCandidateId(),
+            role: 'user',
+            content: opts.userMessage.trim() || '(initial request)',
+            timestamp: turnTs,
+          },
+          {
+            id: newCandidateId(),
+            role: 'assistant',
+            content: res.data.assistantMessage,
+            timestamp: turnTs + 1,
+          },
+        ])
+        // Clear the input for the next refinement.
+        setCriteria('')
       }
-      const assistantMsg: SessionMessage = {
-        id: newCandidateId(),
-        role: 'assistant',
-        content: res.data.assistantMessage,
-        timestamp: turnTs + 1,
-      }
-      setMessages((prev) => [...prev, userMsg, assistantMsg])
-      // After first turn the criteria box becomes the "refine" input; clear
-      // it so the user types fresh next time.
-      setCriteria('')
 
       const now = Date.now()
       const newOnes: CandidateMatch[] = res.data.suggestions.map((s) => ({
@@ -343,10 +355,41 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           })
       })
     } catch (e) {
-      setGenerateError((e as Error).message)
+      if (opts.addToChat) {
+        setGenerateError((e as Error).message)
+      } else {
+        // Silent failures for auto-replacement — user didn't ask, don't
+        // interrupt their flow. Worth logging for debugging.
+        console.warn('[songpicker] auto-replacement failed:', e)
+      }
     } finally {
-      setGenerating(false)
+      if (opts.addToChat) setGenerating(false)
     }
+  }
+
+  async function handleSuggest() {
+    if (!theme.trim() || generating) return
+    await fetchSuggestions({
+      count,
+      userMessage: criteria,
+      addToChat: true,
+    })
+  }
+
+  function scheduleReplacement() {
+    pendingReplacements.current += 1
+    if (replacementTimer.current) clearTimeout(replacementTimer.current)
+    replacementTimer.current = setTimeout(() => {
+      const n = pendingReplacements.current
+      pendingReplacements.current = 0
+      replacementTimer.current = null
+      if (n <= 0) return
+      void fetchSuggestions({
+        count: n,
+        userMessage: `(auto-replacement for ${n} rejected song${n === 1 ? '' : 's'})`,
+        addToChat: false,
+      })
+    }, 600)
   }
 
   function clearCandidates() {
@@ -356,10 +399,14 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   }
 
   function setDecision(id: string, next: Decision) {
+    const target = candidates.find((c) => c.id === id)
+    if (!target) return
+    const oldDecision = target.decision
+    const newDecision: Decision = oldDecision === next ? 'pending' : next
+
     setCandidates((prev) =>
       prev.map((c) => {
         if (c.id !== id) return c
-        const newDecision: Decision = c.decision === next ? 'pending' : next
         // Drop any pending assignment when leaving shortlist (committed
         // assignments survive — that history is real).
         const clearAssignment = newDecision !== 'shortlist' && !c.committedAt
@@ -370,6 +417,12 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         }
       }),
     )
+
+    // Newly rejected → schedule a replacement so the pool stays the same
+    // effective size. Un-rejecting doesn't claw replacements back.
+    if (newDecision === 'reject' && oldDecision !== 'reject') {
+      scheduleReplacement()
+    }
   }
 
   function assignSlot(candidateId: string, slotItemId: string | null) {
@@ -865,10 +918,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       Spotify ↗
                     </a>
                   </div>
-                  {c.suggestion.reasoning && (
-                    <div className="reasoning">
-                      <span className="sparkle-prefix" aria-hidden>✨</span>
-                      <span>{c.suggestion.reasoning}</span>
+                  {c.suggestion.chorusSnippet && (
+                    <div className="chorus-snippet">
+                      <span className="snippet-quote" aria-hidden>“</span>
+                      {c.suggestion.chorusSnippet}
+                      <span className="snippet-quote" aria-hidden>”</span>
                     </div>
                   )}
                   <div className="decision-row">

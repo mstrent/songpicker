@@ -1571,10 +1571,22 @@ textarea {
   font-size: 0.85rem;
   flex-wrap: wrap;
 }
-.candidate .reasoning {
-  color: var(--muted);
+.candidate .chorus-snippet {
+  color: var(--fg);
   font-size: 0.9rem;
   font-style: italic;
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+  padding: 0.4rem 0.7rem;
+  border-radius: 0 6px 6px 0;
+  line-height: 1.4;
+  margin-top: 0.35rem;
+}
+.candidate .chorus-snippet .snippet-quote {
+  color: var(--accent);
+  font-weight: 700;
+  font-style: normal;
+  padding: 0 0.15rem;
 }
 
 .candidate .slot-tags {

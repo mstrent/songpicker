@@ -63,7 +63,7 @@ export interface Song {
 export interface SongSuggestion {
   title: string
   author?: string
-  reasoning?: string
+  chorusSnippet?: string
   slots?: string[]
 }
 
@@ -127,7 +127,7 @@ export interface PersistedCandidate {
   id: string
   title: string
   author: string | null
-  reasoning: string | null
+  chorusSnippet: string | null
   slots: string[]
   matchStatus: MatchStatus
   song: PersistedSongRef | null
