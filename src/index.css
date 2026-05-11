@@ -322,6 +322,29 @@ textarea {
 
 .plans li {
   padding: 0;
+  position: relative;
+}
+
+.plans .pco-quick {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.85rem;
+  z-index: 1;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  padding: 0.12rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  text-decoration: none;
+}
+.plans .pco-quick:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  text-decoration: none;
 }
 
 .plans .plan-link {

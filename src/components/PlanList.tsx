@@ -60,6 +60,15 @@ export function PlanList({ currentUserName, currentUserEmail }: Props) {
     return (
       <li key={`${p.serviceTypeId}/${p.id}`}>
         <a
+          className="pco-quick"
+          href={`https://services.planningcenteronline.com/plans/${p.id}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open this plan in Planning Center"
+        >
+          Planning Center ↗
+        </a>
+        <a
           className={`plan-link${stateClass}${isPast ? ' past' : ''}`}
           href={`#plan/${p.serviceTypeId}/${p.id}`}
         >
