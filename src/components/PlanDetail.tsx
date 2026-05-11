@@ -609,6 +609,12 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   // The drop-target highlights and the floating trash zone are gated on
   // this state.
   const [dragKind, setDragKind] = useState<'candidate' | 'slot' | null>(null)
+  // Source identifier — candidate.id for 'candidate' drags, item.id for
+  // 'slot' drags. We thread the source through React state rather than
+  // dataTransfer.getData because some browsers (notably Firefox)
+  // restrict reading custom mime types from dataTransfer in the drop
+  // event, which would silently break the handler.
+  const [dragSourceId, setDragSourceId] = useState<string | null>(null)
   // Hovered drop-target ids so we can highlight the specific slot or the
   // trash zone the user is over, instead of every valid target at once.
   const [dragOverItemId, setDragOverItemId] = useState<string | null>(null)
@@ -616,8 +622,38 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
 
   function endDrag() {
     setDragKind(null)
+    setDragSourceId(null)
     setDragOverItemId(null)
     setDragOverTrash(false)
+  }
+
+  // Build a styled clone of the source element to use as the drag
+  // ghost. The browser's default drag image is a screenshot of the
+  // source styled with the surrounding background, which can read as
+  // "blank" depending on the card's CSS. A cloned + tilted + shadowed
+  // copy gives a clearly visible greyed-out ghost that tracks the
+  // cursor while the source stays in place.
+  function attachDragImage(e: React.DragEvent, src: HTMLElement) {
+    const clone = src.cloneNode(true) as HTMLElement
+    clone.style.position = 'fixed'
+    clone.style.top = '-9999px'
+    clone.style.left = '-9999px'
+    clone.style.width = `${src.offsetWidth}px`
+    clone.style.opacity = '0.85'
+    clone.style.pointerEvents = 'none'
+    clone.style.boxShadow = '0 14px 30px rgba(0, 0, 0, 0.25)'
+    clone.style.transform = 'rotate(-1.5deg)'
+    clone.style.background = 'var(--surface)'
+    document.body.appendChild(clone)
+    try {
+      e.dataTransfer.setDragImage(clone, Math.min(src.offsetWidth / 2, 200), 28)
+    } catch {
+      // Some sandboxed contexts disallow setDragImage; fall back to the
+      // browser default silently.
+    }
+    // The browser snapshots the drag image synchronously after this
+    // event handler returns. Clean up on the next tick.
+    setTimeout(() => clone.remove(), 0)
   }
 
   // Drop handler for "candidate dragged onto empty slot". Reuses the
@@ -789,12 +825,13 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
               const draggable = isSong && filled
               if (draggable) {
                 dragHandlers.onDragStart = (e) => {
-                  e.dataTransfer.setData(
-                    'application/x-songpicker',
-                    JSON.stringify({ kind: 'slot', itemId: it.id }),
-                  )
+                  // text/plain is required for Firefox to accept the
+                  // drag at all; the real payload lives in React state.
+                  e.dataTransfer.setData('text/plain', it.id)
                   e.dataTransfer.effectAllowed = 'move'
                   setDragKind('slot')
+                  setDragSourceId(it.id)
+                  attachDragImage(e, e.currentTarget)
                 }
                 dragHandlers.onDragEnd = endDrag
               }
@@ -811,25 +848,22 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                 }
                 dragHandlers.onDrop = (e) => {
                   e.preventDefault()
-                  try {
-                    const raw = e.dataTransfer.getData(
-                      'application/x-songpicker',
-                    )
-                    const data = raw ? JSON.parse(raw) : null
-                    if (data?.kind === 'candidate' && data.candidateId) {
-                      void dropCandidateOnSlot(data.candidateId, it.id)
-                    }
-                  } finally {
-                    endDrag()
+                  if (dragKind === 'candidate' && dragSourceId) {
+                    void dropCandidateOnSlot(dragSourceId, it.id)
                   }
+                  endDrag()
                 }
               }
+              const isBeingDragged =
+                dragKind === 'slot' && dragSourceId === it.id
               return (
                 <li
                   key={it.id}
                   className={`${cls}${isDropTarget ? ' drag-target' : ''}${
                     isDropTarget && dragOverItemId === it.id ? ' drag-over' : ''
-                  }${draggable ? ' is-draggable' : ''}`}
+                  }${draggable ? ' is-draggable' : ''}${
+                    isBeingDragged ? ' is-dragging' : ''
+                  }`}
                   draggable={draggable || undefined}
                   {...dragHandlers}
                 >
@@ -843,6 +877,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                           target="_blank"
                           rel="noopener noreferrer"
                           title="Open song in Planning Center"
+                          // Anchors are natively draggable (for URL
+                          // drops); turn that off so the parent <li>
+                          // gets the dragstart instead.
+                          draggable={false}
                         >
                           {displayTitle || '(song)'} ↗
                         </a>
@@ -909,6 +947,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       target="_blank"
                       rel="noopener noreferrer"
                       title="Search Spotify"
+                      draggable={false}
                     >
                       Spotify ↗
                     </a>
@@ -1241,21 +1280,24 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             {active.map((c) => {
               const matched = c.matchStatus === 'matched' && c.song
               const candidateDraggable = !!matched && !c.committedAt
+              const candidateBeingDragged =
+                dragKind === 'candidate' && dragSourceId === c.id
               return (
                 <li
                   key={c.id}
                   className={`candidate match-${c.matchStatus} decision-${c.decision}${
                     candidateDraggable ? ' is-draggable' : ''
-                  }`}
+                  }${candidateBeingDragged ? ' is-dragging' : ''}`}
                   draggable={candidateDraggable || undefined}
                   onDragStart={(e) => {
                     if (!candidateDraggable) return
-                    e.dataTransfer.setData(
-                      'application/x-songpicker',
-                      JSON.stringify({ kind: 'candidate', candidateId: c.id }),
-                    )
+                    // text/plain keeps Firefox happy; the real payload
+                    // lives in dragKind + dragSourceId.
+                    e.dataTransfer.setData('text/plain', c.id)
                     e.dataTransfer.effectAllowed = 'move'
                     setDragKind('candidate')
+                    setDragSourceId(c.id)
+                    attachDragImage(e, e.currentTarget)
                   }}
                   onDragEnd={endDrag}
                 >
@@ -1267,6 +1309,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                         target="_blank"
                         rel="noopener noreferrer"
                         title="Open in Planning Center"
+                        draggable={false}
                       >
                         {c.suggestion.title} ↗
                       </a>
@@ -1338,6 +1381,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       target="_blank"
                       rel="noopener noreferrer"
                       title="Search Spotify"
+                      draggable={false}
                     >
                       Spotify ↗
                     </a>

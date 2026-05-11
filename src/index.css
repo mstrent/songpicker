@@ -835,6 +835,13 @@ textarea {
 .service-order .item.is-draggable:active {
   cursor: grabbing;
 }
+/* Source element fades while it's being dragged — the floating drag
+   ghost (a styled clone) carries the visual weight; the dimmed source
+   tells the user where the card came from without removing it. */
+.service-order .item.is-dragging,
+.candidate.is-dragging {
+  opacity: 0.4;
+}
 /* When a candidate drag is active, empty song slots become drop
    targets — a clear accent outline announces the affordance. The over
    state lifts the soft fill so the user sees exactly which slot they're
