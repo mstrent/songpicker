@@ -690,25 +690,7 @@ textarea {
   margin: 0;
   font-size: 1.7rem;
   letter-spacing: -0.015em;
-  /* Title sits in the sticky header right above the date subtitle.
-     Block-size: 1lh + line-height: 1 still leaves the natural font
-     ascender/descender space around the glyphs (~0.2em above caps,
-     ~0.2em below baseline). Shrink the block-size with display: block
-     and override the box height directly so the meta line tucks
-     right up under the visible baseline of the title. */
   line-height: 1;
-  /* Clamp the rendered box height to the cap-height area of the
-     glyphs — the descender for "y" / "p" / "g" still renders into
-     the gap below, which is what we want here so the date subtitle
-     sits right beneath the title text. */
-  display: block;
-}
-.plan-detail h2::after {
-  /* Negative bottom space — pulls following siblings up by the
-     unused descender room inside h2's line-box. */
-  content: '';
-  display: block;
-  margin-bottom: -0.35rem;
 }
 .plan-detail .pco-link {
   font-size: 0.85rem;
@@ -728,23 +710,21 @@ textarea {
 .plan-detail .meta {
   color: var(--muted);
   font-size: 0.92rem;
-  margin: 0;
+  /* Negative top margin pulls the date subtitle up under the title's
+     baseline — h2 line-box and meta line-box each carry ~0.2em of
+     natural ascender/descender padding around their glyphs, and this
+     reclaims that wasted space so the title and subtitle read as a
+     tight pair. */
+  margin: -0.55rem 0 0;
   line-height: 1.2;
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
   gap: 0.75rem;
   flex-wrap: wrap;
 }
 .plan-detail .meta .meta-text {
   min-width: 0;
-}
-/* Pull the meta line up so it sits flush against the title baseline
-   rather than below the title's full line-box descender room. */
-.plan-detail .meta::before {
-  content: '';
-  display: block;
-  margin-top: -0.25rem;
 }
 
 .plan-detail section {
