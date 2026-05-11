@@ -277,10 +277,15 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         .filter((c) => c.decision === 'reject')
         .map((c) => c.suggestion.title)
       const serviceOrder = buildServiceOrderText(items)
-      const history = messages.map((m) => ({
-        role: m.role === 'system' ? 'user' : m.role,
-        content: m.content,
-      }))
+      // System messages live in the chat log for the user's benefit
+      // (reject/unreject/commit/auto-replace markers) — they're not
+      // sent to the model. AI decisions already get the structured
+      // shortlisted/rejected state on every call.
+      const history = messages
+        .filter((m): m is SessionMessage & { role: 'user' | 'assistant' } =>
+          m.role !== 'system',
+        )
+        .map((m) => ({ role: m.role, content: m.content }))
 
       const res = await suggestSongs({
         theme,
@@ -337,6 +342,15 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         committedAt: null,
       }))
       setCandidates((prev) => [...prev, ...newOnes])
+
+      // Surface silent auto-replacements in the chat log so the user can
+      // see what the AI swapped in without it feeling magical/silent.
+      if (!opts.addToChat && accepted.length > 0) {
+        const titles = accepted.map((s) => s.title).join(', ')
+        appendSystemMessage(
+          `↻ Replaced rejected song${accepted.length === 1 ? '' : 's'} with: ${titles}`,
+        )
+      }
 
       newOnes.forEach((c) => {
         searchSongs({ query: c.suggestion.title })
@@ -406,6 +420,18 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setDebug(null)
   }
 
+  function appendSystemMessage(content: string) {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: newCandidateId(),
+        role: 'system',
+        content,
+        timestamp: Date.now(),
+      },
+    ])
+  }
+
   function setDecision(id: string, next: Decision) {
     const target = candidates.find((c) => c.id === id)
     if (!target) return
@@ -426,10 +452,16 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       }),
     )
 
-    // Newly rejected → schedule a replacement so the pool stays the same
-    // effective size. Un-rejecting doesn't claw replacements back.
+    // Surface decision changes in the chat log so the conversation
+    // captures everything that shapes future suggestions, not just
+    // typed refinements.
     if (newDecision === 'reject' && oldDecision !== 'reject') {
+      appendSystemMessage(`✗ Rejected: ${target.suggestion.title}`)
+      // Newly rejected → schedule a replacement so the pool stays the
+      // same effective size.
       scheduleReplacement()
+    } else if (oldDecision === 'reject' && newDecision !== 'reject') {
+      appendSystemMessage(`↩ Unrejected: ${target.suggestion.title}`)
     }
   }
 
@@ -445,6 +477,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
 
   async function commitCandidate(c: CandidateMatch) {
     if (!c.assignedSlotItemId || !c.song || c.committedAt) return
+    const slot = (items ?? []).find((it) => it.id === c.assignedSlotItemId)
     try {
       await commitSlot({
         serviceTypeId,
@@ -456,6 +489,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         prev.map((x) =>
           x.id === c.id ? { ...x, committedAt: Date.now() } : x,
         ),
+      )
+      appendSystemMessage(
+        `↗ Committed “${c.suggestion.title}” → ${slot?.title ?? 'slot'}`,
       )
       // Refresh service order so the slot flips from empty to filled.
       invalidatePlanContext(serviceTypeId, planId)
@@ -729,20 +765,29 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         </label>
         {messages.length > 0 && (
           <div className="chat-log">
-            {messages.map((m) => (
-              <div key={m.id} className={`chat-msg chat-msg-${m.role}`}>
-                <span className="chat-role">
-                  {m.role === 'user' ? (
-                    'You'
-                  ) : (
-                    <>
-                      <span className="sparkle" aria-hidden>✨</span> AI
-                    </>
-                  )}
-                </span>
-                <div className="chat-content">{m.content}</div>
-              </div>
-            ))}
+            {messages.map((m) => {
+              if (m.role === 'system') {
+                return (
+                  <div key={m.id} className="chat-msg chat-msg-system">
+                    {m.content}
+                  </div>
+                )
+              }
+              return (
+                <div key={m.id} className={`chat-msg chat-msg-${m.role}`}>
+                  <span className="chat-role">
+                    {m.role === 'user' ? (
+                      'You'
+                    ) : (
+                      <>
+                        <span className="sparkle" aria-hidden>✨</span> AI
+                      </>
+                    )}
+                  </span>
+                  <div className="chat-content">{m.content}</div>
+                </div>
+              )
+            })}
           </div>
         )}
         <label>

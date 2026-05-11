@@ -1001,6 +1001,15 @@ textarea {
   border-image: var(--ai-gradient) 1;
   border-image-slice: 1;
 }
+.plan-detail .criteria .chat-msg-system {
+  align-self: center;
+  text-align: center;
+  font-size: 0.78rem;
+  font-style: italic;
+  color: var(--muted);
+  padding: 0.1rem 0.6rem;
+  max-width: 100%;
+}
 
 /* candidates */
 
@@ -1461,25 +1470,33 @@ textarea {
   flex-wrap: wrap;
   gap: 0.4rem;
   min-width: 0;
+  align-items: flex-start;
 }
+/* display: contents lifts each <details>'s summary + body into the
+   prompt-editors flex container as direct children. That lets the
+   summaries (pills) stay inline together at the top, and the open
+   body wrap to its own row spanning the full width — instead of the
+   open body pushing the other pill below it inside its own details. */
 .prompt-editors .structure-prompt {
-  margin: 0;
+  display: contents;
+}
+.prompt-editors .structure-prompt summary {
   flex: 0 0 auto;
-  min-width: 0;
 }
-/* When any pill is expanded, the prompt-editors row breaks to its own
-   line and the open pill stretches to fill it — keeps the textarea and
-   help text inside the column instead of bleeding into the right one. */
-.suggest-header:has(.structure-prompt[open]) .prompt-editors {
-  flex-basis: 100%;
+.prompt-editors .structure-prompt:not([open]) > .body {
+  display: none;
 }
-.prompt-editors .structure-prompt[open] {
-  flex: 1 1 100%;
-  width: 100%;
-}
-.structure-prompt[open] .body {
+.prompt-editors .structure-prompt[open] > .body {
+  flex: 0 0 100%;
   width: 100%;
   box-sizing: border-box;
+  order: 10;
+}
+/* When at least one pill is open, the prompt-editors row breaks to its
+   own line inside the .suggest-header. Pills stay together at the top
+   of that row; the open body takes the second row. */
+.suggest-header:has(.structure-prompt[open]) .prompt-editors {
+  flex-basis: 100%;
 }
 
 .structure-prompt {
