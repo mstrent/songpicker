@@ -750,6 +750,17 @@ textarea {
   text-decoration: underline;
 }
 
+.candidate .chart-search-link {
+  color: var(--warm-strong);
+  font-size: 0.8rem;
+  text-decoration: none;
+  border-bottom: 1px dashed var(--warm);
+}
+.candidate .chart-search-link:hover {
+  border-bottom-style: solid;
+  text-decoration: none;
+}
+
 /* ──── AI affordances ──── */
 
 .ai-button {

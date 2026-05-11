@@ -324,7 +324,18 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       </>
                     )}
                     {c.status === 'unmatched' && (
-                      <span className="badge unmatched">not in library</span>
+                      <>
+                        <span className="badge unmatched">not in library</span>
+                        <a
+                          className="chart-search-link"
+                          href={`https://www.praisecharts.com/search?q=${encodeURIComponent(c.suggestion.title)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Search PraiseCharts for a chord chart"
+                        >
+                          Find chart ↗
+                        </a>
+                      </>
                     )}
                     {c.status === 'error' && (
                       <span className="badge error" title={c.error}>
