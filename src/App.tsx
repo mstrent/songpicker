@@ -2,12 +2,10 @@ import { useEffect, useState } from 'react'
 import { onAuthStateChanged, type User } from 'firebase/auth'
 import { auth } from './lib/firebase'
 import { logOut } from './lib/auth'
-import { useProfile } from './lib/profile'
 import { config } from './config'
 import { SignIn } from './components/SignIn'
 import { PlanList } from './components/PlanList'
 import { PlanDetail } from './components/PlanDetail'
-import { UserBadge } from './components/UserBadge'
 
 function useHashRoute(): string {
   const [hash, setHash] = useState(() => window.location.hash)
@@ -22,7 +20,6 @@ function useHashRoute(): string {
 export default function App() {
   const [user, setUser] = useState<User | null | undefined>(undefined)
   const hash = useHashRoute()
-  const profile = useProfile(user ?? null)
 
   useEffect(() => onAuthStateChanged(auth, setUser), [])
 
@@ -41,7 +38,6 @@ export default function App() {
   }
 
   const planMatch = hash.match(/^#plan\/([^/]+)\/([^/]+)$/)
-  const leaderName = profile?.leaderName ?? user.displayName ?? ''
 
   return (
     <div className="app">
@@ -57,7 +53,10 @@ export default function App() {
             song<span className="accent">picker</span>
           </a>
         </h1>
-        <UserBadge user={user} profile={profile} />
+        <div className="who">
+          <span className="email">{user.email}</span>
+          <button onClick={() => logOut()}>Sign out</button>
+        </div>
       </header>
       <main>
         {planMatch ? (
@@ -65,7 +64,7 @@ export default function App() {
         ) : (
           <>
             <h2>Upcoming plans</h2>
-            <PlanList currentUserName={leaderName} />
+            <PlanList currentUserName={user.displayName} />
           </>
         )}
       </main>
