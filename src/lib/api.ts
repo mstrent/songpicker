@@ -84,13 +84,24 @@ export const listPlans = httpsCallable<void, { plans: Plan[] }>(functions, 'list
 
 export const getPlanContext = httpsCallable<
   { serviceTypeId: string; planId: string },
-  { plan: Plan; notes: PlanNote[]; items: PlanItem[]; userTheme: string }
+  {
+    plan: Plan
+    notes: PlanNote[]
+    items: PlanItem[]
+    userTheme: string
+    userNotes: string
+  }
 >(functions, 'getPlanContext')
 
 export const savePlanTheme = httpsCallable<
   { planId: string; theme: string },
   { ok: boolean }
 >(functions, 'savePlanTheme')
+
+export const savePlanNotes = httpsCallable<
+  { planId: string; notes: string },
+  { ok: boolean }
+>(functions, 'savePlanNotes')
 
 export const searchSongs = httpsCallable<{ query: string }, { songs: Song[] }>(
   functions,

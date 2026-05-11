@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  savePlanNotes,
   savePlanTheme,
   searchSongs,
   suggestSongs,
@@ -10,7 +11,7 @@ import {
   type Song,
   type SongSuggestion,
 } from '../lib/api'
-import { loadPlanContext, patchCachedTheme } from '../lib/cache'
+import { loadPlanContext, patchCachedNotes, patchCachedTheme } from '../lib/cache'
 import { isSongSlot } from '../lib/songSlots'
 import { praiseChartsSearchUrl, spotifySearchUrl } from '../lib/searchLinks'
 import { PromptEditor } from './PromptEditor'
@@ -35,6 +36,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
 
   const [theme, setTheme] = useState('')
   const [themeSource, setThemeSource] = useState('')
+  const [notesText, setNotesText] = useState('')
+  const [notesSource, setNotesSource] = useState('')
   const [criteria, setCriteria] = useState('')
   const [count, setCount] = useState(5)
   const [generating, setGenerating] = useState(false)
@@ -44,6 +47,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   const [debug, setDebug] = useState<AiDebug | null>(null)
 
   const themeInitialized = useRef(false)
+  const notesInitialized = useRef(false)
   const countInitialized = useRef(false)
 
   useEffect(() => {
@@ -53,7 +57,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setNotes(null)
     setItems(null)
     setThemeSource('')
+    setNotesSource('')
     themeInitialized.current = false
+    notesInitialized.current = false
     countInitialized.current = false
 
     loadPlanContext(serviceTypeId, planId)
@@ -62,12 +68,19 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         setPlan(ctx.plan)
         setNotes(ctx.notes)
         setItems(ctx.items)
-        const source = ctx.plan.seriesTitle ?? ctx.plan.title ?? ''
-        setThemeSource(source)
+        const themeSrc = ctx.plan.seriesTitle ?? ctx.plan.title ?? ''
+        setThemeSource(themeSrc)
+        const notesSrc = formatNotesSource(ctx.notes)
+        setNotesSource(notesSrc)
         if (!themeInitialized.current) {
           const saved = ctx.userTheme
-          setTheme(saved && saved.trim() ? saved : source)
+          setTheme(saved && saved.trim() ? saved : themeSrc)
           themeInitialized.current = true
+        }
+        if (!notesInitialized.current) {
+          const saved = ctx.userNotes
+          setNotesText(saved && saved.trim() ? saved : notesSrc)
+          notesInitialized.current = true
         }
         if (!countInitialized.current) {
           const songSlotCount = ctx.items.filter(isSongSlot).length
@@ -87,12 +100,14 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setGenerating(true)
     setGenerateError(null)
     try {
-      // Persist whatever theme the user is asking with so future visits to
-      // this plan start with their edited version rather than re-defaulting
-      // from PCO. Best-effort — a save failure doesn't block the suggest.
-      // Patch the SPA cache too so a back-and-return doesn't show stale.
+      // Persist user edits so future visits to this plan start with what
+      // they typed rather than re-defaulting from PCO. Best-effort — a
+      // save failure doesn't block the suggest. Patch the SPA cache too
+      // so a back-and-return doesn't show stale.
       patchCachedTheme(serviceTypeId, planId, theme)
       void savePlanTheme({ planId, theme }).catch(() => {})
+      patchCachedNotes(serviceTypeId, planId, notesText)
+      void savePlanNotes({ planId, notes: notesText }).catch(() => {})
 
       // Also exclude already-picked songs in the plan so the AI doesn't
       // re-suggest what's already filled in.
@@ -103,7 +118,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           .map((it) => it.songTitle!),
       ]
       const serviceOrder = buildServiceOrderText(items)
-      const planNotes = buildPlanNotesText(notes)
       const res = await suggestSongs({
         theme,
         criteria,
@@ -111,7 +125,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         count,
         planId,
         serviceOrder,
-        planNotes,
+        planNotes: notesText,
       })
       setProvider(res.data.provider)
       setDebug(res.data.debug ?? null)
@@ -268,30 +282,37 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         </section>
       )}
 
-      {notes.length > 0 ? (
-        <section className="notes">
-          <h3>
-            Plan context
+      <section className="notes">
+        <h3>
+          Plan context
+          <span
+            className="ai-context-marker"
+            title="Sent to the AI on every Suggest call"
+            aria-hidden
+          >
+            ✨
+          </span>
+          {notesText.trim() !== notesSource.trim() && (
             <span
-              className="ai-context-marker"
-              title="Plan notes from Planning Center are included in the context sent to the AI"
-              aria-hidden
+              className="edited-flag"
+              title={
+                notesSource
+                  ? `Differs from Planning Center notes:\n${notesSource}`
+                  : 'No notes set in Planning Center'
+              }
             >
-              ✨
+              edited
             </span>
-          </h3>
-          <ul>
-            {notes.map((n) => (
-              <li key={n.id}>
-                {n.category && <strong>{n.category}: </strong>}
-                <span>{n.content}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : (
-        <p className="muted">No plan notes set in Planning Center.</p>
-      )}
+          )}
+        </h3>
+        <textarea
+          className="notes-editor"
+          value={notesText}
+          onChange={(e) => setNotesText(e.target.value)}
+          rows={Math.min(8, Math.max(3, notesText.split('\n').length + 1))}
+          placeholder="Sermon theme, scripture, anything else worth flagging to the AI."
+        />
+      </section>
 
       <div className="prompt-editors">
         <PromptEditor type="role" planId={planId} />
@@ -513,11 +534,10 @@ function updateAt<T>(arr: T[], idx: number, fn: (cur: T) => T): T[] {
   return next
 }
 
-// Render plan notes as a bullet list for the AI prompt, dropping any
-// empty-content entries. The Planning Center category prefix (Sermon
-// Theme, Scripture, General, etc.) goes ahead of each line so the model
-// can weigh them appropriately.
-function buildPlanNotesText(notes: PlanNote[] | null): string {
+// Render Planning Center plan notes as the editable seed text. Same shape
+// the AI eventually receives — bullet list with category prefixes — so
+// the source-of-truth comparison for the "edited" flag is meaningful.
+function formatNotesSource(notes: PlanNote[] | null): string {
   if (!notes || notes.length === 0) return ''
   return notes
     .filter((n) => n.content && n.content.trim())

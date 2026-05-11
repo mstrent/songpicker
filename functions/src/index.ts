@@ -19,10 +19,12 @@ import {
   hardcodedDefaultFor,
   loadAdminDefaults,
   loadResolved,
+  loadUserNotes,
   loadUserTheme,
   saveAdminDefault,
   savePlanOverride,
   saveUserDefault,
+  saveUserNotes,
   saveUserTheme,
   type PromptType,
 } from './prompts'
@@ -164,13 +166,14 @@ export const getPlanContext = onCall(async (req) => {
     throw new HttpsError('invalid-argument', 'serviceTypeId and planId required')
   }
   const client = await pcoForUser(uid)
-  const [plan, notes, items, userTheme] = await Promise.all([
+  const [plan, notes, items, userTheme, userNotes] = await Promise.all([
     client.getPlan(serviceTypeId, planId),
     client.getPlanNotes(serviceTypeId, planId),
     client.listPlanItems(serviceTypeId, planId),
     loadUserTheme(uid, planId),
+    loadUserNotes(uid, planId),
   ])
-  return { plan, notes, items, userTheme }
+  return { plan, notes, items, userTheme, userNotes }
 })
 
 export const savePlanTheme = onCall(async (req) => {
@@ -181,6 +184,17 @@ export const savePlanTheme = onCall(async (req) => {
     throw new HttpsError('invalid-argument', 'theme (string) required')
   }
   await saveUserTheme(uid, planId, theme)
+  return { ok: true }
+})
+
+export const savePlanNotes = onCall(async (req) => {
+  const { uid } = requireAllowed(req)
+  const { planId, notes } = req.data as { planId?: string; notes?: string }
+  if (!planId) throw new HttpsError('invalid-argument', 'planId required')
+  if (typeof notes !== 'string') {
+    throw new HttpsError('invalid-argument', 'notes (string) required')
+  }
+  await saveUserNotes(uid, planId, notes)
   return { ok: true }
 })
 

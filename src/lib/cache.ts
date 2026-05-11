@@ -10,6 +10,7 @@ interface PlanContext {
   notes: PlanNote[]
   items: PlanItem[]
   userTheme: string
+  userNotes: string
 }
 
 // Session-scoped cache for getPlanContext. Keyed by serviceTypeId/planId.
@@ -60,5 +61,19 @@ export function patchCachedTheme(
   contextCache.set(
     k,
     pending.then((ctx) => ({ ...ctx, userTheme: theme })),
+  )
+}
+
+export function patchCachedNotes(
+  serviceTypeId: string,
+  planId: string,
+  notes: string,
+): void {
+  const k = key(serviceTypeId, planId)
+  const pending = contextCache.get(k)
+  if (!pending) return
+  contextCache.set(
+    k,
+    pending.then((ctx) => ({ ...ctx, userNotes: notes })),
   )
 }

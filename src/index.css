@@ -580,18 +580,37 @@ textarea {
 
 /* notes */
 
-.plan-detail .notes ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: grid;
+.plan-detail .notes h3 {
+  display: flex;
+  align-items: center;
   gap: 0.5rem;
 }
-.plan-detail .notes li {
-  border-left: 3px solid var(--border-strong);
-  padding: 0.3rem 0.85rem;
-  background: var(--surface);
-  border-radius: 0 6px 6px 0;
+.plan-detail .notes h3 .edited-flag {
+  background: var(--warm-soft);
+  color: var(--warm-strong);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  cursor: help;
+}
+.plan-detail .notes-editor {
+  width: 100%;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  resize: vertical;
+}
+.plan-detail .notes-editor:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 /* service order */
