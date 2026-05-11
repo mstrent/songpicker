@@ -23,8 +23,8 @@ const COPY: Record<PromptType, Copy> = {
     help: 'Extra context the AI receives on every Suggest call, shaping how songs are distributed across the service (opener, mid-service, closer, etc.).',
   },
   role: {
-    label: 'AI role',
-    help: "Describe who the AI is and how it should think about your service (its persona, the kind of church you lead, the theological frame you prefer, etc.). The technical JSON-format requirements are added behind the scenes — you can edit freely without breaking output.",
+    label: 'AI persona',
+    help: "Describe the AI's persona — who it is, how it should think about your service, the kind of church you lead, the theological frame you prefer, etc. The technical JSON-format requirements are added behind the scenes, so you can edit freely without breaking output.",
   },
 }
 
