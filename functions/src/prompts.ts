@@ -1,17 +1,28 @@
 import { getFirestore } from 'firebase-admin/firestore'
 
-export type PromptType = 'structure' | 'system'
+export type PromptType = 'structure' | 'role'
 
 export const DEFAULT_STRUCTURE_PROMPT = `1 song for the opener: should be upbeat to wake people up. Then 3 songs after announcements: continuing the upbeat feel but moving toward slow and reflective to prepare folks for the message. Then 1 closing song which reinforces the theme (or call to action) and is somewhere in the "medium tempo" to "slow and reflective" range.`
 
-export const DEFAULT_SYSTEM_PROMPT = `You suggest contemporary worship songs for a church service.
-Given a theme and criteria, return real, well-known worship songs that fit.
-Reply ONLY with JSON in this exact shape:
+// The editable "personality/role" portion of the system message.
+export const DEFAULT_ROLE_PROMPT = `You suggest contemporary worship songs for a church service. Given a theme and criteria, return real, well-known worship songs that fit.`
+
+// The non-editable technical instructions that constrain output format.
+// These get appended to whatever role the user has configured before being
+// sent as the model's system message. Kept hidden from the UI so users can
+// freely edit the role without breaking JSON parsing.
+const TECHNICAL_REQUIREMENTS = `Reply ONLY with JSON in this exact shape:
 {"suggestions":[{"title":"Song Title","author":"Songwriter Name","reasoning":"why this fits"}]}
 Return exactly the requested count. Do not invent songs that don't exist.`
 
 export function builtInFor(type: PromptType): string {
-  return type === 'system' ? DEFAULT_SYSTEM_PROMPT : DEFAULT_STRUCTURE_PROMPT
+  return type === 'role' ? DEFAULT_ROLE_PROMPT : DEFAULT_STRUCTURE_PROMPT
+}
+
+// Combine the user-editable role with the always-on technical requirements
+// into the literal system message the model receives.
+export function composeSystemPrompt(role: string): string {
+  return `${role.trim()}\n\n${TECHNICAL_REQUIREMENTS}`
 }
 
 interface PromptSection {
@@ -21,7 +32,7 @@ interface PromptSection {
 
 interface UserPromptDoc {
   structure: PromptSection
-  system: PromptSection
+  role: PromptSection
 }
 
 const collection = 'userPrompts'
@@ -29,11 +40,14 @@ const collection = 'userPrompts'
 async function loadDoc(uid: string): Promise<UserPromptDoc> {
   const snap = await getFirestore().doc(`${collection}/${uid}`).get()
   const raw = (snap.exists ? snap.data() : null) as Record<string, unknown> | null
-  // Backward-compat: an earlier version stored structure prompts at the top
-  // level (`default`, `byPlan`) without a section nesting. Read both shapes,
-  // preferring the new nested one. Writes always use the new layout.
+  // Backward-compat reads:
+  //   * older flat shape — top-level `default` / `byPlan` was the structure prompt
+  //   * earlier nested shape — `system` section is now `role`
   const structRaw = (raw?.structure ?? {}) as Record<string, unknown>
-  const sysRaw = (raw?.system ?? {}) as Record<string, unknown>
+  const roleRaw =
+    (raw?.role as Record<string, unknown> | undefined) ??
+    (raw?.system as Record<string, unknown> | undefined) ??
+    {}
   return {
     structure: {
       default:
@@ -47,9 +61,9 @@ async function loadDoc(uid: string): Promise<UserPromptDoc> {
         (raw?.byPlan as Record<string, string> | undefined) ??
         {},
     },
-    system: {
-      default: typeof sysRaw.default === 'string' ? sysRaw.default : '',
-      byPlan: (sysRaw.byPlan as Record<string, string> | undefined) ?? {},
+    role: {
+      default: typeof roleRaw.default === 'string' ? roleRaw.default : '',
+      byPlan: (roleRaw.byPlan as Record<string, string> | undefined) ?? {},
     },
   }
 }

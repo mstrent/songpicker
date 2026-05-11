@@ -22,9 +22,9 @@ const COPY: Record<PromptType, Copy> = {
     label: 'AI service-flow prompt',
     help: 'Extra context the AI receives on every Suggest call, shaping how songs are distributed across the service (opener, mid-service, closer, etc.).',
   },
-  system: {
-    label: 'AI system prompt',
-    help: "High-level instructions to the model about its role and output format. Edit cautiously — bad changes here can break JSON parsing.",
+  role: {
+    label: 'AI role',
+    help: "Describe who the AI is and how it should think about your service (its persona, the kind of church you lead, the theological frame you prefer, etc.). The technical JSON-format requirements are added behind the scenes — you can edit freely without breaking output.",
   },
 }
 

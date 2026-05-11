@@ -91,7 +91,7 @@ export const searchSongs = httpsCallable<{ query: string }, { songs: Song[] }>(
   'searchSongs',
 )
 
-export type PromptType = 'structure' | 'system'
+export type PromptType = 'structure' | 'role'
 export type PromptSource = 'plan' | 'user' | 'system'
 
 export const suggestSongs = httpsCallable<
@@ -107,7 +107,7 @@ export const suggestSongs = httpsCallable<
     provider: string
     debug: AiDebug
     structureSource: PromptSource
-    systemSource: PromptSource
+    roleSource: PromptSource
   }
 >(functions, 'suggestSongs')
 

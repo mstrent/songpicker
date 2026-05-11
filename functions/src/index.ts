@@ -14,6 +14,7 @@ import type { NewItem } from './pco/types'
 import {
   builtInFor,
   clearPlanOverride,
+  composeSystemPrompt,
   loadResolved,
   savePlanOverride,
   saveUserDefault,
@@ -186,9 +187,9 @@ export const suggestSongs = onCall(
         )
     }
 
-    const [structure, system] = await Promise.all([
+    const [structure, role] = await Promise.all([
       loadResolved(uid, 'structure', planId),
-      loadResolved(uid, 'system', planId),
+      loadResolved(uid, 'role', planId),
     ])
 
     const ai = getAiProvider(provider, apiKey)
@@ -196,7 +197,7 @@ export const suggestSongs = onCall(
       theme,
       criteria: criteria ?? '',
       structurePrompt: structure.effective.value,
-      systemPrompt: system.effective.value,
+      systemPrompt: composeSystemPrompt(role.effective.value),
       exclude,
       count,
     })
@@ -205,14 +206,14 @@ export const suggestSongs = onCall(
       debug: result.debug,
       provider,
       structureSource: structure.effective.source,
-      systemSource: system.effective.source,
+      roleSource: role.effective.source,
     }
   },
 )
 
 function parseType(raw: unknown): PromptType {
-  if (raw === 'structure' || raw === 'system') return raw
-  throw new HttpsError('invalid-argument', 'type must be "structure" or "system"')
+  if (raw === 'structure' || raw === 'role') return raw
+  throw new HttpsError('invalid-argument', 'type must be "structure" or "role"')
 }
 
 export const getPromptConfig = onCall(async (req) => {

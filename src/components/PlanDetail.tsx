@@ -239,8 +239,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       )}
 
       <div className="prompt-editors">
+        <PromptEditor type="role" planId={planId} />
         <PromptEditor type="structure" planId={planId} />
-        <PromptEditor type="system" planId={planId} />
       </div>
 
       <section className="criteria">
