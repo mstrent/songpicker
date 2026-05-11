@@ -392,6 +392,30 @@ textarea {
 .plans .leaders {
   font-style: italic;
 }
+.plans .songs-progress {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  padding: 0.05rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  font-size: 0.75rem;
+}
+.plans .songs-progress.progress-done {
+  background: var(--success-soft);
+  color: var(--success);
+  border-color: transparent;
+}
+.plans .songs-progress.progress-empty {
+  background: var(--warm-soft);
+  color: var(--warm-strong);
+  border-color: transparent;
+}
+.plans .songs-progress.progress-partial {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: transparent;
+}
 
 /* plan detail */
 

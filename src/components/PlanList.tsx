@@ -90,10 +90,31 @@ export function PlanList({ currentUserName, currentUserEmail }: Props) {
                 led by {leaders.map((l) => l.name).join(', ')}
               </span>
             )}
+            {p.songCounts && p.songCounts.total > 0 && (
+              <span
+                className={`songs-progress ${songsProgressClass(p.songCounts)}`}
+                title={
+                  p.songCounts.filled === p.songCounts.total
+                    ? 'All songs picked'
+                    : `${p.songCounts.total - p.songCounts.filled} song${
+                        p.songCounts.total - p.songCounts.filled === 1 ? '' : 's'
+                      } left to pick`
+                }
+              >
+                {p.songCounts.filled}/{p.songCounts.total} songs
+              </span>
+            )}
           </div>
         </a>
       </li>
     )
+  }
+
+  function songsProgressClass({ filled, total }: { filled: number; total: number }): string {
+    if (total === 0) return ''
+    if (filled === 0) return 'progress-empty'
+    if (filled === total) return 'progress-done'
+    return 'progress-partial'
   }
 
   const pastCountLabel =

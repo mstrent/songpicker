@@ -4,6 +4,7 @@ import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/
 
 import { getAiProvider } from './ai'
 import { PcoClient } from './pco/client'
+import { countSongs } from './pco/songSlots'
 import type { NewItem } from './pco/types'
 import {
   AI_PROVIDER,
@@ -61,7 +62,10 @@ export const listPlans = onCall(
     const plans = await Promise.all(
       filtered.map(async (p) => {
         try {
-          const people = await client.listPlanPeople(p.serviceTypeId, p.id)
+          const [people, items] = await Promise.all([
+            client.listPlanPeople(p.serviceTypeId, p.id),
+            client.listPlanItems(p.serviceTypeId, p.id),
+          ])
           const teamMembers = people
             .filter((pp) => pp.status !== 'D')
             .filter((pp): pp is typeof pp & { name: string } => !!pp.name)
@@ -72,7 +76,8 @@ export const listPlans = onCall(
               position: pp.position,
               team: pp.team,
             }))
-          return { ...p, teamMembers }
+          const songCounts = countSongs(items)
+          return { ...p, teamMembers, songCounts }
         } catch {
           return p
         }

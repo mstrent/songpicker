@@ -9,6 +9,7 @@ import {
   type Song,
   type SongSuggestion,
 } from '../lib/api'
+import { isSongSlot } from '../lib/songSlots'
 
 interface CandidateMatch {
   suggestion: SongSuggestion
@@ -164,18 +165,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           <h3>Service order</h3>
           <ol>
             {items.map((it) => {
-              // Definitive signal a slot is filled: it has a song link.
+              // Filled = linked to a real song; isSong from shared helper so
+              // the list-view badge and detail-view styling agree.
               const filled = it.songId != null
-              // For empty slots we need to know "is this meant to hold a
-              // song?" without false-flagging items whose title happens to
-              // contain "song" (e.g., a real song title like "Love Song").
-              // Patterns we trust: PCO's explicit song item_type, or a
-              // strict title pattern: "Song <number>" or
-              // "Opening/Closing song".
-              const isSong =
-                filled ||
-                (it.itemType ?? '').toLowerCase() === 'song' ||
-                /^(song\s+\d+|(opening|closing)\s+song)$/i.test(it.title.trim())
+              const isSong = isSongSlot(it)
               const cls = `item type-${it.itemType}${
                 isSong ? (filled ? ' song-filled' : ' song-empty-slot') : ''
               }`

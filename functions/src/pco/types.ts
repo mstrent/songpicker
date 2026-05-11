@@ -10,6 +10,11 @@ export interface TeamMember {
   team: string | null
 }
 
+export interface SongCounts {
+  filled: number
+  total: number
+}
+
 export interface Plan {
   id: string
   serviceTypeId: string
@@ -18,6 +23,7 @@ export interface Plan {
   seriesTitle: string | null
   sortDate: string | null
   teamMembers?: TeamMember[]
+  songCounts?: SongCounts
 }
 
 export interface PlanPerson {
