@@ -547,6 +547,14 @@ textarea {
   padding: 0.5rem 0 0.5rem;
   margin-top: -0.5rem;
   border-bottom: 1px solid var(--border);
+  /* Flex column with a small explicit gap lets us control the
+     back-link → title → meta stacking precisely. Block-flow margins
+     between h2 and .meta were stacking with line-box leading and
+     leaving more vertical space than wanted. */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.15rem;
 }
 
 .plan-detail .plan-body {
@@ -663,8 +671,8 @@ textarea {
 }
 
 .plan-detail .back {
-  display: inline-block;
-  margin-bottom: 0.25rem;
+  align-self: flex-start;
+  margin: 0;
   color: var(--muted);
   text-decoration: none;
   font-size: 0.9rem;
@@ -707,7 +715,7 @@ textarea {
 .plan-detail .meta {
   color: var(--muted);
   font-size: 0.92rem;
-  margin-top: 0.35rem;
+  margin: 0;
   line-height: 1.2;
   display: flex;
   align-items: baseline;
