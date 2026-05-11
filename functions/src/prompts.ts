@@ -17,11 +17,11 @@ export const TECHNICAL_REQUIREMENTS = `Reply ONLY with JSON in this exact shape:
 
 The chorusSnippet should be one or two recognisable lines from the song's chorus so the user can confirm which song this is at a glance — different songs share titles, but rarely lyrics. Keep it under 100 characters. Quote the actual chorus, don't paraphrase. If you genuinely don't know the lyrics, omit the field rather than invent.
 
-When a "Service structure" is provided, identify the distinct song roles/slots it describes (e.g. "opener", "mid-service", "closer") and tag each suggestion's "slots" with the slot(s) it would fit — a song may fit multiple slots.
+When a "Service structure" is provided, parse it into the distinct conceptual song roles it describes (e.g. "opener", "mid-service", "closer"). These role names — taken from the structure prompt itself — are what each suggestion's "slots" field should contain. A song may fit multiple roles, so the array can list more than one. NEVER use service-order item titles like "Song 1", "Song 2", or "Closing song" as slot tags; always use the conceptual role names from the structure prompt.
 
-Cross-reference these slots against the "Current service order" (when provided). Any slot whose corresponding service-order item is already filled (shown with "— picked: <title>") is DONE — do not propose songs for it. Focus all suggestions on the slots whose service-order items are still marked "(empty, needs a pick)".
+If a "Current service order" is also provided, map each song position in that order to the structure role it represents — typically by sequence (the first song position is the opener, the last is the closer, the ones in between are mid-service or similar middle roles). Then: any role whose positions are all already filled (marked "— picked: <title>") is DONE — do not suggest more songs for it. Focus suggestions on the roles that still have positions marked "(empty, needs a pick)".
 
-Within the user's requested min–max range, try to cover every unfilled slot with at least 3 options so the user has real choice; only fall below that when the requested maximum doesn't leave room. Never exceed the requested maximum. When no service structure is provided, omit "slots" or use an empty array.
+Within the user's requested min–max range, try to cover every still-needed role with at least 3 options so the user has real choice; only fall below that when the requested maximum doesn't leave room. Never exceed the requested maximum. When no service structure is provided, omit "slots" or use an empty array.
 
 Do not invent songs that don't exist.`
 
