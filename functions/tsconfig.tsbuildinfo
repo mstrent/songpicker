@@ -1,1 +1,0 @@
-{"root":["./src/config.ts","./src/index.ts","./src/prompts.ts","./src/ai/anthropic.ts","./src/ai/gemini.ts","./src/ai/index.ts","./src/ai/openai.ts","./src/ai/types.ts","./src/ai/userMessage.ts","./src/pco/client.ts","./src/pco/credentials.ts","./src/pco/songSlots.ts","./src/pco/types.ts"],"version":"5.6.3"}
