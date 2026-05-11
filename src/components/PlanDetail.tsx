@@ -682,10 +682,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         </section>
       )}
 
-      {items.length > 0 && <hr className="section-divider" aria-hidden />}
-
-      <section className="criteria">
-        <div className="suggest-header">
+      <section className="suggest-section">
+        <div className="suggest-section-header">
           <h3>Suggest songs</h3>
           <div className="prompt-pills">
             <PromptPill
@@ -718,6 +716,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             hook={structureHook}
           />
         )}
+        <div className="suggest-form">
         <label>
           <span className="theme-label">
             <span>
@@ -894,6 +893,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           )}
         </div>
         {generateError && <div className="error">Error: {generateError}</div>}
+        </div>
       </section>
 
       {(() => {

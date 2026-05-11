@@ -575,22 +575,38 @@ textarea {
   min-width: 0;
 }
 
-/* Faint gradient hairline between sections in the left column —
-   bridges the visual gap between service order and Suggest card
-   without imposing a hard horizontal rule. */
-.plan-detail .section-divider {
-  border: 0;
-  height: 1px;
-  width: 60%;
-  margin: 0.25rem auto;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    var(--border-strong) 30%,
-    var(--border-strong) 70%,
-    transparent
-  );
-  opacity: 0.7;
+/* Suggest section uses the same shape as Service Order / AI Candidates:
+   uppercase muted heading on the page background, with the form card
+   sitting below it. No hard divider between sections — the section
+   heading itself is the visual break. */
+.suggest-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
+}
+.suggest-section-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  min-width: 0;
+}
+.suggest-section-header h3 {
+  margin: 0;
+}
+.suggest-form {
+  display: grid;
+  gap: 0.85rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem;
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .plan-detail .back {
@@ -812,30 +828,21 @@ textarea {
 
 /* criteria editor */
 
-.plan-detail .criteria {
-  display: grid;
-  gap: 0.85rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.2rem;
-  box-shadow: var(--shadow-sm);
-  min-width: 0;
-  max-width: 100%;
-  box-sizing: border-box;
-}
-.plan-detail .criteria label {
+/* Form children inside the .suggest-form card (theme/context/criteria
+   labels, inputs, the chat log, etc.). Card chrome lives on the
+   .suggest-form rule near the top of this file. */
+.plan-detail .suggest-form label {
   display: grid;
   gap: 0.3rem;
 }
-.plan-detail .criteria label > span {
+.plan-detail .suggest-form label > span {
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--muted);
   font-weight: 700;
 }
-.plan-detail .criteria .theme-label {
+.plan-detail .suggest-form .theme-label {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
@@ -855,14 +862,14 @@ textarea {
   cursor: help;
   line-height: 1;
 }
-.plan-detail .criteria label > span .ai-context-marker {
+.plan-detail .suggest-form label > span .ai-context-marker {
   margin-left: 0.15rem;
 }
 .service-order h3 .ai-context-marker,
 .plan-detail .notes h3 .ai-context-marker {
   margin-left: 0.4rem;
 }
-.plan-detail .criteria .edited-flag {
+.plan-detail .suggest-form .edited-flag {
   display: inline-block;
   background: var(--warm-soft);
   color: var(--warm-strong);
@@ -874,7 +881,7 @@ textarea {
   border-radius: 999px;
   cursor: help;
 }
-.plan-detail .criteria .reset-btn {
+.plan-detail .suggest-form .reset-btn {
   background: transparent;
   color: var(--muted);
   border: 1px solid var(--border-strong);
@@ -886,21 +893,21 @@ textarea {
   border-radius: 999px;
   cursor: pointer;
 }
-.plan-detail .criteria .reset-btn:hover {
+.plan-detail .suggest-form .reset-btn:hover {
   color: var(--accent);
   border-color: var(--accent);
   background: var(--accent-soft);
   filter: none;
 }
-.plan-detail .criteria .source-hint {
+.plan-detail .suggest-form .source-hint {
   text-transform: none;
   letter-spacing: 0;
   font-weight: 400;
   color: var(--muted);
   font-size: 0.85em;
 }
-.plan-detail .criteria input[type='text'],
-.plan-detail .criteria textarea {
+.plan-detail .suggest-form input[type='text'],
+.plan-detail .suggest-form textarea {
   width: 100%;
   padding: 0.55rem 0.7rem;
   border: 1px solid var(--border-strong);
@@ -910,35 +917,35 @@ textarea {
   font-size: 0.97rem;
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
-.plan-detail .criteria input[type='text']:focus,
-.plan-detail .criteria textarea:focus {
+.plan-detail .suggest-form input[type='text']:focus,
+.plan-detail .suggest-form textarea:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
-.plan-detail .criteria textarea {
+.plan-detail .suggest-form textarea {
   resize: vertical;
   min-height: 4.5rem;
 }
-.plan-detail .criteria .row {
+.plan-detail .suggest-form .row {
   display: flex;
   align-items: end;
   gap: 0.75rem;
   flex-wrap: wrap;
 }
-.plan-detail .criteria .inline {
+.plan-detail .suggest-form .inline {
   flex-direction: row;
   align-items: center;
   gap: 0.5rem;
 }
-.plan-detail .criteria .inline > span {
+.plan-detail .suggest-form .inline > span {
   text-transform: none;
   letter-spacing: 0;
   font-size: 0.85rem;
   font-weight: 500;
   color: var(--fg);
 }
-.plan-detail .criteria .inline input[type='number'] {
+.plan-detail .suggest-form .inline input[type='number'] {
   width: 4.5rem;
   padding: 0.45rem;
   border: 1px solid var(--border-strong);
@@ -946,13 +953,13 @@ textarea {
   background: var(--bg);
   color: var(--fg);
 }
-.plan-detail .criteria button.ghost {
+.plan-detail .suggest-form button.ghost {
   background: transparent;
   color: var(--muted);
   border: 1px solid var(--border-strong);
   font-weight: 500;
 }
-.plan-detail .criteria button.ghost:hover {
+.plan-detail .suggest-form button.ghost:hover {
   color: var(--fg);
   border-color: var(--accent);
   background: var(--accent-soft);
@@ -961,7 +968,7 @@ textarea {
 /* Chat-style conversation log shown above the criteria/refine textarea
    once at least one Suggest call has been made. Persists across reloads. */
 
-.plan-detail .criteria .chat-log {
+.plan-detail .suggest-form .chat-log {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
@@ -972,21 +979,21 @@ textarea {
   max-height: 22rem;
   overflow-y: auto;
 }
-.plan-detail .criteria .chat-msg {
+.plan-detail .suggest-form .chat-msg {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
 }
-.plan-detail .criteria .chat-msg-user {
+.plan-detail .suggest-form .chat-msg-user {
   align-self: flex-end;
   max-width: 85%;
   text-align: right;
 }
-.plan-detail .criteria .chat-msg-assistant {
+.plan-detail .suggest-form .chat-msg-assistant {
   align-self: flex-start;
   max-width: 90%;
 }
-.plan-detail .criteria .chat-role {
+.plan-detail .suggest-form .chat-role {
   font-size: 0.7rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -996,10 +1003,10 @@ textarea {
   align-items: center;
   gap: 0.25rem;
 }
-.plan-detail .criteria .chat-msg-user .chat-role {
+.plan-detail .suggest-form .chat-msg-user .chat-role {
   color: var(--accent);
 }
-.plan-detail .criteria .chat-content {
+.plan-detail .suggest-form .chat-content {
   font-size: 0.92rem;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1009,17 +1016,17 @@ textarea {
   padding: 0.55rem 0.8rem;
   line-height: 1.4;
 }
-.plan-detail .criteria .chat-msg-user .chat-content {
+.plan-detail .suggest-form .chat-msg-user .chat-content {
   background: var(--accent-soft);
   border-color: var(--accent-soft-2);
   color: var(--fg);
 }
-.plan-detail .criteria .chat-msg-assistant .chat-content {
+.plan-detail .suggest-form .chat-msg-assistant .chat-content {
   border-left: 3px solid transparent;
   border-image: var(--ai-gradient) 1;
   border-image-slice: 1;
 }
-.plan-detail .criteria .chat-msg-system {
+.plan-detail .suggest-form .chat-msg-system {
   align-self: center;
   text-align: center;
   font-size: 0.78rem;
