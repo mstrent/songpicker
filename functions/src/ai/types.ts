@@ -12,6 +12,6 @@ export interface SuggestRequest {
 }
 
 export interface AiProvider {
-  name: 'anthropic' | 'openai'
+  name: 'anthropic' | 'openai' | 'gemini'
   suggestSongs(req: SuggestRequest): Promise<SongSuggestion[]>
 }

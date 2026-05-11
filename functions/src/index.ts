@@ -8,7 +8,7 @@ import type { NewItem } from './pco/types'
 import {
   AI_PROVIDER,
   ALLOWED_EMAIL,
-  ANTHROPIC_API_KEY,
+  GEMINI_API_KEY,
   PCO_APP_ID,
   PCO_SECRET,
 } from './config'
@@ -66,12 +66,14 @@ export const searchSongs = onCall(
   },
 )
 
-// To add OpenAI as a provider:
-//   1. firebase functions:secrets:set OPENAI_API_KEY
-//   2. import OPENAI_API_KEY from './config' and add to the secrets array below
-//   3. extend the provider switch to call OPENAI_API_KEY.value() when 'openai'
+// To add another provider (anthropic, openai, ...):
+//   1. firebase functions:secrets:set <PROVIDER>_API_KEY
+//   2. add the secret to secrets[] below and the imports
+//   3. add a case to the switch
+// Each secret listed in secrets[] must exist in Secret Manager at deploy
+// time, so only bind providers whose keys you've actually set.
 export const suggestSongs = onCall(
-  { secrets: [ANTHROPIC_API_KEY] },
+  { secrets: [GEMINI_API_KEY] },
   async (req) => {
     requireAllowed(req)
     const { theme, criteria, exclude, count } = req.data as {
@@ -83,13 +85,18 @@ export const suggestSongs = onCall(
     if (!theme) throw new HttpsError('invalid-argument', 'theme required')
 
     const provider = AI_PROVIDER.value()
-    if (provider !== 'anthropic') {
-      throw new HttpsError(
-        'failed-precondition',
-        `Provider "${provider}" not wired. Only "anthropic" is bound right now — see comment above suggestSongs.`,
-      )
+    let apiKey: string
+    switch (provider) {
+      case 'gemini':
+        apiKey = GEMINI_API_KEY.value()
+        break
+      default:
+        throw new HttpsError(
+          'failed-precondition',
+          `Provider "${provider}" not wired. Bind its secret in suggestSongs and add a case here.`,
+        )
     }
-    const ai = getAiProvider(provider, ANTHROPIC_API_KEY.value())
+    const ai = getAiProvider(provider, apiKey)
     const suggestions = await ai.suggestSongs({
       theme,
       criteria: criteria ?? '',
