@@ -544,7 +544,7 @@ textarea {
   top: 0;
   z-index: 5;
   background: var(--bg);
-  padding: 0.5rem 0 0.75rem;
+  padding: 0.5rem 0 0.5rem;
   margin-top: -0.5rem;
   border-bottom: 1px solid var(--border);
 }
@@ -681,9 +681,13 @@ textarea {
   flex-wrap: wrap;
 }
 .plan-detail h2 {
-  margin: 0 0 0.25rem;
+  margin: 0;
   font-size: 1.7rem;
   letter-spacing: -0.015em;
+  /* Title sits in the sticky header right above the date subtitle —
+     tighten the line box so the two read as a unit instead of leaving
+     extra leading below the glyphs. */
+  line-height: 1.15;
 }
 .plan-detail .pco-link {
   font-size: 0.85rem;
@@ -703,6 +707,8 @@ textarea {
 .plan-detail .meta {
   color: var(--muted);
   font-size: 0.92rem;
+  margin-top: 0.15rem;
+  line-height: 1.2;
 }
 
 .plan-detail section {
