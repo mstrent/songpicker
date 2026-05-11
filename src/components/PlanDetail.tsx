@@ -312,8 +312,12 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                 <button
                   type="button"
                   className="reset-btn"
-                  onClick={() => setTheme(themeSource)}
-                  title="Reset to the Planning Center value"
+                  onClick={() => {
+                    setTheme(themeSource)
+                    patchCachedTheme(serviceTypeId, planId, '')
+                    void savePlanTheme({ planId, theme: '' }).catch(() => {})
+                  }}
+                  title="Reset to the Planning Center value (clears your saved override)"
                 >
                   ↺ reset
                 </button>
@@ -355,8 +359,12 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                 <button
                   type="button"
                   className="reset-btn"
-                  onClick={() => setNotesText(notesSource)}
-                  title="Reset to the Planning Center value"
+                  onClick={() => {
+                    setNotesText(notesSource)
+                    patchCachedNotes(serviceTypeId, planId, '')
+                    void savePlanNotes({ planId, notes: '' }).catch(() => {})
+                  }}
+                  title="Reset to the Planning Center value (clears your saved override)"
                 >
                   ↺ reset
                 </button>
