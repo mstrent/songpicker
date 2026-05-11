@@ -1571,6 +1571,88 @@ textarea {
   font-size: 0.85rem;
   flex-wrap: wrap;
 }
+/* Collapsed pool of rejected candidates, lives at the bottom of the left
+   column so the active candidate list isn't cluttered with strike-throughs.
+   Same dashed disclosure style as the past-plans group on the list view. */
+.rejected-pool {
+  margin-top: 0.5rem;
+}
+.rejected-pool summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 8px;
+  user-select: none;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px dashed var(--border);
+}
+.rejected-pool summary::-webkit-details-marker {
+  display: none;
+}
+.rejected-pool summary:hover {
+  color: var(--fg);
+  border-color: var(--border-strong);
+  background: var(--surface);
+}
+.rejected-pool summary .chevron {
+  display: inline-block;
+  transition: transform 0.15s ease;
+  font-size: 0.85em;
+}
+.rejected-pool[open] summary .chevron {
+  transform: rotate(90deg);
+}
+.rejected-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.6rem 0 0;
+  display: grid;
+  gap: 0.45rem;
+}
+.rejected-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--error);
+  border-radius: 8px;
+  padding: 0.55rem 0.8rem;
+  opacity: 0.85;
+  display: grid;
+  gap: 0.3rem;
+}
+.rejected-card .rejected-title {
+  font-weight: 600;
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.rejected-card .rejected-title .author {
+  font-weight: 400;
+}
+.rejected-card .rejected-snippet {
+  font-size: 0.85rem;
+  font-style: italic;
+  color: var(--muted);
+}
+.rejected-card .decision-btn {
+  justify-self: start;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border-strong);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.rejected-card .decision-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .candidate .chorus-snippet {
   color: var(--fg);
   font-size: 0.9rem;

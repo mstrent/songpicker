@@ -318,8 +318,16 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         setCriteria('')
       }
 
+      // The "at least 4 per slot" rule in the technical requirements makes
+      // the model over-deliver — for chat-driven calls that's the point,
+      // but for silent auto-replacements (1:1 with rejections) it's
+      // clutter. Hard-cap silent calls to the requested count.
+      const accepted = opts.addToChat
+        ? res.data.suggestions
+        : res.data.suggestions.slice(0, opts.count)
+
       const now = Date.now()
-      const newOnes: CandidateMatch[] = res.data.suggestions.map((s) => ({
+      const newOnes: CandidateMatch[] = accepted.map((s) => ({
         id: newCandidateId(),
         suggestion: s,
         matchStatus: 'checking',
@@ -791,10 +799,51 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         </div>
         {generateError && <div className="error">Error: {generateError}</div>}
       </section>
+
+      {(() => {
+        const rejected = candidates.filter((c) => c.decision === 'reject')
+        if (rejected.length === 0) return null
+        return (
+          <details className="rejected-pool">
+            <summary>
+              <span className="chevron" aria-hidden>▸</span>
+              <span>{rejected.length} rejected</span>
+            </summary>
+            <ul className="rejected-list">
+              {rejected.map((c) => (
+                <li key={c.id} className="rejected-card">
+                  <div className="rejected-title">
+                    {c.suggestion.title}
+                    {c.suggestion.author && (
+                      <span className="author"> — {c.suggestion.author}</span>
+                    )}
+                  </div>
+                  {c.suggestion.chorusSnippet && (
+                    <div className="rejected-snippet">
+                      “{c.suggestion.chorusSnippet}”
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="decision-btn"
+                    onClick={() => setDecision(c.id, 'reject')}
+                    title="Bring this candidate back to the active pool"
+                  >
+                    ↶ Unreject
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )
+      })()}
         </div>
 
         <div className="plan-right">
       {candidates.length > 0 && (() => {
+        // Active = pending or shortlisted; rejected ones get tucked into
+        // a collapsed disclosure on the left column to reduce clutter.
+        const active = candidates.filter((c) => c.decision !== 'reject')
         // Empty song slots currently free in PCO. We assign by the slot's
         // item id; the dropdown on each candidate filters out slots
         // already claimed by another (uncommitted) candidate so two
@@ -818,17 +867,18 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           return emptySongSlots.filter((s) => !takenByOthers.has(s.id))
         }
 
+        if (active.length === 0) return null
         return (
         <section className="candidates">
           <h3 className="ai-heading">
             <span className="sparkle" aria-hidden>✨</span>
             <span className="gradient-text">
-              AI candidates ({candidates.length})
+              AI candidates ({active.length})
             </span>
             {provider && <span className="provider-tag">via {providerLabel(provider)}</span>}
           </h3>
           <ul>
-            {candidates.map((c) => {
+            {active.map((c) => {
               const matched = c.matchStatus === 'matched' && c.song
               return (
                 <li
