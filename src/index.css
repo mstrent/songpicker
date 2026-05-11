@@ -796,16 +796,29 @@ textarea {
   border-radius: 8px;
   background: var(--surface);
 }
+/* Small × icon sitting right next to the song title link. Subtle by
+   default so the title still leads the eye, but trivially reachable
+   when the user wants to reopen the slot. */
+.service-order .ititle-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
 .service-order .clear-slot-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  font-size: 1rem;
+  line-height: 1;
   background: transparent;
   color: var(--muted);
-  border: 1px solid var(--border-strong);
-  font-size: 0.78rem;
-  font-weight: 600;
-  padding: 0.2rem 0.55rem;
-  border-radius: 999px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
   cursor: pointer;
-  white-space: nowrap;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 .service-order .clear-slot-btn:hover {

@@ -413,20 +413,27 @@ export class PcoClient {
     serviceTypeId: string,
     planId: string,
     itemId: string,
-    opts: { songId?: string; arrangementId?: string },
+    opts: { songId?: string; arrangementId?: string; title?: string },
   ): Promise<void> {
+    const data: Record<string, unknown> = {
+      type: 'Item',
+      id: itemId,
+    }
     const relationships: Record<string, { data: { type: string; id: string } }> = {}
     if (opts.songId) relationships.song = { data: { type: 'Song', id: opts.songId } }
     if (opts.arrangementId) {
       relationships.arrangement = { data: { type: 'Arrangement', id: opts.arrangementId } }
     }
-    const body = JSON.stringify({
-      data: {
-        type: 'Item',
-        id: itemId,
-        relationships,
-      },
-    })
+    if (Object.keys(relationships).length > 0) {
+      data.relationships = relationships
+    }
+    if (opts.title !== undefined) {
+      // PCO's web UI rewrites the item title to the song name when you
+      // link a song, but its API leaves the title untouched. We push the
+      // attribute change in the same PATCH so behavior matches.
+      data.attributes = { title: opts.title }
+    }
+    const body = JSON.stringify({ data })
     await this.fetch(
       `/service_types/${serviceTypeId}/plans/${planId}/items/${itemId}`,
       { method: 'PATCH', body },

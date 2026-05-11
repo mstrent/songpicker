@@ -394,11 +394,12 @@ export const saveSession = onCall(async (req) => {
 
 export const commitSlot = onCall(async (req) => {
   const { uid } = requireAllowed(req)
-  const { serviceTypeId, planId, itemId, songId } = req.data as {
+  const { serviceTypeId, planId, itemId, songId, songTitle } = req.data as {
     serviceTypeId?: string
     planId?: string
     itemId?: string
     songId?: string
+    songTitle?: string
   }
   if (!serviceTypeId || !planId || !itemId || !songId) {
     throw new HttpsError(
@@ -407,7 +408,11 @@ export const commitSlot = onCall(async (req) => {
     )
   }
   const client = await pcoForUser(uid)
-  await client.updatePlanItem(serviceTypeId, planId, itemId, { songId })
+  await client.updatePlanItem(serviceTypeId, planId, itemId, {
+    songId,
+    // Mirror PCO web UI: linking a song sets the item title to match.
+    ...(songTitle ? { title: songTitle } : {}),
+  })
   return { ok: true }
 })
 

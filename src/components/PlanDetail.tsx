@@ -545,6 +545,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         planId,
         itemId: c.assignedSlotItemId,
         songId: c.song.id,
+        // Rewrite the item title so PCO shows the song name (matches
+        // what its web UI does on song-link).
+        songTitle: c.song.title,
       })
       setCandidates((prev) =>
         prev.map((x) =>
@@ -641,15 +644,28 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                   <span className="seq">{it.sequence}</span>
                   <div className="ibody">
                     {filled ? (
-                      <a
-                        className="ititle ititle-link"
-                        href={`https://services.planningcenteronline.com/songs/${it.songId}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title="Open song in Planning Center"
-                      >
-                        {displayTitle || '(song)'} ↗
-                      </a>
+                      <div className="ititle-row">
+                        <a
+                          className="ititle ititle-link"
+                          href={`https://services.planningcenteronline.com/songs/${it.songId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Open song in Planning Center"
+                        >
+                          {displayTitle || '(song)'} ↗
+                        </a>
+                        {isSong && (
+                          <button
+                            type="button"
+                            className="clear-slot-btn"
+                            onClick={() => clearPickedSlot(it.id)}
+                            title="Remove this song from the slot and reopen it for new suggestions"
+                            aria-label="Remove song from slot"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
                     ) : (
                       <div className="ititle">{it.title || '(no title)'}</div>
                     )}
@@ -704,16 +720,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     >
                       Spotify ↗
                     </a>
-                  )}
-                  {filled && isSong && (
-                    <button
-                      type="button"
-                      className="clear-slot-btn"
-                      onClick={() => clearPickedSlot(it.id)}
-                      title="Remove this song from the slot in Planning Center and reopen it for new suggestions"
-                    >
-                      × clear
-                    </button>
                   )}
                 </li>
               )

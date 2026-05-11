@@ -161,7 +161,16 @@ export const saveSession = httpsCallable<
 >(functions, 'saveSession')
 
 export const commitSlot = httpsCallable<
-  { serviceTypeId: string; planId: string; itemId: string; songId: string },
+  {
+    serviceTypeId: string
+    planId: string
+    itemId: string
+    songId: string
+    /** Sent so the PCO item title is rewritten to match the song name —
+     *  Planning Center's web UI does this automatically when you link a
+     *  song, but the API doesn't. */
+    songTitle?: string
+  },
   { ok: boolean }
 >(functions, 'commitSlot')
 
