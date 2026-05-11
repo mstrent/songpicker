@@ -664,10 +664,11 @@ textarea {
 
 .plan-detail .back {
   display: inline-block;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
   color: var(--muted);
   text-decoration: none;
   font-size: 0.9rem;
+  line-height: 1.2;
 }
 .plan-detail .back:hover {
   color: var(--accent);
@@ -685,9 +686,11 @@ textarea {
   font-size: 1.7rem;
   letter-spacing: -0.015em;
   /* Title sits in the sticky header right above the date subtitle —
-     tighten the line box so the two read as a unit instead of leaving
-     extra leading below the glyphs. */
-  line-height: 1.15;
+     pin line-height to 1 so there's no extra leading below the glyphs.
+     The descender room around the actual font glyphs is already part
+     of the font box; default 1.4× leading was the real source of the
+     wasted space. */
+  line-height: 1;
 }
 .plan-detail .pco-link {
   font-size: 0.85rem;
@@ -707,8 +710,8 @@ textarea {
 .plan-detail .meta {
   color: var(--muted);
   font-size: 0.92rem;
-  margin-top: 0.15rem;
-  line-height: 1.2;
+  margin-top: 0.35rem;
+  line-height: 1;
 }
 
 .plan-detail section {
