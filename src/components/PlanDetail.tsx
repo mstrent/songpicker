@@ -10,6 +10,7 @@ import {
   type SongSuggestion,
 } from '../lib/api'
 import { isSongSlot } from '../lib/songSlots'
+import { praiseChartsSearchUrl, spotifySearchUrl } from '../lib/searchLinks'
 
 interface CandidateMatch {
   suggestion: SongSuggestion
@@ -172,6 +173,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
               const cls = `item type-${it.itemType}${
                 isSong ? (filled ? ' song-filled' : ' song-empty-slot') : ''
               }`
+              const displayTitle = it.title || it.songTitle || ''
               return (
                 <li key={it.id} className={cls}>
                   <span className="seq">{it.sequence}</span>
@@ -184,7 +186,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                         rel="noopener noreferrer"
                         title="Open song in Planning Center"
                       >
-                        {it.title || it.songTitle || '(song)'} ↗
+                        {displayTitle || '(song)'} ↗
                       </a>
                     ) : (
                       <div className="ititle">{it.title || '(no title)'}</div>
@@ -193,7 +195,21 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       <span className="song-empty">Pick a song</span>
                     )}
                   </div>
-                  {!isSong && <span className={`badge type-${it.itemType}`}>{it.itemType}</span>}
+                  {filled && displayTitle ? (
+                    <a
+                      className="spotify-link"
+                      href={spotifySearchUrl(displayTitle)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Search Spotify"
+                    >
+                      Spotify ↗
+                    </a>
+                  ) : (
+                    !isSong && (
+                      <span className={`badge type-${it.itemType}`}>{it.itemType}</span>
+                    )
+                  )}
                 </li>
               )
             })}
@@ -328,7 +344,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                         <span className="badge unmatched">not in library</span>
                         <a
                           className="chart-search-link"
-                          href={`https://www.praisecharts.com/search?q=${encodeURIComponent(c.suggestion.title)}`}
+                          href={praiseChartsSearchUrl(c.suggestion.title)}
                           target="_blank"
                           rel="noopener noreferrer"
                           title="Search PraiseCharts for a chord chart"
@@ -342,6 +358,15 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                         lookup failed
                       </span>
                     )}
+                    <a
+                      className="spotify-link"
+                      href={spotifySearchUrl(c.suggestion.title)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Search Spotify"
+                    >
+                      Spotify ↗
+                    </a>
                   </div>
                   {c.suggestion.reasoning && (
                     <div className="reasoning">
