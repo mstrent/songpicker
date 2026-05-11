@@ -442,13 +442,11 @@ textarea {
   background: var(--warm-soft);
 }
 
-.service-order .song-attached {
+.service-order .ititle-link {
   color: var(--accent);
-  font-weight: 600;
-  font-size: 0.92rem;
   text-decoration: none;
 }
-.service-order .song-attached:hover {
+.service-order .ititle-link:hover {
   text-decoration: underline;
 }
 .service-order .song-empty {

@@ -174,21 +174,21 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                 <li key={it.id} className={cls}>
                   <span className="seq">{it.sequence}</span>
                   <div className="ibody">
-                    <div className="ititle">{it.title || '(no title)'}</div>
-                    {isSong && (
-                      filled ? (
-                        <a
-                          className="song-attached"
-                          href={`https://services.planningcenteronline.com/songs/${it.songId}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title="Open song in Planning Center"
-                        >
-                          {it.songTitle ?? '(song)'} ↗
-                        </a>
-                      ) : (
-                        <span className="song-empty">Pick a song</span>
-                      )
+                    {filled ? (
+                      <a
+                        className="ititle ititle-link"
+                        href={`https://services.planningcenteronline.com/songs/${it.songId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Open song in Planning Center"
+                      >
+                        {it.title || it.songTitle || '(song)'} ↗
+                      </a>
+                    ) : (
+                      <div className="ititle">{it.title || '(no title)'}</div>
+                    )}
+                    {isSong && !filled && (
+                      <span className="song-empty">Pick a song</span>
                     )}
                   </div>
                   {!isSong && <span className={`badge type-${it.itemType}`}>{it.itemType}</span>}
