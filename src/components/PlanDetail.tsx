@@ -49,6 +49,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   const themeInitialized = useRef(false)
   const notesInitialized = useRef(false)
   const countInitialized = useRef(false)
+  // Track whether the user has actually touched the field. We don't want to
+  // auto-save the initial seed value (which would treat a never-edited field
+  // as a user override, polluting storage).
+  const userTouchedTheme = useRef(false)
+  const userTouchedNotes = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -61,6 +66,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     themeInitialized.current = false
     notesInitialized.current = false
     countInitialized.current = false
+    userTouchedTheme.current = false
+    userTouchedNotes.current = false
 
     loadPlanContext(serviceTypeId, planId)
       .then((ctx) => {
@@ -94,6 +101,29 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       cancelled = true
     }
   }, [serviceTypeId, planId])
+
+  // Debounced auto-save: persists theme/notes ~600ms after the last keystroke.
+  // Saving '' when the value matches the PCO source keeps storage tidy (no
+  // override = falls back to source on next load).
+  useEffect(() => {
+    if (!userTouchedTheme.current) return
+    const id = setTimeout(() => {
+      const value = theme === themeSource ? '' : theme
+      patchCachedTheme(serviceTypeId, planId, value)
+      void savePlanTheme({ planId, theme: value }).catch(() => {})
+    }, 600)
+    return () => clearTimeout(id)
+  }, [theme, themeSource, serviceTypeId, planId])
+
+  useEffect(() => {
+    if (!userTouchedNotes.current) return
+    const id = setTimeout(() => {
+      const value = notesText === notesSource ? '' : notesText
+      patchCachedNotes(serviceTypeId, planId, value)
+      void savePlanNotes({ planId, notes: value }).catch(() => {})
+    }, 600)
+    return () => clearTimeout(id)
+  }, [notesText, notesSource, serviceTypeId, planId])
 
   async function handleSuggest() {
     if (!theme.trim() || generating) return
@@ -327,7 +357,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           <input
             type="text"
             value={theme}
-            onChange={(e) => setTheme(e.target.value)}
+            onChange={(e) => {
+              userTouchedTheme.current = true
+              setTheme(e.target.value)
+            }}
             placeholder="What is the service about?"
           />
         </label>
@@ -374,7 +407,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           <textarea
             rows={Math.min(8, Math.max(3, notesText.split('\n').length + 1))}
             value={notesText}
-            onChange={(e) => setNotesText(e.target.value)}
+            onChange={(e) => {
+              userTouchedNotes.current = true
+              setNotesText(e.target.value)
+            }}
             placeholder="Sermon theme, scripture, anything else worth flagging to the AI."
           />
         </label>
