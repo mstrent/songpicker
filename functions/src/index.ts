@@ -9,7 +9,6 @@ import {
   AI_PROVIDER,
   ALLOWED_EMAIL,
   ANTHROPIC_API_KEY,
-  OPENAI_API_KEY,
   PCO_APP_ID,
   PCO_SECRET,
 } from './config'
@@ -67,8 +66,12 @@ export const searchSongs = onCall(
   },
 )
 
+// To add OpenAI as a provider:
+//   1. firebase functions:secrets:set OPENAI_API_KEY
+//   2. import OPENAI_API_KEY from './config' and add to the secrets array below
+//   3. extend the provider switch to call OPENAI_API_KEY.value() when 'openai'
 export const suggestSongs = onCall(
-  { secrets: [ANTHROPIC_API_KEY, OPENAI_API_KEY] },
+  { secrets: [ANTHROPIC_API_KEY] },
   async (req) => {
     requireAllowed(req)
     const { theme, criteria, exclude, count } = req.data as {
@@ -80,15 +83,13 @@ export const suggestSongs = onCall(
     if (!theme) throw new HttpsError('invalid-argument', 'theme required')
 
     const provider = AI_PROVIDER.value()
-    const apiKey =
-      provider === 'anthropic' ? ANTHROPIC_API_KEY.value() : OPENAI_API_KEY.value()
-    if (!apiKey) {
+    if (provider !== 'anthropic') {
       throw new HttpsError(
         'failed-precondition',
-        `Missing API key for provider: ${provider}`,
+        `Provider "${provider}" not wired. Only "anthropic" is bound right now — see comment above suggestSongs.`,
       )
     }
-    const ai = getAiProvider(provider, apiKey)
+    const ai = getAiProvider(provider, ANTHROPIC_API_KEY.value())
     const suggestions = await ai.suggestSongs({
       theme,
       criteria: criteria ?? '',
