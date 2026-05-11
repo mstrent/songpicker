@@ -3,9 +3,11 @@ export interface ServiceType {
   name: string | null
 }
 
-export interface WorshipLeader {
+export interface TeamMember {
   name: string
   email: string | null
+  position: string | null
+  team: string | null
 }
 
 export interface Plan {
@@ -15,7 +17,7 @@ export interface Plan {
   title: string | null
   seriesTitle: string | null
   sortDate: string | null
-  worshipLeaders?: WorshipLeader[]
+  teamMembers?: TeamMember[]
 }
 
 export interface PlanPerson {
@@ -24,6 +26,7 @@ export interface PlanPerson {
   position: string | null
   status: string | null
   email: string | null
+  team: string | null
 }
 
 export interface PlanItem {

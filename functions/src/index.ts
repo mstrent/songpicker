@@ -46,8 +46,9 @@ export const listPlans = onCall(
       ? all.filter((p) => p.serviceTypeName != null && allowed.includes(p.serviceTypeName))
       : all
 
-    // Enrich each plan with its worship leader(s) — name + email so the SPA
-    // can match by email (definitive) before falling back to fuzzy name.
+    // Enrich each plan with everyone on its roster (name + email + position
+    // + team) so the SPA can do both the "led by …" display and the
+    // "you're serving / leading" highlight without further server calls.
     // Parallel fetch keeps total latency ~one PCO round-trip even with N
     // plans; per-plan failures are swallowed so one bad plan doesn't blank
     // the whole list.
@@ -55,11 +56,16 @@ export const listPlans = onCall(
       filtered.map(async (p) => {
         try {
           const people = await client.listPlanPeople(p.serviceTypeId, p.id)
-          const worshipLeaders = people
-            .filter((pp) => pp.position === 'Worship Leader' && pp.status !== 'D')
+          const teamMembers = people
+            .filter((pp) => pp.status !== 'D')
             .filter((pp): pp is typeof pp & { name: string } => !!pp.name)
-            .map((pp) => ({ name: pp.name, email: pp.email }))
-          return { ...p, worshipLeaders }
+            .map((pp) => ({
+              name: pp.name,
+              email: pp.email,
+              position: pp.position,
+              team: pp.team,
+            }))
+          return { ...p, teamMembers }
         } catch {
           return p
         }

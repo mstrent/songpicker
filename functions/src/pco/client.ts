@@ -139,7 +139,7 @@ export class PcoClient {
         status: string | null
       }>
     >(
-      `/service_types/${serviceTypeId}/plans/${planId}/team_members?include=person.emails&per_page=100`,
+      `/service_types/${serviceTypeId}/plans/${planId}/team_members?include=person.emails,team&per_page=100`,
     )
 
     // Build email_id -> address lookup, preferring `primary` ones.
@@ -166,15 +166,26 @@ export class PcoClient {
       if (pick) personEmail.set(inc.id, pick.address.toLowerCase())
     }
 
+    // Build team_id -> name lookup.
+    const teamName = new Map<string, string>()
+    for (const inc of json.included ?? []) {
+      if (inc.type === 'Team') {
+        const name = (inc.attributes as { name?: string }).name
+        if (name) teamName.set(inc.id, name)
+      }
+    }
+
     const data = Array.isArray(json.data) ? json.data : [json.data]
     return data.map((d) => {
       const personId = firstRefId(d.relationships?.person)
+      const teamId = firstRefId(d.relationships?.team)
       return {
         id: d.id,
         name: d.attributes.name,
         position: d.attributes.team_position_name,
         status: d.attributes.status,
         email: personId ? (personEmail.get(personId) ?? null) : null,
+        team: teamId ? (teamName.get(teamId) ?? null) : null,
       }
     })
   }

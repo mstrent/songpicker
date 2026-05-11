@@ -150,9 +150,13 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             day: 'numeric',
             year: 'numeric',
           })}
-        {plan.worshipLeaders && plan.worshipLeaders.length > 0 && (
-          <> · led by {plan.worshipLeaders.map((l) => l.name).join(', ')}</>
-        )}
+        {(() => {
+          const leaders =
+            plan.teamMembers?.filter((m) => m.position === 'Worship Leader') ?? []
+          return leaders.length > 0 ? (
+            <> · led by {leaders.map((l) => l.name).join(', ')}</>
+          ) : null
+        })()}
       </div>
 
       {items.length > 0 && (

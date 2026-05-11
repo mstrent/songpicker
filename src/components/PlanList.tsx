@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { listPlans, type Plan } from '../lib/api'
+import { listPlans, type Plan, type TeamMember } from '../lib/api'
 import { namesMatch } from '../lib/names'
 
 interface Props {
@@ -23,24 +23,43 @@ export function PlanList({ currentUserName, currentUserEmail }: Props) {
 
   const myEmail = currentUserEmail?.trim().toLowerCase() ?? ''
 
+  const matchesMe = (m: TeamMember): boolean =>
+    (myEmail.length > 0 && m.email != null && m.email.toLowerCase() === myEmail) ||
+    namesMatch(m.name, currentUserName)
+
   return (
     <ul className="plans">
       {plans.map((p) => {
         const heading = p.title || p.seriesTitle || '(no title)'
         const sub = p.title && p.seriesTitle ? p.seriesTitle : null
-        const leaders = p.worshipLeaders ?? []
-        const ledByMe = leaders.some(
-          (l) =>
-            (myEmail && l.email && l.email.toLowerCase() === myEmail) ||
-            namesMatch(l.name, currentUserName),
-        )
+        const team = p.teamMembers ?? []
+        const leaders = team.filter((m) => m.position === 'Worship Leader')
+        const ledByMe = leaders.some(matchesMe)
+        const onTeam = !ledByMe && team.some(matchesMe)
+        const myRoles = onTeam
+          ? Array.from(
+              new Set(
+                team
+                  .filter(matchesMe)
+                  .map((m) => m.position)
+                  .filter((p): p is string => !!p),
+              ),
+            )
+          : []
+        const stateClass = ledByMe ? ' led-by-me' : onTeam ? ' on-team' : ''
         return (
           <li key={`${p.serviceTypeId}/${p.id}`}>
             <a
-              className={`plan-link${ledByMe ? ' led-by-me' : ''}`}
+              className={`plan-link${stateClass}`}
               href={`#plan/${p.serviceTypeId}/${p.id}`}
             >
               {ledByMe && <span className="me-flag">You're leading</span>}
+              {onTeam && (
+                <span className="me-flag on-team-flag">
+                  You're serving
+                  {myRoles.length > 0 && ` · ${myRoles.join(', ')}`}
+                </span>
+              )}
               <div className="title">{heading}</div>
               {sub && <div className="series">{sub}</div>}
               <div className="meta-row">

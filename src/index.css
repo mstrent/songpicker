@@ -278,6 +278,20 @@ textarea {
   border-radius: 12px 0 0 12px;
 }
 
+.plans .plan-link.on-team {
+  border-color: var(--border-strong);
+}
+.plans .plan-link.on-team::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--warm);
+  border-radius: 12px 0 0 12px;
+}
+
 .plans .me-flag {
   display: inline-block;
   background: var(--accent);
@@ -289,6 +303,11 @@ textarea {
   padding: 0.1rem 0.55rem;
   border-radius: 999px;
   margin-bottom: 0.4rem;
+}
+.plans .me-flag.on-team-flag {
+  background: transparent;
+  color: var(--warm-strong);
+  border: 1px solid var(--warm);
 }
 
 .plans .title {
