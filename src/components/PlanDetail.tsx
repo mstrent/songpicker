@@ -1218,17 +1218,24 @@ function formatNotesSource(notes: PlanNote[] | null): string {
 }
 
 // Render the plan's items as a human-readable list for the AI prompt.
-// Empty song slots get an explicit "(empty — needs a pick)" marker so the
-// model can see exactly which positions in the order need filling. Filled
-// song slots include author + CCLI + arrangement when available to
-// disambiguate same-titled songs (multiple "Surrender"s exist).
+// Song slots get replaced with a meta position tag "[song slot N of M]"
+// rather than their literal PCO title ("Song 1", "Closing song", etc.) so
+// the model doesn't mistake those titles for slot names — slot names
+// belong to the structure prompt's conceptual roles (opener, mid-service,
+// closer). Position info (N of M) is preserved so the model can still
+// map each position to a structure role by sequence.
 function buildServiceOrderText(items: PlanItem[] | null): string {
   if (!items || items.length === 0) return ''
+  const totalSongSlots = items.filter(isSongSlot).length
+  let songIdx = 0
   return items
     .map((it) => {
-      const songSlot = isSongSlot(it)
-      const base = `${it.sequence}. ${it.title || '(no title)'}`
-      if (!songSlot) return base
+      if (!isSongSlot(it)) {
+        return `${it.sequence}. ${it.title || '(no title)'}`
+      }
+      songIdx += 1
+      const positionTag = `[song slot ${songIdx} of ${totalSongSlots}]`
+      const base = `${it.sequence}. ${positionTag}`
       if (it.songId) {
         const disamb = formatSongDisamb(it)
         return `${base} — picked: ${it.songTitle ?? '(song)'}${disamb ? ` ${disamb}` : ''}`
