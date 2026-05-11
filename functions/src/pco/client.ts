@@ -54,10 +54,21 @@ export class PcoClient {
     path: string,
     init?: { method?: string; body?: string; headers?: Record<string, string> },
   ): Promise<T> {
-    const res = await fetch(`${BASE_URL}${path}`, {
+    const url = `${BASE_URL}${path}`
+    const reqInit = {
       ...init,
       headers: { ...this.headers(), ...(init?.headers ?? {}) },
-    })
+    }
+    let res = await fetch(url, reqInit)
+    if (res.status === 429) {
+      // PCO returns "Retry-After" in seconds (its rate window is 20s).
+      // Wait, then retry once. If still rate-limited, let the error bubble.
+      const retryAfterRaw = res.headers.get('Retry-After')
+      const waitSec = retryAfterRaw ? parseInt(retryAfterRaw, 10) : 20
+      const waitMs = Math.min(Math.max(waitSec * 1000, 1000), 30000)
+      await new Promise((r) => setTimeout(r, waitMs))
+      res = await fetch(url, reqInit)
+    }
     if (!res.ok) {
       const body = await res.text()
       throw new Error(`Planning Center ${res.status} ${path}: ${body.slice(0, 500)}`)
@@ -129,21 +140,21 @@ export class PcoClient {
   }
 
   async getPlan(serviceTypeId: string, planId: string): Promise<Plan> {
-    const [json, types] = await Promise.all([
-      this.fetch<
-        JsonApiResponse<{
-          title: string | null
-          series_title: string | null
-          sort_date: string | null
-        }>
-      >(`/service_types/${serviceTypeId}/plans/${planId}`),
-      this.listServiceTypes(),
-    ])
+    // No extra listServiceTypes here — serviceTypeName only matters in the
+    // list view (where it comes from listPlans), and an extra call per
+    // detail-page open costs a real chunk of our 100 req/20s budget.
+    const json = await this.fetch<
+      JsonApiResponse<{
+        title: string | null
+        series_title: string | null
+        sort_date: string | null
+      }>
+    >(`/service_types/${serviceTypeId}/plans/${planId}`)
     const d = Array.isArray(json.data) ? json.data[0] : json.data
     return {
       id: d.id,
       serviceTypeId,
-      serviceTypeName: types.find((t) => t.id === serviceTypeId)?.name ?? null,
+      serviceTypeName: null,
       title: d.attributes.title,
       seriesTitle: d.attributes.series_title,
       sortDate: d.attributes.sort_date,

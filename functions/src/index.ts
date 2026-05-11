@@ -4,6 +4,7 @@ import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/
 
 import { getAiProvider } from './ai'
 import { PcoClient } from './pco/client'
+import { pMap } from './pco/concurrency'
 import {
   hasPcoCredentials,
   pcoForUser,
@@ -120,8 +121,13 @@ export const listPlans = onCall(async (req) => {
   // Parallel fetch keeps total latency ~one PCO round-trip even with N
   // plans; per-plan failures are swallowed so one bad plan doesn't blank
   // the whole list.
-  const plans = await Promise.all(
-    filtered.map(async (p) => {
+  // Bounded concurrency: each plan triggers two PCO calls (people +
+  // items). Capping at 4 plans in flight = up to 8 in-flight PCO calls
+  // for enrichment, well under the 100 req/20s ceiling even with the
+  // other listAllPlans calls already spent.
+  const plans = await pMap(
+    filtered,
+    async (p) => {
       try {
         const [people, items] = await Promise.all([
           client.listPlanPeople(p.serviceTypeId, p.id),
@@ -142,7 +148,8 @@ export const listPlans = onCall(async (req) => {
       } catch {
         return p
       }
-    }),
+    },
+    4,
   )
   return { plans }
 })

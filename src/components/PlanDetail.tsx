@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  getPlanContext,
   savePlanTheme,
   searchSongs,
   suggestSongs,
@@ -11,6 +10,7 @@ import {
   type Song,
   type SongSuggestion,
 } from '../lib/api'
+import { loadPlanContext, patchCachedTheme } from '../lib/cache'
 import { isSongSlot } from '../lib/songSlots'
 import { praiseChartsSearchUrl, spotifySearchUrl } from '../lib/searchLinks'
 import { PromptEditor } from './PromptEditor'
@@ -56,21 +56,21 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     themeInitialized.current = false
     countInitialized.current = false
 
-    getPlanContext({ serviceTypeId, planId })
-      .then((res) => {
+    loadPlanContext(serviceTypeId, planId)
+      .then((ctx) => {
         if (cancelled) return
-        setPlan(res.data.plan)
-        setNotes(res.data.notes)
-        setItems(res.data.items)
-        const source = res.data.plan.seriesTitle ?? res.data.plan.title ?? ''
+        setPlan(ctx.plan)
+        setNotes(ctx.notes)
+        setItems(ctx.items)
+        const source = ctx.plan.seriesTitle ?? ctx.plan.title ?? ''
         setThemeSource(source)
         if (!themeInitialized.current) {
-          const saved = res.data.userTheme
+          const saved = ctx.userTheme
           setTheme(saved && saved.trim() ? saved : source)
           themeInitialized.current = true
         }
         if (!countInitialized.current) {
-          const songSlotCount = res.data.items.filter(isSongSlot).length
+          const songSlotCount = ctx.items.filter(isSongSlot).length
           setCount(Math.max(songSlotCount * 2, 5))
           countInitialized.current = true
         }
@@ -90,6 +90,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       // Persist whatever theme the user is asking with so future visits to
       // this plan start with their edited version rather than re-defaulting
       // from PCO. Best-effort — a save failure doesn't block the suggest.
+      // Patch the SPA cache too so a back-and-return doesn't show stale.
+      patchCachedTheme(serviceTypeId, planId, theme)
       void savePlanTheme({ planId, theme }).catch(() => {})
 
       const exclude = candidates.map((c) => c.suggestion.title)
