@@ -64,7 +64,7 @@ export default function App() {
         ) : (
           <>
             <h2>Upcoming plans</h2>
-            <PlanList currentUserName={user.displayName} />
+            <PlanList currentUserName={config.leaderName || user.displayName} />
           </>
         )}
       </main>

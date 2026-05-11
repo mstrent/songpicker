@@ -12,4 +12,7 @@ export const config = {
   region: env.VITE_FIREBASE_REGION ?? 'us-central1',
   allowedEmail: env.VITE_ALLOWED_EMAIL ?? '',
   useEmulators: env.VITE_USE_EMULATORS === 'true',
+  // Overrides user.displayName when matching against PCO worshipLeaders.
+  // Set this if your Google account name differs from your PCO name.
+  leaderName: env.VITE_LEADER_NAME ?? '',
 }

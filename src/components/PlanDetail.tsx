@@ -155,7 +155,12 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           <h3>Service order</h3>
           <ol>
             {items.map((it) => {
-              const isSong = it.itemType === 'song'
+              // PCO's item_type is often a generic "item" even for song slots
+              // (depends on how the planner set it up). Fall back to a title
+              // heuristic so titles like "Song 1" / "Closing song" still
+              // visually pop as song slots.
+              const isSong =
+                it.itemType === 'song' || /\bsong\b/i.test(it.title)
               const filled = isSong && it.songId
               const cls = `item type-${it.itemType}${
                 isSong ? (filled ? ' song-filled' : ' song-empty-slot') : ''

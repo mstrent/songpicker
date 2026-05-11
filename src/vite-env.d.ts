@@ -10,6 +10,7 @@ interface ImportMetaEnv {
   readonly VITE_FIREBASE_REGION?: string
   readonly VITE_ALLOWED_EMAIL?: string
   readonly VITE_USE_EMULATORS?: string
+  readonly VITE_LEADER_NAME?: string
 }
 
 interface ImportMeta {
