@@ -115,7 +115,20 @@ button:hover { filter: brightness(1.1); }
 
 .plans .title { font-weight: 600; }
 .plans .series { color: var(--muted); font-size: 0.9rem; }
-.plans .date { color: var(--muted); font-size: 0.85rem; margin-top: 0.25rem; }
+.plans .meta-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  margin-top: 0.4rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.plans .service-type {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+}
+.plans .date { color: var(--muted); }
 
 .error { color: var(--error); }
 .muted { color: var(--muted); }

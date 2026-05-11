@@ -53,7 +53,7 @@ export class PcoClient {
   }
 
   async listPlans(
-    serviceTypeId: string,
+    serviceType: ServiceType,
     opts: { future?: boolean; perPage?: number } = {},
   ): Promise<Plan[]> {
     const params = new URLSearchParams()
@@ -67,12 +67,13 @@ export class PcoClient {
         series_title: string | null
         sort_date: string | null
       }>
-    >(`/service_types/${serviceTypeId}/plans?${params}`)
+    >(`/service_types/${serviceType.id}/plans?${params}`)
 
     const data = Array.isArray(json.data) ? json.data : [json.data]
     return data.map((d) => ({
       id: d.id,
-      serviceTypeId,
+      serviceTypeId: serviceType.id,
+      serviceTypeName: serviceType.name,
       title: d.attributes.title,
       seriesTitle: d.attributes.series_title,
       sortDate: d.attributes.sort_date,
@@ -82,23 +83,27 @@ export class PcoClient {
   async listAllUpcomingPlans(): Promise<Plan[]> {
     const types = await this.listServiceTypes()
     const all = await Promise.all(
-      types.map((t) => this.listPlans(t.id, { future: true, perPage: 10 })),
+      types.map((t) => this.listPlans(t, { future: true, perPage: 10 })),
     )
     return all.flat().sort((a, b) => (a.sortDate ?? '').localeCompare(b.sortDate ?? ''))
   }
 
   async getPlan(serviceTypeId: string, planId: string): Promise<Plan> {
-    const json = await this.fetch<
-      JsonApiResponse<{
-        title: string | null
-        series_title: string | null
-        sort_date: string | null
-      }>
-    >(`/service_types/${serviceTypeId}/plans/${planId}`)
+    const [json, types] = await Promise.all([
+      this.fetch<
+        JsonApiResponse<{
+          title: string | null
+          series_title: string | null
+          sort_date: string | null
+        }>
+      >(`/service_types/${serviceTypeId}/plans/${planId}`),
+      this.listServiceTypes(),
+    ])
     const d = Array.isArray(json.data) ? json.data[0] : json.data
     return {
       id: d.id,
       serviceTypeId,
+      serviceTypeName: types.find((t) => t.id === serviceTypeId)?.name ?? null,
       title: d.attributes.title,
       seriesTitle: d.attributes.series_title,
       sortDate: d.attributes.sort_date,

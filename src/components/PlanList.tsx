@@ -25,9 +25,16 @@ export function PlanList() {
             <a className="plan-link" href={`#plan/${p.serviceTypeId}/${p.id}`}>
               <div className="title">{heading}</div>
               {sub && <div className="series">{sub}</div>}
-              {p.sortDate && (
-                <div className="date">{new Date(p.sortDate).toLocaleDateString()}</div>
-              )}
+              <div className="meta-row">
+                {p.serviceTypeName && (
+                  <span className="service-type">{p.serviceTypeName}</span>
+                )}
+                {p.sortDate && (
+                  <span className="date">
+                    {new Date(p.sortDate).toLocaleDateString()}
+                  </span>
+                )}
+              </div>
             </a>
           </li>
         )

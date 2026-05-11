@@ -4,6 +4,7 @@ import { functions } from './firebase'
 export interface Plan {
   id: string
   serviceTypeId: string
+  serviceTypeName: string | null
   title: string | null
   seriesTitle: string | null
   sortDate: string | null
