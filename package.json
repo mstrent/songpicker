@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently -n vite,fns,emu -c cyan,magenta,yellow -k npm:dev:vite npm:dev:functions npm:dev:emulators",
     "dev:vite": "vite",
-    "dev:emulators": "firebase emulators:start --only functions,firestore",
+    "dev:emulators": "firebase emulators:start --only functions,firestore --import=.emulator-data --export-on-exit=.emulator-data",
     "dev:functions": "npm --prefix functions run build:watch",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
