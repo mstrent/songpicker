@@ -7,6 +7,7 @@ import {
   searchSongs,
   suggestSongs,
   type AiDebug,
+  type ConversationTurn,
   type Decision,
   type MatchStatus,
   type PersistedCandidate,
@@ -240,30 +241,58 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       patchCachedNotes(serviceTypeId, planId, notesText)
       void savePlanNotes({ planId, notes: notesText }).catch(() => {})
 
-      // Also exclude already-picked songs in the plan so the AI doesn't
-      // re-suggest what's already filled in. Rejected candidates are
-      // explicitly fed back so the model knows we said "not that one".
-      const rejected = candidates.filter((c) => c.decision === 'reject')
+      // Don't auto-suggest titles already filled in PCO or already in the
+      // candidate pool. Rejected/shortlisted state is communicated via
+      // structured fields so the model can reason with it; not in the
+      // exclude list, which is for hard "no repeats".
       const exclude = [
         ...candidates.map((c) => c.suggestion.title),
         ...(items ?? [])
           .filter((it) => it.songId && it.songTitle)
           .map((it) => it.songTitle!),
       ]
+      const shortlistedTitles = candidates
+        .filter((c) => c.decision === 'shortlist')
+        .map((c) => c.suggestion.title)
+      const rejectedTitles = candidates
+        .filter((c) => c.decision === 'reject')
+        .map((c) => c.suggestion.title)
+
       const serviceOrder = buildServiceOrderText(items)
+      const history = messages.map((m) => ({ role: m.role === 'system' ? 'user' : m.role, content: m.content }))
       const res = await suggestSongs({
         theme,
-        criteria: criteria + (rejected.length > 0
-          ? `\n\nAvoid suggestions similar to these (the user already rejected them): ${rejected.map((c) => c.suggestion.title).join(', ')}`
-          : ''),
+        userMessage: criteria,
         exclude,
         count,
         planId,
         serviceOrder,
         planNotes: notesText,
+        history: history as ConversationTurn[],
+        shortlistedTitles,
+        rejectedTitles,
       })
       setProvider(res.data.provider)
       setDebug(res.data.debug ?? null)
+
+      // Append the typed input + the model's summary as the new turn.
+      const turnTs = Date.now()
+      const userMsg: SessionMessage = {
+        id: newCandidateId(),
+        role: 'user',
+        content: criteria.trim() || '(initial request)',
+        timestamp: turnTs,
+      }
+      const assistantMsg: SessionMessage = {
+        id: newCandidateId(),
+        role: 'assistant',
+        content: res.data.assistantMessage,
+        timestamp: turnTs + 1,
+      }
+      setMessages((prev) => [...prev, userMsg, assistantMsg])
+      // After first turn the criteria box becomes the "refine" input; clear
+      // it so the user types fresh next time.
+      setCriteria('')
 
       const now = Date.now()
       const newOnes: CandidateMatch[] = res.data.suggestions.map((s) => ({
@@ -566,22 +595,46 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             placeholder="Sermon theme, scripture, anything else worth flagging to the AI."
           />
         </label>
+        {messages.length > 0 && (
+          <div className="chat-log">
+            {messages.map((m) => (
+              <div key={m.id} className={`chat-msg chat-msg-${m.role}`}>
+                <span className="chat-role">
+                  {m.role === 'user' ? (
+                    'You'
+                  ) : (
+                    <>
+                      <span className="sparkle" aria-hidden>✨</span> AI
+                    </>
+                  )}
+                </span>
+                <div className="chat-content">{m.content}</div>
+              </div>
+            ))}
+          </div>
+        )}
         <label>
           <span>
-            Criteria (mood, tempo, era, must-include, avoid)
+            {messages.length === 0
+              ? 'Criteria (mood, tempo, era, must-include, avoid)'
+              : 'Refine'}
             <span
               className="ai-context-marker"
-              title="Sent to the AI on every Suggest call"
+              title="Sent to the AI on the next Suggest call"
               aria-hidden
             >
               ✨
             </span>
           </span>
           <textarea
-            rows={4}
+            rows={messages.length === 0 ? 4 : 2}
             value={criteria}
             onChange={(e) => setCriteria(e.target.value)}
-            placeholder="e.g. upbeat opener, slower communion song, include 'Cornerstone'"
+            placeholder={
+              messages.length === 0
+                ? "e.g. upbeat opener, slower communion song, include 'Cornerstone'"
+                : "e.g. give me a few more upbeat openers, or swap the closer for something slower"
+            }
           />
         </label>
         <div className="row">
@@ -603,9 +656,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             <span className="sparkle" aria-hidden>✨</span>
             {generating
               ? 'Generating…'
-              : candidates.length > 0
-                ? 'Suggest more'
-                : 'Suggest songs'}
+              : messages.length === 0
+                ? 'Suggest songs'
+                : 'Send refinement'}
           </button>
           {candidates.length > 0 && (
             <button className="ghost" onClick={clearCandidates} disabled={generating}>

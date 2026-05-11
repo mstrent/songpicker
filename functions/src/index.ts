@@ -222,16 +222,29 @@ export const suggestSongs = onCall(
   { secrets: [ANTHROPIC_API_KEY, GEMINI_API_KEY] },
   async (req) => {
     const { uid } = requireAllowed(req)
-    const { theme, criteria, exclude, count, planId, serviceOrder, planNotes } =
-      req.data as {
-        theme?: string
-        criteria?: string
-        exclude?: string[]
-        count?: number
-        planId?: string
-        serviceOrder?: string
-        planNotes?: string
-      }
+    const {
+      theme,
+      userMessage,
+      exclude,
+      count,
+      planId,
+      serviceOrder,
+      planNotes,
+      history,
+      shortlistedTitles,
+      rejectedTitles,
+    } = req.data as {
+      theme?: string
+      userMessage?: string
+      exclude?: string[]
+      count?: number
+      planId?: string
+      serviceOrder?: string
+      planNotes?: string
+      history?: Array<{ role: 'user' | 'assistant'; content: string }>
+      shortlistedTitles?: string[]
+      rejectedTitles?: string[]
+    }
     if (!theme) throw new HttpsError('invalid-argument', 'theme required')
 
     const provider = AI_PROVIDER.value()
@@ -258,17 +271,21 @@ export const suggestSongs = onCall(
     const ai = getAiProvider(provider, apiKey)
     const result = await ai.suggestSongs({
       theme,
-      criteria: criteria ?? '',
+      userMessage: userMessage ?? '',
       structurePrompt: structure.effective.value,
       systemPrompt: composeSystemPrompt(role.effective.value),
       serviceOrder,
       planNotes,
+      shortlistedTitles,
+      rejectedTitles,
+      history,
       exclude,
       count,
     })
     return {
       suggestions: result.suggestions,
       debug: result.debug,
+      assistantMessage: result.assistantMessage,
       provider,
       structureSource: structure.effective.source,
       roleSource: role.effective.source,

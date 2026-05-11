@@ -164,20 +164,29 @@ export const searchSongs = httpsCallable<{ query: string }, { songs: Song[] }>(
 export type PromptType = 'structure' | 'role'
 export type PromptSource = 'plan' | 'user' | 'system'
 
+export interface ConversationTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 export const suggestSongs = httpsCallable<
   {
     theme: string
-    criteria: string
+    userMessage: string
     exclude?: string[]
     count?: number
     planId?: string
     serviceOrder?: string
     planNotes?: string
+    history?: ConversationTurn[]
+    shortlistedTitles?: string[]
+    rejectedTitles?: string[]
   },
   {
     suggestions: SongSuggestion[]
     provider: string
     debug: AiDebug
+    assistantMessage: string
     structureSource: PromptSource
     roleSource: PromptSource
   }

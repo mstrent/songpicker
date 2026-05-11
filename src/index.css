@@ -876,6 +876,68 @@ textarea {
   background: var(--accent-soft);
 }
 
+/* Chat-style conversation log shown above the criteria/refine textarea
+   once at least one Suggest call has been made. Persists across reloads. */
+
+.plan-detail .criteria .chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.85rem 1rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  max-height: 22rem;
+  overflow-y: auto;
+}
+.plan-detail .criteria .chat-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.plan-detail .criteria .chat-msg-user {
+  align-self: flex-end;
+  max-width: 85%;
+  text-align: right;
+}
+.plan-detail .criteria .chat-msg-assistant {
+  align-self: flex-start;
+  max-width: 90%;
+}
+.plan-detail .criteria .chat-role {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.plan-detail .criteria .chat-msg-user .chat-role {
+  color: var(--accent);
+}
+.plan-detail .criteria .chat-content {
+  font-size: 0.92rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.55rem 0.8rem;
+  line-height: 1.4;
+}
+.plan-detail .criteria .chat-msg-user .chat-content {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft-2);
+  color: var(--fg);
+}
+.plan-detail .criteria .chat-msg-assistant .chat-content {
+  border-left: 3px solid transparent;
+  border-image: var(--ai-gradient) 1;
+  border-image-slice: 1;
+}
+
 /* candidates */
 
 .candidates ul {
