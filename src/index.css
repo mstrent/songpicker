@@ -802,6 +802,9 @@ textarea {
   border-radius: 12px;
   padding: 1.2rem;
   box-shadow: var(--shadow-sm);
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 .plan-detail .criteria label {
   display: grid;
@@ -1447,6 +1450,7 @@ textarea {
   justify-content: space-between;
   gap: 0.6rem;
   margin-bottom: 0.25rem;
+  min-width: 0;
 }
 .suggest-header h3 {
   margin: 0;
@@ -1456,11 +1460,26 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
+  min-width: 0;
 }
 .prompt-editors .structure-prompt {
   margin: 0;
   flex: 0 0 auto;
   min-width: 0;
+}
+/* When any pill is expanded, the prompt-editors row breaks to its own
+   line and the open pill stretches to fill it — keeps the textarea and
+   help text inside the column instead of bleeding into the right one. */
+.suggest-header:has(.structure-prompt[open]) .prompt-editors {
+  flex-basis: 100%;
+}
+.prompt-editors .structure-prompt[open] {
+  flex: 1 1 100%;
+  width: 100%;
+}
+.structure-prompt[open] .body {
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .structure-prompt {
@@ -1521,6 +1540,8 @@ textarea {
 }
 .structure-prompt textarea {
   width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--border-strong);
   border-radius: 8px;
