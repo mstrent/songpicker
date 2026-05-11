@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   getPlanContext,
+  savePlanTheme,
   searchSongs,
   suggestSongs,
   type AiDebug,
@@ -33,6 +34,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const [theme, setTheme] = useState('')
+  const [themeSource, setThemeSource] = useState('')
   const [criteria, setCriteria] = useState('')
   const [count, setCount] = useState(5)
   const [generating, setGenerating] = useState(false)
@@ -50,6 +52,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setPlan(null)
     setNotes(null)
     setItems(null)
+    setThemeSource('')
     themeInitialized.current = false
     countInitialized.current = false
 
@@ -59,8 +62,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         setPlan(res.data.plan)
         setNotes(res.data.notes)
         setItems(res.data.items)
+        const source = res.data.plan.seriesTitle ?? res.data.plan.title ?? ''
+        setThemeSource(source)
         if (!themeInitialized.current) {
-          setTheme(res.data.plan.seriesTitle ?? res.data.plan.title ?? '')
+          const saved = res.data.userTheme
+          setTheme(saved && saved.trim() ? saved : source)
           themeInitialized.current = true
         }
         if (!countInitialized.current) {
@@ -81,6 +87,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setGenerating(true)
     setGenerateError(null)
     try {
+      // Persist whatever theme the user is asking with so future visits to
+      // this plan start with their edited version rather than re-defaulting
+      // from PCO. Best-effort — a save failure doesn't block the suggest.
+      void savePlanTheme({ planId, theme }).catch(() => {})
+
       const exclude = candidates.map((c) => c.suggestion.title)
       const res = await suggestSongs({ theme, criteria, exclude, count, planId })
       setProvider(res.data.provider)
@@ -253,7 +264,17 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       <section className="criteria">
         <h3>Suggest songs</h3>
         <label>
-          <span>Theme</span>
+          <span className="theme-label">
+            Theme
+            {theme.trim() !== themeSource.trim() && (
+              <span
+                className="edited-flag"
+                title={`Differs from Planning Center: "${themeSource || '(empty)'}"`}
+              >
+                edited
+              </span>
+            )}
+          </span>
           <input
             type="text"
             value={theme}

@@ -16,8 +16,10 @@ import {
   clearPlanOverride,
   composeSystemPrompt,
   loadResolved,
+  loadUserTheme,
   savePlanOverride,
   saveUserDefault,
+  saveUserTheme,
   type PromptType,
 } from './prompts'
 import {
@@ -135,12 +137,24 @@ export const getPlanContext = onCall(async (req) => {
     throw new HttpsError('invalid-argument', 'serviceTypeId and planId required')
   }
   const client = await pcoForUser(uid)
-  const [plan, notes, items] = await Promise.all([
+  const [plan, notes, items, userTheme] = await Promise.all([
     client.getPlan(serviceTypeId, planId),
     client.getPlanNotes(serviceTypeId, planId),
     client.listPlanItems(serviceTypeId, planId),
+    loadUserTheme(uid, planId),
   ])
-  return { plan, notes, items }
+  return { plan, notes, items, userTheme }
+})
+
+export const savePlanTheme = onCall(async (req) => {
+  const { uid } = requireAllowed(req)
+  const { planId, theme } = req.data as { planId?: string; theme?: string }
+  if (!planId) throw new HttpsError('invalid-argument', 'planId required')
+  if (typeof theme !== 'string') {
+    throw new HttpsError('invalid-argument', 'theme (string) required')
+  }
+  await saveUserTheme(uid, planId, theme)
+  return { ok: true }
 })
 
 export const searchSongs = onCall(async (req) => {

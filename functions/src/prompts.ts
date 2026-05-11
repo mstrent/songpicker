@@ -36,6 +36,7 @@ interface PromptSection {
 interface UserPromptDoc {
   structure: PromptSection
   role: PromptSection
+  themes: Record<string, string>
 }
 
 const collection = 'userPrompts'
@@ -68,7 +69,27 @@ async function loadDoc(uid: string): Promise<UserPromptDoc> {
       default: typeof roleRaw.default === 'string' ? roleRaw.default : '',
       byPlan: (roleRaw.byPlan as Record<string, string> | undefined) ?? {},
     },
+    themes:
+      (raw?.themes as Record<string, string> | undefined) ?? {},
   }
+}
+
+export async function loadUserTheme(
+  uid: string,
+  planId: string,
+): Promise<string> {
+  const doc = await loadDoc(uid)
+  return doc.themes[planId] ?? ''
+}
+
+export async function saveUserTheme(
+  uid: string,
+  planId: string,
+  theme: string,
+): Promise<void> {
+  await getFirestore()
+    .doc(`${collection}/${uid}`)
+    .set({ themes: { [planId]: theme } }, { merge: true })
 }
 
 export interface ResolvedPrompt {

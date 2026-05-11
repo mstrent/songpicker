@@ -659,6 +659,23 @@ textarea {
   color: var(--muted);
   font-weight: 700;
 }
+.plan-detail .criteria .theme-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.plan-detail .criteria .edited-flag {
+  display: inline-block;
+  background: var(--warm-soft);
+  color: var(--warm-strong);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  cursor: help;
+}
 .plan-detail .criteria input[type='text'],
 .plan-detail .criteria textarea {
   width: 100%;
