@@ -573,6 +573,13 @@ textarea {
   font-weight: 600;
   font-size: 1rem;
 }
+.candidate .ctitle-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+.candidate .ctitle-link:hover {
+  text-decoration: underline;
+}
 .candidate .author {
   color: var(--muted);
   font-weight: 400;

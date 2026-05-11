@@ -262,44 +262,65 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         <section className="candidates">
           <h3>Candidates ({candidates.length})</h3>
           <ul>
-            {candidates.map((c, i) => (
-              <li key={i} className={`candidate ${c.status}`}>
-                <div className="ctitle">
-                  {c.suggestion.title}
-                  {c.suggestion.author && (
-                    <span className="author"> — {c.suggestion.author}</span>
+            {candidates.map((c, i) => {
+              const matched = c.status === 'matched' && c.song
+              return (
+                <li key={i} className={`candidate ${c.status}`}>
+                  <div className="ctitle">
+                    {matched ? (
+                      <a
+                        className="ctitle-link"
+                        href={`https://services.planningcenteronline.com/songs/${c.song!.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Open in Planning Center"
+                      >
+                        {c.suggestion.title} ↗
+                      </a>
+                    ) : (
+                      c.suggestion.title
+                    )}
+                    {c.suggestion.author && (
+                      <span className="author"> — {c.suggestion.author}</span>
+                    )}
+                  </div>
+                  <div className="cstatus">
+                    {c.status === 'checking' && (
+                      <span className="badge checking">checking PCO…</span>
+                    )}
+                    {matched && (
+                      <>
+                        <span className="badge matched">in library</span>
+                        {c.song!.lastScheduledAt ? (
+                          <span
+                            className="last-played"
+                            title={new Date(c.song!.lastScheduledAt).toLocaleString()}
+                          >
+                            last played {relativeTime(c.song!.lastScheduledAt)}
+                            {c.song!.lastScheduledShortDates && (
+                              <> · {c.song!.lastScheduledShortDates}</>
+                            )}
+                          </span>
+                        ) : (
+                          <span className="last-played">never played</span>
+                        )}
+                      </>
+                    )}
+                    {c.status === 'unmatched' && (
+                      <span className="badge unmatched">not in library</span>
+                    )}
+                    {c.status === 'error' && (
+                      <span className="badge error" title={c.error}>
+                        lookup failed
+                      </span>
+                    )}
+                  </div>
+                  {c.suggestion.reasoning && (
+                    <div className="reasoning">{c.suggestion.reasoning}</div>
                   )}
-                </div>
-                <div className="cstatus">
-                  {c.status === 'checking' && (
-                    <span className="badge checking">checking PCO…</span>
-                  )}
-                  {c.status === 'matched' && (
-                    <>
-                      <span className="badge matched">in library</span>
-                      {c.song?.lastScheduledAt ? (
-                        <span className="last-played">
-                          last played {relativeTime(c.song.lastScheduledAt)}
-                        </span>
-                      ) : (
-                        <span className="last-played">never played</span>
-                      )}
-                    </>
-                  )}
-                  {c.status === 'unmatched' && (
-                    <span className="badge unmatched">not in library</span>
-                  )}
-                  {c.status === 'error' && (
-                    <span className="badge error" title={c.error}>
-                      lookup failed
-                    </span>
-                  )}
-                </div>
-                {c.suggestion.reasoning && (
-                  <div className="reasoning">{c.suggestion.reasoning}</div>
-                )}
-              </li>
-            ))}
+                </li>
+              )
+            })}
           </ul>
         </section>
       )}
