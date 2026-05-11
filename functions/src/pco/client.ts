@@ -417,6 +417,30 @@ export class PcoClient {
     return []
   }
 
+  async updatePlanItem(
+    serviceTypeId: string,
+    planId: string,
+    itemId: string,
+    opts: { songId?: string; arrangementId?: string },
+  ): Promise<void> {
+    const relationships: Record<string, { data: { type: string; id: string } }> = {}
+    if (opts.songId) relationships.song = { data: { type: 'Song', id: opts.songId } }
+    if (opts.arrangementId) {
+      relationships.arrangement = { data: { type: 'Arrangement', id: opts.arrangementId } }
+    }
+    const body = JSON.stringify({
+      data: {
+        type: 'Item',
+        id: itemId,
+        relationships,
+      },
+    })
+    await this.fetch(
+      `/service_types/${serviceTypeId}/plans/${planId}/items/${itemId}`,
+      { method: 'PATCH', body },
+    )
+  }
+
   async createPlanItem(
     serviceTypeId: string,
     planId: string,

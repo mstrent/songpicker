@@ -21,6 +21,10 @@ export interface PersistedCandidate {
   error: string | null
   decision: Decision
   addedAt: number
+  /** PCO item id this candidate is queued to fill, or null. */
+  assignedSlotItemId: string | null
+  /** Epoch ms when this assignment was successfully committed to PCO. */
+  committedAt: number | null
 }
 
 export interface Message {
@@ -64,6 +68,9 @@ function sanitizeCandidate(raw: unknown): PersistedCandidate | null {
     error: typeof c.error === 'string' ? c.error : null,
     decision,
     addedAt: typeof c.addedAt === 'number' ? c.addedAt : Date.now(),
+    assignedSlotItemId:
+      typeof c.assignedSlotItemId === 'string' ? c.assignedSlotItemId : null,
+    committedAt: typeof c.committedAt === 'number' ? c.committedAt : null,
   }
 }
 

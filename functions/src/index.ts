@@ -389,6 +389,25 @@ export const saveSession = onCall(async (req) => {
   return { ok: true }
 })
 
+export const commitSlot = onCall(async (req) => {
+  const { uid } = requireAllowed(req)
+  const { serviceTypeId, planId, itemId, songId } = req.data as {
+    serviceTypeId?: string
+    planId?: string
+    itemId?: string
+    songId?: string
+  }
+  if (!serviceTypeId || !planId || !itemId || !songId) {
+    throw new HttpsError(
+      'invalid-argument',
+      'serviceTypeId, planId, itemId, and songId required',
+    )
+  }
+  const client = await pcoForUser(uid)
+  await client.updatePlanItem(serviceTypeId, planId, itemId, { songId })
+  return { ok: true }
+})
+
 export const commitPlanItems = onCall(async (req) => {
   const { uid } = requireAllowed(req)
   const { serviceTypeId, planId, items } = req.data as {

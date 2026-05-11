@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  commitSlot,
   loadSession,
   saveSession,
   savePlanNotes,
@@ -18,7 +19,12 @@ import {
   type Song,
   type SongSuggestion,
 } from '../lib/api'
-import { loadPlanContext, patchCachedNotes, patchCachedTheme } from '../lib/cache'
+import {
+  invalidatePlanContext,
+  loadPlanContext,
+  patchCachedNotes,
+  patchCachedTheme,
+} from '../lib/cache'
 import { isSongSlot } from '../lib/songSlots'
 import { praiseChartsSearchUrl, spotifySearchUrl } from '../lib/searchLinks'
 import { PromptEditor } from './PromptEditor'
@@ -31,6 +37,8 @@ interface CandidateMatch {
   error?: string
   decision: Decision
   addedAt: number
+  assignedSlotItemId: string | null
+  committedAt: number | null
 }
 
 function newCandidateId(): string {
@@ -61,6 +69,8 @@ function toPersisted(c: CandidateMatch): PersistedCandidate {
     error: c.error ?? null,
     decision: c.decision,
     addedAt: c.addedAt,
+    assignedSlotItemId: c.assignedSlotItemId,
+    committedAt: c.committedAt,
   }
 }
 
@@ -89,6 +99,8 @@ function fromPersisted(p: PersistedCandidate): CandidateMatch {
     error: p.error ?? undefined,
     decision: p.decision,
     addedAt: p.addedAt,
+    assignedSlotItemId: p.assignedSlotItemId,
+    committedAt: p.committedAt,
   }
 }
 
@@ -301,6 +313,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         matchStatus: 'checking',
         decision: 'pending',
         addedAt: now,
+        assignedSlotItemId: null,
+        committedAt: null,
       }))
       setCandidates((prev) => [...prev, ...newOnes])
 
@@ -343,12 +357,52 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
 
   function setDecision(id: string, next: Decision) {
     setCandidates((prev) =>
+      prev.map((c) => {
+        if (c.id !== id) return c
+        const newDecision: Decision = c.decision === next ? 'pending' : next
+        // Drop any pending assignment when leaving shortlist (committed
+        // assignments survive — that history is real).
+        const clearAssignment = newDecision !== 'shortlist' && !c.committedAt
+        return {
+          ...c,
+          decision: newDecision,
+          assignedSlotItemId: clearAssignment ? null : c.assignedSlotItemId,
+        }
+      }),
+    )
+  }
+
+  function assignSlot(candidateId: string, slotItemId: string | null) {
+    setCandidates((prev) =>
       prev.map((c) =>
-        c.id === id
-          ? { ...c, decision: c.decision === next ? 'pending' : next }
+        c.id === candidateId && !c.committedAt
+          ? { ...c, assignedSlotItemId: slotItemId }
           : c,
       ),
     )
+  }
+
+  async function commitCandidate(c: CandidateMatch) {
+    if (!c.assignedSlotItemId || !c.song || c.committedAt) return
+    try {
+      await commitSlot({
+        serviceTypeId,
+        planId,
+        itemId: c.assignedSlotItemId,
+        songId: c.song.id,
+      })
+      setCandidates((prev) =>
+        prev.map((x) =>
+          x.id === c.id ? { ...x, committedAt: Date.now() } : x,
+        ),
+      )
+      // Refresh service order so the slot flips from empty to filled.
+      invalidatePlanContext(serviceTypeId, planId)
+      const fresh = await loadPlanContext(serviceTypeId, planId)
+      setItems(fresh.items)
+    } catch (e) {
+      setGenerateError((e as Error).message)
+    }
   }
 
   if (loadError) return <div className="error">Error loading plan: {loadError}</div>
@@ -685,7 +739,31 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         {generateError && <div className="error">Error: {generateError}</div>}
       </section>
 
-      {candidates.length > 0 && (
+      {candidates.length > 0 && (() => {
+        // Empty song slots currently free in PCO. We assign by the slot's
+        // item id; the dropdown on each candidate filters out slots
+        // already claimed by another (uncommitted) candidate so two
+        // candidates can't queue for the same slot.
+        const emptySongSlots = (items ?? []).filter(
+          (it) => isSongSlot(it) && !it.songId,
+        )
+        const slotById = new Map(emptySongSlots.map((s) => [s.id, s] as const))
+
+        function availableSlotsFor(candidateId: string): PlanItem[] {
+          const takenByOthers = new Set(
+            candidates
+              .filter(
+                (c) =>
+                  c.id !== candidateId &&
+                  c.assignedSlotItemId &&
+                  !c.committedAt,
+              )
+              .map((c) => c.assignedSlotItemId!),
+          )
+          return emptySongSlots.filter((s) => !takenByOthers.has(s.id))
+        }
+
+        return (
         <section className="candidates">
           <h3 className="ai-heading">
             <span className="sparkle" aria-hidden>✨</span>
@@ -796,6 +874,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       type="button"
                       className={`decision-btn decision-shortlist${c.decision === 'shortlist' ? ' on' : ''}`}
                       onClick={() => setDecision(c.id, 'shortlist')}
+                      disabled={!!c.committedAt}
                       title={
                         c.decision === 'shortlist'
                           ? 'Click again to undo'
@@ -808,6 +887,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       type="button"
                       className={`decision-btn decision-reject${c.decision === 'reject' ? ' on' : ''}`}
                       onClick={() => setDecision(c.id, 'reject')}
+                      disabled={!!c.committedAt}
                       title={
                         c.decision === 'reject'
                           ? 'Click again to undo'
@@ -816,11 +896,78 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     >
                       ✗ Reject
                     </button>
+
+                    {c.decision === 'shortlist' && matched && (() => {
+                      if (c.committedAt) {
+                        const slot = c.assignedSlotItemId
+                          ? slotById.get(c.assignedSlotItemId)
+                          : null
+                        return (
+                          <span className="committed-badge">
+                            ✓ Committed{slot ? ` to ${slot.title}` : ''}
+                          </span>
+                        )
+                      }
+                      if (c.assignedSlotItemId) {
+                        const slot = slotById.get(c.assignedSlotItemId)
+                        return (
+                          <>
+                            <span className="assigned-arrow">
+                              → {slot?.title ?? '(slot)'}
+                            </span>
+                            <button
+                              type="button"
+                              className="commit-btn"
+                              onClick={() => commitCandidate(c)}
+                              title="Push this song into the slot in Planning Center"
+                            >
+                              ↗ Commit
+                            </button>
+                            <button
+                              type="button"
+                              className="unassign-btn"
+                              onClick={() => assignSlot(c.id, null)}
+                              title="Unassign"
+                            >
+                              ×
+                            </button>
+                          </>
+                        )
+                      }
+                      const avail = availableSlotsFor(c.id)
+                      return (
+                        <select
+                          className="slot-picker"
+                          value=""
+                          disabled={avail.length === 0}
+                          onChange={(e) =>
+                            e.target.value && assignSlot(c.id, e.target.value)
+                          }
+                          title={
+                            avail.length === 0
+                              ? 'No empty song slots available'
+                              : 'Assign to slot'
+                          }
+                        >
+                          <option value="">
+                            {avail.length === 0
+                              ? 'No open slots'
+                              : 'Assign to slot…'}
+                          </option>
+                          {avail.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.title}
+                            </option>
+                          ))}
+                        </select>
+                      )
+                    })()}
                   </div>
                 </li>
               )
             })}
           </ul>
+          {/* end candidates list */}
           {debug && (
             <details className="ai-debug">
               <summary>
@@ -844,7 +991,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             </details>
           )}
         </section>
-      )}
+        )
+      })()}
     </div>
   )
 }

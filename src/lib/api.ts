@@ -135,6 +135,8 @@ export interface PersistedCandidate {
   error: string | null
   decision: Decision
   addedAt: number
+  assignedSlotItemId: string | null
+  committedAt: number | null
 }
 
 export interface SessionMessage {
@@ -158,6 +160,11 @@ export const saveSession = httpsCallable<
   { planId: string; session: PickerSession },
   { ok: boolean }
 >(functions, 'saveSession')
+
+export const commitSlot = httpsCallable<
+  { serviceTypeId: string; planId: string; itemId: string; songId: string },
+  { ok: boolean }
+>(functions, 'commitSlot')
 
 export const searchSongs = httpsCallable<{ query: string }, { songs: Song[] }>(
   functions,
