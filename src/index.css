@@ -558,7 +558,10 @@ textarea {
 @media (min-width: 960px) {
   .plan-detail .plan-body {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+    /* Left holds service order + prompts + suggest form; right is just
+       the candidates list, so a slightly narrower right column reads
+       better and keeps drag-target slots roomy on the left. */
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
     gap: 1.5rem;
     align-items: start;
   }

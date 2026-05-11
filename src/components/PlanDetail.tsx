@@ -562,9 +562,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           </ol>
         </section>
       )}
-        </div>
 
-        <div className="plan-right">
       <div className="prompt-editors">
         <PromptEditor type="role" planId={planId} />
         <PromptEditor type="structure" planId={planId} />
@@ -740,7 +738,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         </div>
         {generateError && <div className="error">Error: {generateError}</div>}
       </section>
+        </div>
 
+        <div className="plan-right">
       {candidates.length > 0 && (() => {
         // Empty song slots currently free in PCO. We assign by the slot's
         // item id; the dropdown on each candidate filters out slots
