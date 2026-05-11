@@ -46,7 +46,7 @@ export function PcoSetup({ onSaved }: Props) {
         </li>
         <li>Scroll down to <strong>Personal Access Tokens</strong>.</li>
         <li>Click <strong>New Personal Access Token</strong>, name it "songpicker".</li>
-        <li>Copy the <strong>Application ID</strong> and <strong>Secret</strong> below.</li>
+        <li>Paste the <strong>Application ID</strong> and <strong>Secret</strong> into the fields below.</li>
       </ol>
       <form onSubmit={handleSubmit}>
         <label>
