@@ -16,4 +16,10 @@ export function getAiProvider(name: string, apiKey: string): AiProvider {
   }
 }
 
-export type { AiProvider, SongSuggestion, SuggestRequest } from './types'
+export type {
+  AiDebug,
+  AiProvider,
+  SongSuggestion,
+  SuggestRequest,
+  SuggestResult,
+} from './types'

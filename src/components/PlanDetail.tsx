@@ -3,6 +3,7 @@ import {
   getPlanContext,
   searchSongs,
   suggestSongs,
+  type AiDebug,
   type Plan,
   type PlanItem,
   type PlanNote,
@@ -37,6 +38,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   const [generateError, setGenerateError] = useState<string | null>(null)
   const [candidates, setCandidates] = useState<CandidateMatch[]>([])
   const [provider, setProvider] = useState<string | null>(null)
+  const [debug, setDebug] = useState<AiDebug | null>(null)
 
   const themeInitialized = useRef(false)
 
@@ -74,6 +76,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       const exclude = candidates.map((c) => c.suggestion.title)
       const res = await suggestSongs({ theme, criteria, exclude, count })
       setProvider(res.data.provider)
+      setDebug(res.data.debug ?? null)
 
       const startIndex = candidates.length
       const newOnes: CandidateMatch[] = res.data.suggestions.map((s) => ({
@@ -111,6 +114,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
 
   function clearCandidates() {
     setCandidates([])
+    setDebug(null)
   }
 
   if (loadError) return <div className="error">Error loading plan: {loadError}</div>
@@ -378,6 +382,28 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
               )
             })}
           </ul>
+          {debug && (
+            <details className="ai-debug">
+              <summary>
+                <span className="chevron" aria-hidden>▸</span>
+                <span>Context sent to AI</span>
+              </summary>
+              <div className="debug-body">
+                <div className="debug-row">
+                  <span className="debug-label">Model</span>
+                  <code>{debug.model}</code>
+                </div>
+                <div className="debug-row">
+                  <span className="debug-label">System prompt</span>
+                  <pre>{debug.systemPrompt}</pre>
+                </div>
+                <div className="debug-row">
+                  <span className="debug-label">User message</span>
+                  <pre>{debug.userMessage}</pre>
+                </div>
+              </div>
+            </details>
+          )}
         </section>
       )}
     </div>

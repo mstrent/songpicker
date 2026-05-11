@@ -11,7 +11,18 @@ export interface SuggestRequest {
   count?: number
 }
 
+export interface AiDebug {
+  model: string
+  systemPrompt: string
+  userMessage: string
+}
+
+export interface SuggestResult {
+  suggestions: SongSuggestion[]
+  debug: AiDebug
+}
+
 export interface AiProvider {
   name: 'anthropic' | 'openai' | 'gemini'
-  suggestSongs(req: SuggestRequest): Promise<SongSuggestion[]>
+  suggestSongs(req: SuggestRequest): Promise<SuggestResult>
 }

@@ -177,13 +177,13 @@ export const suggestSongs = onCall(
         )
     }
     const ai = getAiProvider(provider, apiKey)
-    const suggestions = await ai.suggestSongs({
+    const result = await ai.suggestSongs({
       theme,
       criteria: criteria ?? '',
       exclude,
       count,
     })
-    return { suggestions, provider }
+    return { suggestions: result.suggestions, debug: result.debug, provider }
   },
 )
 

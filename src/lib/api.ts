@@ -56,6 +56,12 @@ export interface SongSuggestion {
   reasoning?: string
 }
 
+export interface AiDebug {
+  model: string
+  systemPrompt: string
+  userMessage: string
+}
+
 export interface CommitItem {
   title: string
   sequence: number
@@ -87,7 +93,7 @@ export const searchSongs = httpsCallable<{ query: string }, { songs: Song[] }>(
 
 export const suggestSongs = httpsCallable<
   { theme: string; criteria: string; exclude?: string[]; count?: number },
-  { suggestions: SongSuggestion[]; provider: string }
+  { suggestions: SongSuggestion[]; provider: string; debug: AiDebug }
 >(functions, 'suggestSongs')
 
 export const commitPlanItems = httpsCallable<
