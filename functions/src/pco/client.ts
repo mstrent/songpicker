@@ -230,7 +230,7 @@ export class PcoClient {
         description: string | null
       }>
     >(
-      `/service_types/${serviceTypeId}/plans/${planId}/items?include=song,arrangement,item_notes,item_assignments,item_assignments.assignable&order=sequence&per_page=100`,
+      `/service_types/${serviceTypeId}/plans/${planId}/items?include=song,item_notes,item_assignments,item_assignments.assignable&order=sequence&per_page=100`,
     )
     interface SongRef {
       title: string
@@ -238,7 +238,6 @@ export class PcoClient {
       ccli: string | null
     }
     const songsById = new Map<string, SongRef>()
-    const arrangementNames = new Map<string, string>()
     const noteContent = new Map<string, string>()
     // Two-pass over included so we can resolve ItemAssignment -> Person
     // (or TeamPosition) regardless of arrival order. Persons get their
@@ -265,9 +264,6 @@ export class PcoClient {
             ccli: a.ccli_number ?? null,
           })
         }
-      } else if (inc.type === 'Arrangement') {
-        const name = (inc.attributes as { name?: string }).name
-        if (name) arrangementNames.set(inc.id, name)
       } else if (inc.type === 'ItemNote') {
         const a = inc.attributes as { content?: string }
         if (a.content && a.content.trim()) {
@@ -326,7 +322,6 @@ export class PcoClient {
         .filter((n): n is string => !!n)
 
       const description = d.attributes.description ?? null
-      const arrangementId = firstRefId(d.relationships?.arrangement)
       const songRef = songId ? songsById.get(songId) : undefined
       return {
         id: d.id,
@@ -337,9 +332,6 @@ export class PcoClient {
         songTitle: songRef?.title ?? null,
         songAuthor: songRef?.author ?? null,
         songCcli: songRef?.ccli ?? null,
-        arrangementName: arrangementId
-          ? (arrangementNames.get(arrangementId) ?? null)
-          : null,
         keyName: d.attributes.key_name ?? null,
         description: description && description.trim() ? description.trim() : null,
         notes,

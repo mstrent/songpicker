@@ -482,8 +482,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                   it.notes.length > 0 ||
                   it.leaders.length > 0 ||
                   it.songAuthor ||
-                  it.songCcli ||
-                  it.arrangementName)
+                  it.songCcli)
               return (
                 <li key={it.id} className={cls}>
                   <span className="seq">{it.sequence}</span>
@@ -521,13 +520,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                             </span>
                           ))}
                         </div>
-                        {(it.songAuthor || it.arrangementName || it.songCcli) && (
+                        {(it.songAuthor || it.songCcli) && (
                           <div className="meta-credits">
                             {it.songAuthor && (
                               <span>by <strong>{it.songAuthor}</strong></span>
-                            )}
-                            {it.arrangementName && (
-                              <span> · arrangement: {it.arrangementName}</span>
                             )}
                             {it.songCcli && (
                               <span> · CCLI {it.songCcli}</span>
@@ -1033,7 +1029,6 @@ function buildServiceOrderText(items: PlanItem[] | null): string {
 function formatSongDisamb(it: PlanItem): string {
   const parts: string[] = []
   if (it.songAuthor) parts.push(`by ${it.songAuthor}`)
-  if (it.arrangementName) parts.push(`arrangement: ${it.arrangementName}`)
   if (it.songCcli) parts.push(`CCLI ${it.songCcli}`)
   return parts.length > 0 ? `(${parts.join(', ')})` : ''
 }
