@@ -681,6 +681,35 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             )
             return
           }
+          // Pre-turn snapshot of slot placeholder identities. For each
+          // currently-committed candidate, capture the slot's original
+          // placeholder name (its priorSlotTitle, captured at first
+          // commit time and untainted by what's happened since).
+          // Incoming commits in this turn inherit from this map so a
+          // swap doesn't lose the placeholder — without it, processing
+          // assignment 1 would read the slot's CURRENT title (which
+          // is the outgoing song's name), and assignment 2 would find
+          // no occupant to evict (since assignment 1 already moved
+          // them in optimistic state).
+          //
+          // Skip clearly-tainted entries (priorSlotTitle equal to the
+          // candidate's own song title) — those got overwritten in a
+          // prior turn and shouldn't propagate further.
+          const preTurnSlotPlaceholders = new Map<string, string>()
+          for (const c of candidates) {
+            if (
+              c.committedAt &&
+              c.assignedSlotItemId &&
+              c.priorSlotTitle &&
+              c.priorSlotTitle.trim() &&
+              c.priorSlotTitle.trim() !== c.suggestion.title.trim()
+            ) {
+              preTurnSlotPlaceholders.set(
+                c.assignedSlotItemId,
+                c.priorSlotTitle.trim(),
+              )
+            }
+          }
           // Validate + resolve each assignment up front. Invalid ones
           // get a ⚠ marker and drop out of the plan.
           type ResolvedCommit = {
@@ -781,8 +810,19 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                 (c) =>
                   c.assignedSlotItemId === r.slotItemId && c.committedAt != null,
               )
+              // Restore title: prefer the occupant's stored prior
+              // (preserves any user-customized slot name like
+              // "Communion song"). Fall back to the position-based
+              // "Song N" if the stored prior is missing OR if it
+              // matches the candidate's own song title — the latter
+              // means a previous commit/swap tainted it, in which
+              // case "Song N" is at least correct rather than wrong.
+              const storedPrior = occupant?.priorSlotTitle?.trim()
+              const occupantTitle = occupant?.suggestion.title.trim()
+              const priorIsTainted =
+                !!(storedPrior && occupantTitle && storedPrior === occupantTitle)
               const restoreTitle =
-                occupant?.priorSlotTitle?.trim() ||
+                (!priorIsTainted && storedPrior) ||
                 fallbackSlotTitle(r.slotItemId)
               const songTitle =
                 occupant?.suggestion.title ?? r.slotItem.songTitle ?? 'song'
@@ -867,7 +907,15 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                   priorSlotTitle: evicted.priorSlotTitle,
                 }
               }
-              const newPriorSlotTitle = r.slotItem.title ?? null
+              // Inherit the slot's original placeholder from the
+              // pre-turn snapshot if we have one. Fall back to the
+              // slot's current title only when there was no prior
+              // committed candidate (i.e., fresh commit to a slot
+              // whose title still IS the placeholder).
+              const newPriorSlotTitle =
+                preTurnSlotPlaceholders.get(targetItemId) ??
+                r.slotItem.title ??
+                null
               return prev.map((c) => {
                 if (c.id === candidate.id) {
                   return {
@@ -1491,17 +1539,18 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       (items ?? []).filter(isSongSlot).findIndex((it) => it.id === slotItem.id) + 1
     // Prefer the title captured at commit time; fall back to the
     // "Song N" convention so the slot label doesn't keep the song
-    // name after clearing.
+    // name after clearing. Skip the stored prior when it equals the
+    // candidate's own song title — that's a sign it got tainted by
+    // a previous overwrite/swap and would restore to the wrong name.
     const committedCandidate = candidates.find(
-      (c) =>
-        c.assignedSlotItemId === slotItem.id &&
-        c.committedAt != null &&
-        c.priorSlotTitle &&
-        c.priorSlotTitle.trim() !== '',
+      (c) => c.assignedSlotItemId === slotItem.id && c.committedAt != null,
     )
+    const storedPrior = committedCandidate?.priorSlotTitle?.trim()
+    const occupantTitle = committedCandidate?.suggestion.title.trim()
+    const priorIsTainted =
+      !!(storedPrior && occupantTitle && storedPrior === occupantTitle)
     const restoreTitle =
-      committedCandidate?.priorSlotTitle?.trim() ||
-      fallbackSlotTitle(slotItem.id)
+      (!priorIsTainted && storedPrior) || fallbackSlotTitle(slotItem.id)
     const songTitle =
       committedCandidate?.suggestion.title ?? slotItem.songTitle ?? '(song)'
     const rollbackByCandidate = new Map(
