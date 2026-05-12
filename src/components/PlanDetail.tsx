@@ -711,15 +711,14 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           onDragLeave={() => setDragOverTrash(false)}
           onDrop={(e) => {
             e.preventDefault()
-            try {
-              const raw = e.dataTransfer.getData('application/x-songpicker')
-              const data = raw ? JSON.parse(raw) : null
-              if (data?.kind === 'slot' && data.itemId) {
-                void clearPickedSlot(data.itemId)
-              }
-            } finally {
-              endDrag()
+            // Source id lives in React state now — the dataTransfer
+            // payload was deprecated when we moved off the
+            // application/x-songpicker custom mime type. Reading the
+            // old key here silently no-op'd the clear.
+            if (dragKind === 'slot' && dragSourceId) {
+              void clearPickedSlot(dragSourceId)
             }
+            endDrag()
           }}
           aria-label="Drop to clear this slot"
         >
