@@ -620,47 +620,59 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   const [dragOverItemId, setDragOverItemId] = useState<string | null>(null)
   const [dragOverTrash, setDragOverTrash] = useState(false)
 
+  // Floating-ghost we render ourselves at the cursor position during a
+  // drag. The browser-default drag image was rendering blank, and
+  // setDragImage on a styled clone also failed for this user — likely
+  // a Chromium quirk on Retina-class displays. So we suppress the
+  // browser's ghost entirely and paint our own labeled chip via a
+  // dragover listener on the document.
+  const [dragGhost, setDragGhost] = useState<{
+    label: string
+    sub: string | null
+    x: number
+    y: number
+  } | null>(null)
+
   function endDrag() {
     setDragKind(null)
     setDragSourceId(null)
     setDragOverItemId(null)
     setDragOverTrash(false)
+    setDragGhost(null)
   }
 
-  // Build a styled clone of the source element and hand it to
-  // setDragImage. The browser's default drag image is unreliable
-  // (renders blank for some users on Chromium/Retina combinations), so
-  // we generate our own. Key: the clone must be RENDERED in the DOM
-  // when setDragImage snapshots it — offscreen via top:-9999px works
-  // on most browsers but is brittle. Position it just outside the
-  // viewport horizontally, where the browser still lays it out, then
-  // remove on the next frame.
-  function attachDragImage(e: React.DragEvent<HTMLLIElement>) {
-    const src = e.currentTarget
-    const clone = src.cloneNode(true) as HTMLElement
-    const w = src.offsetWidth
-    clone.style.position = 'absolute'
-    clone.style.top = '0'
-    clone.style.left = '-10000px'
-    clone.style.width = `${w}px`
-    clone.style.background = getComputedStyle(src).backgroundColor || '#fff'
-    clone.style.opacity = '0.95'
-    clone.style.pointerEvents = 'none'
-    clone.style.boxShadow = '0 14px 30px rgba(0, 0, 0, 0.25)'
-    clone.style.transform = 'rotate(-1.5deg)'
-    clone.style.borderRadius =
-      getComputedStyle(src).borderRadius || '10px'
-    document.body.appendChild(clone)
-    try {
-      e.dataTransfer.setDragImage(clone, Math.min(w / 2, 200), 24)
-    } catch {
-      // Some sandboxed contexts disallow setDragImage; fall back to
-      // the browser default silently.
+  // While any drag is active, follow the cursor with our floating
+  // ghost via the document-level dragover event (dragover fires
+  // continuously and reports clientX/clientY).
+  useEffect(() => {
+    if (!dragGhost) return
+    function onMove(e: DragEvent) {
+      // clientX/Y can briefly hit 0,0 right before drop on some
+      // browsers; ignore those to avoid the ghost teleporting to the
+      // corner.
+      if (e.clientX === 0 && e.clientY === 0) return
+      setDragGhost((prev) =>
+        prev ? { ...prev, x: e.clientX, y: e.clientY } : null,
+      )
     }
-    // Wait one frame so the browser has actually snapshotted the
-    // element before we yank it from the DOM. setTimeout(…, 0)
-    // sometimes fires too eagerly on slower devices.
-    requestAnimationFrame(() => clone.remove())
+    document.addEventListener('dragover', onMove)
+    return () => document.removeEventListener('dragover', onMove)
+  }, [dragGhost !== null])
+
+  // Suppress the browser's default drag image so it doesn't compete
+  // with our floating ghost (and so users on Chromium/Retina don't see
+  // it render as a blank rectangle either). A 1×1 transparent canvas
+  // is the standard "invisible drag image" trick.
+  function useEmptyDragImage(e: React.DragEvent): void {
+    const canvas = document.createElement('canvas')
+    canvas.width = 1
+    canvas.height = 1
+    try {
+      e.dataTransfer.setDragImage(canvas, 0, 0)
+    } catch {
+      // Ignored — falls back to the browser default. We have the
+      // floating ghost too, so the user still sees something.
+    }
   }
 
 
@@ -736,6 +748,20 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
 
   return (
     <div className="plan-detail">
+      {dragGhost && (
+        <div
+          className="drag-ghost"
+          style={{
+            left: dragGhost.x + 14,
+            top: dragGhost.y + 14,
+          }}
+        >
+          <div className="drag-ghost-title">{dragGhost.label}</div>
+          {dragGhost.sub && (
+            <div className="drag-ghost-sub">{dragGhost.sub}</div>
+          )}
+        </div>
+      )}
       {dragKind === 'slot' && (
         <div
           className={`slot-trash${dragOverTrash ? ' drag-over' : ''}`}
@@ -848,9 +874,15 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     if (!draggable) return
                     e.dataTransfer.setData('text/plain', it.id)
                     e.dataTransfer.effectAllowed = 'move'
-                    attachDragImage(e)
+                    useEmptyDragImage(e)
                     setDragKind('slot')
                     setDragSourceId(it.id)
+                    setDragGhost({
+                      label: it.songTitle ?? it.title ?? 'song',
+                      sub: it.songAuthor ?? null,
+                      x: e.clientX,
+                      y: e.clientY,
+                    })
                   }}
                   onDragEnd={() => {
                     if (draggable) endDrag()
@@ -1303,9 +1335,15 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     // lives in dragKind + dragSourceId.
                     e.dataTransfer.setData('text/plain', c.id)
                     e.dataTransfer.effectAllowed = 'move'
-                    attachDragImage(e)
+                    useEmptyDragImage(e)
                     setDragKind('candidate')
                     setDragSourceId(c.id)
+                    setDragGhost({
+                      label: c.suggestion.title,
+                      sub: c.suggestion.author ?? null,
+                      x: e.clientX,
+                      y: e.clientY,
+                    })
                   }}
                   onDragEnd={endDrag}
                 >
