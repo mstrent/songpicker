@@ -106,22 +106,24 @@ export interface RemoveAction {
   reason: string
 }
 
-/** Actually commit a candidate to a Planning Center song slot. SPA
- *  calls the commitSlot Cloud Function with the candidate's matched
- *  PCO song id; the optimistic local state flips committedAt
- *  immediately and rolls back on PCO failure. Skipped silently for
- *  candidates whose library match hasn't completed. */
-export interface CommitSongAction {
-  kind: 'commit'
-  candidateId: string
+/** A single slot assignment: "this slot should contain this candidate"
+ *  (or null to be empty). Multiple assignments in one call cover any
+ *  multi-slot rearrangement — fresh commit, move, swap, overwrite,
+ *  clear — without the AI needing to choose between specialized
+ *  tools or coordinate multiple tool calls. */
+export interface SlotAssignment {
   slotIndex: number
+  candidateId: string | null
 }
 
-/** Back out a committed song slot — clears the PCO item via clearSlot
- *  and resets any committed-state on the candidate that owned it. */
-export interface ClearSlotAction {
-  kind: 'clear_slot'
-  slotIndex: number
+/** Declarative slot-state update: place candidates in slots, with
+ *  null meaning "empty this slot". Replaces the older
+ *  commit_song / clear_slot pair. The SPA computes the diff from
+ *  current state and runs the PCO operations in two phases (clears
+ *  then commits) so swaps and moves land cleanly. */
+export interface SetSlotContentsAction {
+  kind: 'set_slot_contents'
+  assignments: SlotAssignment[]
 }
 
 /** Reverse a prior remove_candidates: flip the listed candidates back
@@ -135,8 +137,7 @@ export interface UnrejectAction {
 export type AiAction =
   | ProposeAction
   | RemoveAction
-  | CommitSongAction
-  | ClearSlotAction
+  | SetSlotContentsAction
   | UnrejectAction
 
 export interface SuggestResult {

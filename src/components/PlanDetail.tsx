@@ -674,235 +674,303 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             `🤖 AI rejected ${titles} — reason: "${action.reason}"`,
           )
           setRejectedPoolOpen(true)
-        } else if (action.kind === 'commit') {
+        } else if (action.kind === 'set_slot_contents') {
           if (autoRefresh) {
             appendSystemMessage(
-              `⚠ AI tried to commit a song during auto-refresh — skipped (commits require explicit direction)`,
+              `⚠ AI tried to change song slots during auto-refresh — skipped (Planning Center writes require explicit direction)`,
             )
             return
           }
-          const candidate = preTurnCandidatesById.get(action.candidateId)
-          if (!candidate) {
-            appendSystemMessage(
-              `⚠ AI tried to commit an unknown candidate (${action.candidateId}) — skipped`,
-            )
-            return
+          // Validate + resolve each assignment up front. Invalid ones
+          // get a ⚠ marker and drop out of the plan.
+          type ResolvedCommit = {
+            kind: 'commit'
+            slotItemId: string
+            slotIndex: number
+            slotItem: PlanItem
+            candidate: CandidateMatch
+            songId: string
+            songTitle: string
           }
-          if (!candidate.song?.id) {
-            appendSystemMessage(
-              `⚠ AI tried to commit "${candidate.suggestion.title}" but it isn't matched to a song in your Planning Center library — skipped`,
-            )
-            return
+          type ResolvedClear = {
+            kind: 'clear'
+            slotItemId: string
+            slotIndex: number
+            slotItem: PlanItem
           }
-          const targetItemId = itemIdBySlotIndex.get(action.slotIndex)
-          if (!targetItemId) {
-            appendSystemMessage(
-              `⚠ AI tried to commit "${candidate.suggestion.title}" to song slot ${action.slotIndex}, but no such slot exists — skipped`,
-            )
-            return
-          }
-          const slotItem = (items ?? []).find((it) => it.id === targetItemId)
-          if (!slotItem) return
-          const songId = candidate.song.id
-          const songTitle = candidate.suggestion.title
-          // Use live tracker (not preTurn snapshot) so action 2 of a
-          // swap correctly sees that its candidate is no longer
-          // committed (action 1 evicted it).
-          const currentSlot = liveCommittedSlot.get(candidate.id)
-          const isMove =
-            currentSlot !== undefined && currentSlot !== targetItemId
-          const fromSlotIndex =
-            isMove && currentSlot
-              ? slotIndexByItemId.get(currentSlot) ?? null
-              : null
-          // Capture rollback snapshot from CURRENT state (not preTurn)
-          // so failure restores whatever we just optimistically wrote.
-          // Have to read via setCandidates updater because React state
-          // closure is stale — that's why this is awkward.
-          let rollbackForCandidate:
-            | {
-                id: string
-                decision: typeof candidate.decision
-                committedAt: number | null
-                assignedSlotItemId: string | null
-                priorSlotTitle: string | null
-              }
-            | null = null
-          let evictedRollback:
-            | {
-                id: string
-                committedAt: number | null
-                assignedSlotItemId: string | null
-                priorSlotTitle: string | null
-              }
-            | null = null
-          setCandidates((prev) => {
-            const me = prev.find((c) => c.id === candidate.id)
-            if (me) {
-              rollbackForCandidate = {
-                id: me.id,
-                decision: me.decision,
-                committedAt: me.committedAt,
-                assignedSlotItemId: me.assignedSlotItemId,
-                priorSlotTitle: me.priorSlotTitle,
-              }
+          const resolved: Array<ResolvedCommit | ResolvedClear> = []
+          for (const a of action.assignments) {
+            const slotItemId = itemIdBySlotIndex.get(a.slotIndex)
+            if (!slotItemId) {
+              appendSystemMessage(
+                `⚠ AI tried to set song slot ${a.slotIndex}, but no such slot exists — skipped`,
+              )
+              continue
             }
-            const evicted = prev.find(
-              (c) =>
-                c.id !== candidate.id &&
-                c.assignedSlotItemId === targetItemId &&
-                c.committedAt != null,
-            )
-            if (evicted) {
-              evictedRollback = {
-                id: evicted.id,
-                committedAt: evicted.committedAt,
-                assignedSlotItemId: evicted.assignedSlotItemId,
-                priorSlotTitle: evicted.priorSlotTitle,
-              }
+            const slotItem = (items ?? []).find((it) => it.id === slotItemId)
+            if (!slotItem) continue
+            if (a.candidateId == null) {
+              resolved.push({
+                kind: 'clear',
+                slotItemId,
+                slotIndex: a.slotIndex,
+                slotItem,
+              })
+              continue
             }
-            const newPriorSlotTitle = slotItem.title ?? null
-            return prev.map((c) => {
-              if (c.id === candidate.id) {
-                return {
-                  ...c,
-                  committedAt: now,
-                  assignedSlotItemId: targetItemId,
-                  priorSlotTitle: newPriorSlotTitle,
-                  commitPending: true,
-                }
-              }
-              if (
-                c.assignedSlotItemId === targetItemId &&
-                c.committedAt != null &&
-                c.id !== candidate.id
-              ) {
-                return {
-                  ...c,
-                  committedAt: null,
-                  assignedSlotItemId: null,
-                  priorSlotTitle: null,
-                }
-              }
-              return c
+            const candidate = preTurnCandidatesById.get(a.candidateId)
+            if (!candidate) {
+              appendSystemMessage(
+                `⚠ AI referenced an unknown candidate (${a.candidateId}) — skipped`,
+              )
+              continue
+            }
+            if (!candidate.song?.id) {
+              appendSystemMessage(
+                `⚠ AI tried to place "${candidate.suggestion.title}" but it isn't matched to a song in your Planning Center library — skipped`,
+              )
+              continue
+            }
+            resolved.push({
+              kind: 'commit',
+              slotItemId,
+              slotIndex: a.slotIndex,
+              slotItem,
+              candidate,
+              songId: candidate.song.id,
+              songTitle: candidate.suggestion.title,
             })
-          })
-          // Plan PCO operations
-          if (isMove && currentSlot) {
-            const restoreTitle =
-              candidate.priorSlotTitle?.trim() || fallbackSlotTitle(currentSlot)
-            const slotItemForClear = (items ?? []).find(
-              (it) => it.id === currentSlot,
-            )
-            if (slotItemForClear) {
-              plannedClears.set(currentSlot, {
-                slotItem: slotItemForClear,
+          }
+          if (resolved.length === 0) return
+
+          // Detect swap pairs across the resolved commits: assignment X
+          // puts A in slot α while another assignment Y puts B in slot
+          // β AND A was currently at β AND B was currently at α. We
+          // emit one combined "swapped" system message per pair rather
+          // than two "moved" lines.
+          const swapPartnerIndex = new Map<number, number>()
+          for (let i = 0; i < resolved.length; i++) {
+            if (swapPartnerIndex.has(i)) continue
+            const ri = resolved[i]
+            if (ri.kind !== 'commit') continue
+            const iCurrent = liveCommittedSlot.get(ri.candidate.id)
+            if (iCurrent === undefined || iCurrent === ri.slotItemId) continue
+            for (let j = i + 1; j < resolved.length; j++) {
+              if (swapPartnerIndex.has(j)) continue
+              const rj = resolved[j]
+              if (rj.kind !== 'commit') continue
+              const jCurrent = liveCommittedSlot.get(rj.candidate.id)
+              if (jCurrent === undefined || jCurrent === rj.slotItemId) continue
+              if (jCurrent === ri.slotItemId && iCurrent === rj.slotItemId) {
+                swapPartnerIndex.set(i, j)
+                swapPartnerIndex.set(j, i)
+                break
+              }
+            }
+          }
+
+          // Apply each resolved entry: optimistic state + plan PCO ops
+          // + emit a system message (one combined per swap pair).
+          const emittedSwapMessageFor = new Set<number>()
+          for (let i = 0; i < resolved.length; i++) {
+            const r = resolved[i]
+            if (r.kind === 'clear') {
+              // Snapshot for rollback: any committed candidate at this
+              // slot we're about to evict.
+              const occupant = candidates.find(
+                (c) =>
+                  c.assignedSlotItemId === r.slotItemId && c.committedAt != null,
+              )
+              const restoreTitle =
+                occupant?.priorSlotTitle?.trim() ||
+                fallbackSlotTitle(r.slotItemId)
+              const songTitle =
+                occupant?.suggestion.title ?? r.slotItem.songTitle ?? 'song'
+              setCandidates((prev) =>
+                prev.map((c) =>
+                  c.assignedSlotItemId === r.slotItemId
+                    ? {
+                        ...c,
+                        committedAt: null,
+                        assignedSlotItemId: null,
+                        priorSlotTitle: null,
+                      }
+                    : c,
+                ),
+              )
+              for (const [id, slot] of [...liveCommittedSlot.entries()]) {
+                if (slot === r.slotItemId) liveCommittedSlot.delete(id)
+              }
+              plannedClears.set(r.slotItemId, {
+                slotItem: r.slotItem,
                 restoreTitle,
               })
-            }
-          }
-          plannedCommits.set(targetItemId, {
-            candidateId: candidate.id,
-            songId,
-            songTitle,
-            rollback: () => {
-              setCandidates((prev) =>
-                prev.map((c) => {
-                  if (
-                    rollbackForCandidate &&
-                    c.id === rollbackForCandidate.id
-                  ) {
-                    return {
-                      ...c,
-                      decision: rollbackForCandidate.decision,
-                      committedAt: rollbackForCandidate.committedAt,
-                      assignedSlotItemId:
-                        rollbackForCandidate.assignedSlotItemId,
-                      priorSlotTitle: rollbackForCandidate.priorSlotTitle,
-                      commitPending: false,
-                    }
-                  }
-                  if (evictedRollback && c.id === evictedRollback.id) {
-                    return {
-                      ...c,
-                      committedAt: evictedRollback.committedAt,
-                      assignedSlotItemId: evictedRollback.assignedSlotItemId,
-                      priorSlotTitle: evictedRollback.priorSlotTitle,
-                    }
-                  }
-                  return c
-                }),
+              pcoWritesFired = true
+              appendSystemMessage(
+                `🤖 AI cleared "${songTitle}" from song slot ${r.slotIndex}`,
               )
-            },
-          })
-          // Update live tracker: candidate moves to new slot; any
-          // previous occupant of target gets evicted.
-          for (const [id, slot] of [...liveCommittedSlot.entries()]) {
-            if (slot === targetItemId && id !== candidate.id) {
-              liveCommittedSlot.delete(id)
+              continue
             }
-          }
-          liveCommittedSlot.set(candidate.id, targetItemId)
-          pcoWritesFired = true
-          appendSystemMessage(
-            isMove
-              ? `🤖 AI moved "${songTitle}" from song slot ${fromSlotIndex ?? '?'} to song slot ${action.slotIndex}`
-              : `🤖 AI committed "${songTitle}" to song slot ${action.slotIndex}`,
-          )
-        } else if (action.kind === 'clear_slot') {
-          if (autoRefresh) {
-            appendSystemMessage(
-              `⚠ AI tried to clear a slot during auto-refresh — skipped`,
-            )
-            return
-          }
-          const targetItemId = itemIdBySlotIndex.get(action.slotIndex)
-          if (!targetItemId) {
-            appendSystemMessage(
-              `⚠ AI tried to clear song slot ${action.slotIndex}, but no such slot exists — skipped`,
-            )
-            return
-          }
-          const slotItem = (items ?? []).find((it) => it.id === targetItemId)
-          if (!slotItem) return
-          // Find the candidate currently at this slot (in live state)
-          // so we can name it in the message and capture the right
-          // restoreTitle.
-          const committedCandidate = candidates.find(
-            (c) =>
-              c.assignedSlotItemId === targetItemId &&
-              c.committedAt != null &&
-              c.priorSlotTitle &&
-              c.priorSlotTitle.trim() !== '',
-          )
-          const restoreTitle =
-            committedCandidate?.priorSlotTitle?.trim() ||
-            fallbackSlotTitle(targetItemId)
-          const songTitle =
-            committedCandidate?.suggestion.title ??
-            slotItem.songTitle ??
-            'song'
-          // Optimistic clear: any candidate at this slot uncommitted.
-          setCandidates((prev) =>
-            prev.map((c) =>
-              c.assignedSlotItemId === targetItemId
-                ? {
+            // Commit (fresh / move / overwrite / swap-half)
+            const candidate = r.candidate
+            const targetItemId = r.slotItemId
+            const songId = r.songId
+            const songTitle = r.songTitle
+            const currentSlot = liveCommittedSlot.get(candidate.id)
+            const isMove =
+              currentSlot !== undefined && currentSlot !== targetItemId
+            const fromSlotIndex =
+              isMove && currentSlot
+                ? slotIndexByItemId.get(currentSlot) ?? null
+                : null
+            // Rollback snapshots for both this candidate and any
+            // evicted previous occupant of the target slot.
+            let rollbackForCandidate:
+              | {
+                  id: string
+                  decision: typeof candidate.decision
+                  committedAt: number | null
+                  assignedSlotItemId: string | null
+                  priorSlotTitle: string | null
+                }
+              | null = null
+            let evictedRollback:
+              | {
+                  id: string
+                  committedAt: number | null
+                  assignedSlotItemId: string | null
+                  priorSlotTitle: string | null
+                }
+              | null = null
+            setCandidates((prev) => {
+              const me = prev.find((c) => c.id === candidate.id)
+              if (me) {
+                rollbackForCandidate = {
+                  id: me.id,
+                  decision: me.decision,
+                  committedAt: me.committedAt,
+                  assignedSlotItemId: me.assignedSlotItemId,
+                  priorSlotTitle: me.priorSlotTitle,
+                }
+              }
+              const evicted = prev.find(
+                (c) =>
+                  c.id !== candidate.id &&
+                  c.assignedSlotItemId === targetItemId &&
+                  c.committedAt != null,
+              )
+              if (evicted) {
+                evictedRollback = {
+                  id: evicted.id,
+                  committedAt: evicted.committedAt,
+                  assignedSlotItemId: evicted.assignedSlotItemId,
+                  priorSlotTitle: evicted.priorSlotTitle,
+                }
+              }
+              const newPriorSlotTitle = r.slotItem.title ?? null
+              return prev.map((c) => {
+                if (c.id === candidate.id) {
+                  return {
+                    ...c,
+                    committedAt: now,
+                    assignedSlotItemId: targetItemId,
+                    priorSlotTitle: newPriorSlotTitle,
+                    commitPending: true,
+                  }
+                }
+                if (
+                  c.assignedSlotItemId === targetItemId &&
+                  c.committedAt != null &&
+                  c.id !== candidate.id
+                ) {
+                  return {
                     ...c,
                     committedAt: null,
                     assignedSlotItemId: null,
                     priorSlotTitle: null,
                   }
-                : c,
-            ),
-          )
-          for (const [id, slot] of [...liveCommittedSlot.entries()]) {
-            if (slot === targetItemId) liveCommittedSlot.delete(id)
+                }
+                return c
+              })
+            })
+            if (isMove && currentSlot) {
+              const restoreTitle =
+                candidate.priorSlotTitle?.trim() ||
+                fallbackSlotTitle(currentSlot)
+              const slotItemForClear = (items ?? []).find(
+                (it) => it.id === currentSlot,
+              )
+              if (slotItemForClear) {
+                plannedClears.set(currentSlot, {
+                  slotItem: slotItemForClear,
+                  restoreTitle,
+                })
+              }
+            }
+            plannedCommits.set(targetItemId, {
+              candidateId: candidate.id,
+              songId,
+              songTitle,
+              rollback: () => {
+                setCandidates((prev) =>
+                  prev.map((c) => {
+                    if (
+                      rollbackForCandidate &&
+                      c.id === rollbackForCandidate.id
+                    ) {
+                      return {
+                        ...c,
+                        decision: rollbackForCandidate.decision,
+                        committedAt: rollbackForCandidate.committedAt,
+                        assignedSlotItemId:
+                          rollbackForCandidate.assignedSlotItemId,
+                        priorSlotTitle: rollbackForCandidate.priorSlotTitle,
+                        commitPending: false,
+                      }
+                    }
+                    if (evictedRollback && c.id === evictedRollback.id) {
+                      return {
+                        ...c,
+                        committedAt: evictedRollback.committedAt,
+                        assignedSlotItemId: evictedRollback.assignedSlotItemId,
+                        priorSlotTitle: evictedRollback.priorSlotTitle,
+                      }
+                    }
+                    return c
+                  }),
+                )
+              },
+            })
+            for (const [id, slot] of [...liveCommittedSlot.entries()]) {
+              if (slot === targetItemId && id !== candidate.id) {
+                liveCommittedSlot.delete(id)
+              }
+            }
+            liveCommittedSlot.set(candidate.id, targetItemId)
+            pcoWritesFired = true
+
+            // System message: one combined "swapped" for swap pairs,
+            // otherwise per-assignment commit / move.
+            const partner = swapPartnerIndex.get(i)
+            if (partner !== undefined) {
+              if (!emittedSwapMessageFor.has(i)) {
+                const other = resolved[partner]
+                if (other.kind === 'commit') {
+                  appendSystemMessage(
+                    `🤖 AI swapped "${songTitle}" and "${other.songTitle}"`,
+                  )
+                  emittedSwapMessageFor.add(i)
+                  emittedSwapMessageFor.add(partner)
+                }
+              }
+            } else {
+              appendSystemMessage(
+                isMove
+                  ? `🤖 AI moved "${songTitle}" from song slot ${fromSlotIndex ?? '?'} to song slot ${r.slotIndex}`
+                  : `🤖 AI committed "${songTitle}" to song slot ${r.slotIndex}`,
+              )
+            }
           }
-          plannedClears.set(targetItemId, { slotItem, restoreTitle })
-          pcoWritesFired = true
-          appendSystemMessage(
-            `🤖 AI cleared "${songTitle}" from song slot ${action.slotIndex}`,
-          )
         } else if (action.kind === 'unreject') {
           setCandidates((prev) =>
             prev.map((c) =>

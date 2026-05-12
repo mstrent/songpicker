@@ -286,14 +286,13 @@ export interface RemoveAction {
   ids: string[]
   reason: string
 }
-export interface CommitSongAction {
-  kind: 'commit'
-  candidateId: string
+export interface SlotAssignment {
   slotIndex: number
+  candidateId: string | null
 }
-export interface ClearSlotAction {
-  kind: 'clear_slot'
-  slotIndex: number
+export interface SetSlotContentsAction {
+  kind: 'set_slot_contents'
+  assignments: SlotAssignment[]
 }
 export interface UnrejectAction {
   kind: 'unreject'
@@ -302,8 +301,7 @@ export interface UnrejectAction {
 export type AiAction =
   | ProposeAction
   | RemoveAction
-  | CommitSongAction
-  | ClearSlotAction
+  | SetSlotContentsAction
   | UnrejectAction
 
 /** One progress chunk streamed as the AI turn unfolds. Text deltas

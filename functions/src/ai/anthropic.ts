@@ -3,10 +3,10 @@ import { buildUserMessage, flattenUserMessage } from './userMessage'
 import type {
   AiAction,
   AiProvider,
-  ClearSlotAction,
-  CommitSongAction,
   ProposeAction,
   RemoveAction,
+  SetSlotContentsAction,
+  SlotAssignment,
   SongSuggestion,
   StreamChunk,
   SuggestRequest,
@@ -76,37 +76,35 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
-    name: 'commit_song',
+    name: 'set_slot_contents',
     description:
-      "Fill a Planning Center song slot with this candidate. Use only when the user has clearly directed you to ('commit X to slot 2', 'fill the closer with the second one', 'go ahead and pick that'). Don't commit during auto-refresh turns and don't commit unprompted. The candidate must be matched to a song in the user's PCO library (committed candidates show up as 'committed' in the candidates block); if the user wants to commit something the AI proposed earlier this turn, wait for the user to confirm. Move semantics: if the candidate is already committed to a different slot, the SPA clears that slot automatically as part of the move — just call commit_song with the new slot. Don't issue a separate clear_slot for moves.",
+      "Declarative slot-state update for Planning Center. Pass an array of assignments — each specifies what one song slot should contain after the call. This single tool covers every slot rearrangement: fresh commit, move, swap, overwrite, and clear. The SPA computes the diff from the current service order and runs the necessary PCO operations as one atomic batch.\n\nWhen to use: any user-directed action that changes what's in a slot. 'Commit X to slot 2', 'move X to slot 4', 'swap X and Y', 'clear the closer' — all map to one call to this tool with the appropriate assignments.\n\nRules: don't use during auto-refresh turns. Don't write to Planning Center unprompted. Non-null candidateIds must reference a candidate that's matched to a song in the user's library (committed candidates and library-matched proposals from prior turns are eligible; freshly-proposed candidates from this same turn won't be matched yet).\n\nExamples (slotIndex is 1-based among song slots, matching the '[song slot N of M]' tags):\n- Commit candidate c_abc to song slot 2:\n  assignments=[{slotIndex:2, candidateId:'c_abc'}]\n- Move candidate c_abc from its current slot to slot 4 — just specify the target; the SPA infers the source clear:\n  assignments=[{slotIndex:4, candidateId:'c_abc'}]\n- Clear song slot 2 (remove whatever song is there):\n  assignments=[{slotIndex:2, candidateId:null}]\n- Swap two committed songs A (currently slot 1) and B (currently slot 3):\n  assignments=[{slotIndex:1, candidateId:'c_B'}, {slotIndex:3, candidateId:'c_A'}]\n- Fill two empty slots in one go:\n  assignments=[{slotIndex:2, candidateId:'c_X'}, {slotIndex:4, candidateId:'c_Y'}]",
     input_schema: {
       type: 'object',
       properties: {
-        candidateId: { type: 'string' },
-        slotIndex: {
-          type: 'integer',
-          minimum: 1,
-          description:
-            'Target song slot, 1-based, matching the [song slot N of M] tags in the service order text.',
+        assignments: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'object',
+            properties: {
+              slotIndex: {
+                type: 'integer',
+                minimum: 1,
+                description:
+                  '1-based song-slot position, matching the [song slot N of M] tags in the service order text.',
+              },
+              candidateId: {
+                type: ['string', 'null'],
+                description:
+                  'Candidate id from the Current candidates block, or null to clear the slot.',
+              },
+            },
+            required: ['slotIndex', 'candidateId'],
+          },
         },
       },
-      required: ['candidateId', 'slotIndex'],
-    },
-  },
-  {
-    name: 'clear_slot',
-    description:
-      "Back out an already-committed song slot in Planning Center. Use when the user asks you to clear/unpick/undo a slot. Don't clear during auto-refresh turns and don't clear unprompted.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        slotIndex: {
-          type: 'integer',
-          minimum: 1,
-          description: '1-based song slot to clear.',
-        },
-      },
-      required: ['slotIndex'],
+      required: ['assignments'],
     },
   },
   {
@@ -337,10 +335,8 @@ function toAction(name: string, input: unknown): AiAction | null {
       return parsePropose(obj)
     case 'remove_candidates':
       return parseRemove(obj)
-    case 'commit_song':
-      return parseCommit(obj)
-    case 'clear_slot':
-      return parseClear(obj)
+    case 'set_slot_contents':
+      return parseSetSlotContents(obj)
     case 'unreject_candidates':
       return parseUnreject(obj)
     default:
@@ -382,17 +378,25 @@ function parseRemove(obj: Record<string, unknown>): RemoveAction | null {
   return { kind: 'remove', ids, reason }
 }
 
-function parseCommit(obj: Record<string, unknown>): CommitSongAction | null {
-  if (typeof obj.candidateId !== 'string' || !obj.candidateId) return null
-  const idx = typeof obj.slotIndex === 'number' ? Math.floor(obj.slotIndex) : NaN
-  if (!Number.isFinite(idx) || idx < 1) return null
-  return { kind: 'commit', candidateId: obj.candidateId, slotIndex: idx }
-}
-
-function parseClear(obj: Record<string, unknown>): ClearSlotAction | null {
-  const idx = typeof obj.slotIndex === 'number' ? Math.floor(obj.slotIndex) : NaN
-  if (!Number.isFinite(idx) || idx < 1) return null
-  return { kind: 'clear_slot', slotIndex: idx }
+function parseSetSlotContents(
+  obj: Record<string, unknown>,
+): SetSlotContentsAction | null {
+  if (!Array.isArray(obj.assignments)) return null
+  const assignments: SlotAssignment[] = []
+  for (const raw of obj.assignments) {
+    if (!raw || typeof raw !== 'object') continue
+    const r = raw as Record<string, unknown>
+    const idx = typeof r.slotIndex === 'number' ? Math.floor(r.slotIndex) : NaN
+    if (!Number.isFinite(idx) || idx < 1) continue
+    let candidateId: string | null = null
+    if (r.candidateId === null) candidateId = null
+    else if (typeof r.candidateId === 'string' && r.candidateId.trim())
+      candidateId = r.candidateId
+    else continue
+    assignments.push({ slotIndex: idx, candidateId })
+  }
+  if (assignments.length === 0) return null
+  return { kind: 'set_slot_contents', assignments }
 }
 
 function parseUnreject(obj: Record<string, unknown>): UnrejectAction | null {
@@ -416,6 +420,7 @@ function fallbackMessage(actions: AiAction[]): string {
     if (a.kind === 'propose') return sum + a.suggestions.length
     if (a.kind === 'remove') return sum + a.ids.length
     if (a.kind === 'unreject') return sum + a.ids.length
+    if (a.kind === 'set_slot_contents') return sum + a.assignments.length
     return sum + 1
   }, 0)
   return `Done — ${total} change${total === 1 ? '' : 's'}.`
