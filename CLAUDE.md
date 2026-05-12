@@ -144,6 +144,15 @@ page.
   `unreject_candidates`. Tool results aren't fed back (no
   `tool_result` round-trip); the next turn's candidates block
   reflects consequences.
+- **Per-candidate `inLibrary` flag in the candidates block.**
+  Each `AiCandidate` includes `inLibrary: boolean` (true iff
+  `c.matchStatus === 'matched'`). `set_slot_contents` commits
+  defensively skip unmatched candidates with a ⚠ marker, but the
+  AI also gets the field directly so it can plan around unmatched
+  picks instead of trying-and-failing. Rendered inline in the
+  candidates block as `— NOT IN LIBRARY (can't be committed via
+  set_slot_contents)` for the false case; matched is the default
+  (no tag) to keep the payload tight.
 - **Cache breakpoints** on the system prompt and on the stable half
   of the user message (theme + plan notes + structure +
   serviceOrder). Volatile half (candidates + alreadyInPlan + user
