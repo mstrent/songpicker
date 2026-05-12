@@ -12,9 +12,30 @@ export function PlanList({ currentUserName, currentUserEmail }: Props) {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    listPlans()
-      .then((res) => setPlans(res.data.plans))
-      .catch((e: Error) => setError(e.message))
+    // Auto-retry once on first failure. The first listPlans call right
+    // after a fresh PAT entry can race with cold-start latency or hit
+    // a transient PCO blip; retrying saves the user a manual reload.
+    let cancelled = false
+    const run = async () => {
+      try {
+        const res = await listPlans()
+        if (!cancelled) setPlans(res.data.plans)
+      } catch (e: unknown) {
+        if (cancelled) return
+        await new Promise((r) => setTimeout(r, 1500))
+        if (cancelled) return
+        try {
+          const res = await listPlans()
+          if (!cancelled) setPlans(res.data.plans)
+        } catch (e2: unknown) {
+          if (!cancelled) setError((e2 as Error).message)
+        }
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   if (error) return <div className="error">Error: {error}</div>

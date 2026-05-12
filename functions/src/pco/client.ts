@@ -1,3 +1,4 @@
+import { pMap } from './concurrency'
 import type {
   NewItem,
   Plan,
@@ -60,7 +61,15 @@ export class PcoClient {
       ...init,
       headers: { ...this.headers(), ...(init?.headers ?? {}) },
     }
-    let res = await fetch(url, reqInit)
+    let res: Response
+    try {
+      res = await fetch(url, reqInit)
+    } catch {
+      // Transient network error (DNS hiccup, socket reset). One short
+      // backoff retry recovers without bubbling to the SPA.
+      await new Promise((r) => setTimeout(r, 500))
+      res = await fetch(url, reqInit)
+    }
     if (res.status === 429) {
       // PCO returns "Retry-After" in seconds (its rate window is 20s).
       // Wait, then retry once. If still rate-limited, let the error bubble.
@@ -68,6 +77,11 @@ export class PcoClient {
       const waitSec = retryAfterRaw ? parseInt(retryAfterRaw, 10) : 20
       const waitMs = Math.min(Math.max(waitSec * 1000, 1000), 30000)
       await new Promise((r) => setTimeout(r, waitMs))
+      res = await fetch(url, reqInit)
+    } else if (res.status >= 500 && res.status < 600) {
+      // PCO occasionally returns 502/503 under burst load. Short
+      // backoff retry recovers without bubbling to the SPA.
+      await new Promise((r) => setTimeout(r, 500))
       res = await fetch(url, reqInit)
     }
     if (!res.ok) {
@@ -120,22 +134,35 @@ export class PcoClient {
     const future = opts.future ?? 10
     const past = opts.past ?? 0
 
-    const futureFetches = types.map((t) =>
-      this.listPlans(t, { filter: 'future', perPage: future, order: 'sort_date' }),
+    // Flat list so pMap bounds concurrency across both future + past
+    // requests. The previous shape fired 2*N parallel listPlans for
+    // an N-service-type account, which on first PAT entry (stacked
+    // with savePcoCredentials's listServiceTypes already counted in
+    // PCO's 20s window) could push us toward the 100/20s rate ceiling.
+    interface PlanFetch {
+      type: ServiceType
+      filter: 'future' | 'past'
+      perPage: number
+      order: string
+    }
+    const fetches: PlanFetch[] = []
+    for (const t of types) {
+      fetches.push({ type: t, filter: 'future', perPage: future, order: 'sort_date' })
+      if (past > 0) {
+        fetches.push({ type: t, filter: 'past', perPage: past, order: '-sort_date' })
+      }
+    }
+    const results = await pMap(
+      fetches,
+      (f) =>
+        this.listPlans(f.type, {
+          filter: f.filter,
+          perPage: f.perPage,
+          order: f.order,
+        }),
+      4,
     )
-    const pastFetches =
-      past > 0
-        ? types.map((t) =>
-            this.listPlans(t, { filter: 'past', perPage: past, order: '-sort_date' }),
-          )
-        : []
-
-    const [futureResults, pastResults] = await Promise.all([
-      Promise.all(futureFetches),
-      Promise.all(pastFetches),
-    ])
-
-    return [...pastResults.flat(), ...futureResults.flat()].sort((a, b) =>
+    return results.flat().sort((a, b) =>
       (a.sortDate ?? '').localeCompare(b.sortDate ?? ''),
     )
   }
