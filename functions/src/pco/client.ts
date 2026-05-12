@@ -88,7 +88,21 @@ export class PcoClient {
       const body = await res.text()
       throw new Error(`Planning Center ${res.status} ${path}: ${body.slice(0, 500)}`)
     }
-    return res.json() as Promise<T>
+    // Tolerate empty bodies — PCO's action endpoints (e.g.
+    // /item_reorder) return 204 No Content on success, and calling
+    // .json() on that throws "Unexpected end of JSON input".
+    // Read as text first so we can distinguish empty from bad JSON.
+    const text = await res.text()
+    if (!text) return undefined as unknown as T
+    try {
+      return JSON.parse(text) as T
+    } catch (e) {
+      throw new Error(
+        `Planning Center ${path}: invalid JSON response — ${
+          (e as Error).message
+        }: ${text.slice(0, 500)}`,
+      )
+    }
   }
 
   async listServiceTypes(): Promise<ServiceType[]> {
