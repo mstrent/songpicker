@@ -193,6 +193,39 @@ export const commitSlot = httpsCallable<
   { ok: boolean }
 >(functions, 'commitSlot')
 
+/** Intent-shaped placement endpoint. Use this for all
+ *  "ensure this song is in this slot" intents — fresh commits AND
+ *  moves. When fromSlotItemId is provided, the old slot is cleared
+ *  first (PCO has no atomic move). Replaces direct use of
+ *  commitSlot for the SPA's action layer. */
+export const placeSongInSlot = httpsCallable<
+  {
+    serviceTypeId: string
+    planId: string
+    slotItemId: string
+    songId: string
+    songTitle?: string
+    /** When set, the function first clears this slot before
+     *  committing to slotItemId. Used for move semantics. */
+    fromSlotItemId?: string
+    /** Title to restore on the from-slot when clearing it. */
+    fromSlotRestoreTitle?: string
+  },
+  { ok: boolean }
+>(functions, 'placeSongInSlot')
+
+/** Intent-shaped clear endpoint — renames the older clearSlot
+ *  for consistency. */
+export const clearSongFromSlot = httpsCallable<
+  {
+    serviceTypeId: string
+    planId: string
+    slotItemId: string
+    restoreTitle?: string
+  },
+  { ok: boolean }
+>(functions, 'clearSongFromSlot')
+
 export const clearSlot = httpsCallable<
   {
     serviceTypeId: string

@@ -387,6 +387,98 @@ export const saveSession = onCall(async (req) => {
   return { ok: true }
 })
 
+// Intent-shaped placement endpoint: "ensure this song ends up in this
+// slot." Handles both fresh commits (no fromSlotItemId) and moves
+// (fromSlotItemId provided — clears it first, since PCO has no
+// atomic move). Looks up the song's default arrangement + key and
+// commits those alongside the song id so the slot lands fully
+// populated, mirroring what the PCO web UI does on song-pick.
+export const placeSongInSlot = onCall(async (req) => {
+  const { uid } = requireAllowed(req)
+  const {
+    serviceTypeId,
+    planId,
+    slotItemId,
+    songId,
+    songTitle,
+    fromSlotItemId,
+    fromSlotRestoreTitle,
+  } = req.data as {
+    serviceTypeId?: string
+    planId?: string
+    slotItemId?: string
+    songId?: string
+    songTitle?: string
+    fromSlotItemId?: string
+    fromSlotRestoreTitle?: string
+  }
+  if (!serviceTypeId || !planId || !slotItemId || !songId) {
+    throw new HttpsError(
+      'invalid-argument',
+      'serviceTypeId, planId, slotItemId, and songId required',
+    )
+  }
+  const client = await pcoForUser(uid)
+  // Clear the old slot first if this is a move. Sequential so the
+  // song isn't briefly in two places (which PCO doesn't allow
+  // anyway). If this PATCH fails, the commit below never runs and
+  // the song stays in its original slot.
+  if (fromSlotItemId && fromSlotItemId !== slotItemId) {
+    await client.clearPlanItemSong(
+      serviceTypeId,
+      planId,
+      fromSlotItemId,
+      fromSlotRestoreTitle,
+    )
+  }
+  // Same arrangement+key lookup as the old commitSlot endpoint so
+  // the slot lands fully populated (title, song, arrangement, key).
+  // Failures here don't block the commit — the song relationship +
+  // title still get set so the pick isn't lost.
+  let arrangementId: string | undefined
+  let keyId: string | undefined
+  try {
+    const info = await client.getSongDefaultArrangementInfo(songId)
+    if (info) {
+      arrangementId = info.arrangementId
+      if (info.keyId) keyId = info.keyId
+    }
+  } catch (err) {
+    console.warn(
+      `[placeSongInSlot] arrangement lookup failed for song ${songId}; committing song + title only:`,
+      err,
+    )
+  }
+  await client.updatePlanItem(serviceTypeId, planId, slotItemId, {
+    songId,
+    ...(arrangementId ? { arrangementId } : {}),
+    ...(keyId ? { keyId } : {}),
+    ...(songTitle ? { title: songTitle } : {}),
+  })
+  return { ok: true }
+})
+
+// Intent-shaped clear endpoint: "this slot should be empty." Renames
+// the older clearSlot for consistency with placeSongInSlot.
+export const clearSongFromSlot = onCall(async (req) => {
+  const { uid } = requireAllowed(req)
+  const { serviceTypeId, planId, slotItemId, restoreTitle } = req.data as {
+    serviceTypeId?: string
+    planId?: string
+    slotItemId?: string
+    restoreTitle?: string
+  }
+  if (!serviceTypeId || !planId || !slotItemId) {
+    throw new HttpsError(
+      'invalid-argument',
+      'serviceTypeId, planId, and slotItemId required',
+    )
+  }
+  const client = await pcoForUser(uid)
+  await client.clearPlanItemSong(serviceTypeId, planId, slotItemId, restoreTitle)
+  return { ok: true }
+})
+
 export const commitSlot = onCall(async (req) => {
   const { uid } = requireAllowed(req)
   const { serviceTypeId, planId, itemId, songId, songTitle } = req.data as {
