@@ -24,16 +24,21 @@ title, arrangement, and key all set in one go.
    auto-looked-up in your Planning Center song library and annotated
    with `last_scheduled_at`. Songs played within the last four weeks
    get a caution highlight.
-5. Iterate: shortlist / reject, ask for "more like this but slower",
-   manually add a song you remembered. The AI sees the current pool
-   + rejections on each turn so it improves without you re-explaining.
+5. Iterate in a chat-style conversation: reject songs (with an
+   optional reason — picked from a global chip pool or freeform),
+   ask the AI to "give me a few slower options for the closer" or
+   "swap A and B" or "commit X to slot 2", and the AI takes action
+   directly. It can propose, retire, commit, clear, move, and swap
+   via tool calls; manual drag-and-drop still works in parallel.
 6. Drag candidates onto empty song slots in the plan, or drag between
    filled slots to swap. Committing a candidate:
    - PATCHes the plan item's title to the song's name
    - links the song relationship
    - lets you pick the arrangement + key (writes the Key resource id
      onto the item)
-   Clearing a slot restores its prior title.
+   Clearing a slot restores its prior title (with taint detection
+   so a slot that's been through multiple swaps doesn't end up
+   labelled with a previous song).
 
 ## Stack
 
@@ -104,13 +109,15 @@ All hosted on Firebase free tier.
 | `listPlans`, `getPlanContext` | Plan list + detail (notes, items, leaders) |
 | `savePlanTheme`, `savePlanNotes` | Auto-saved per-plan overrides |
 | `searchSongs` | Song-library lookup (with parenthetical-stripped retry) |
-| `suggestSongs` | AI suggestions (Claude Sonnet 4.6) |
+| `suggestSongs` | Streaming AI turn (Claude Sonnet 4.6 + tool use); SPA calls via `.stream()` |
 | `getPromptConfig`, `savePromptConfig` | Per-user persona + service-flow prompts |
 | `getAdminStatus`, `getAdminPromptConfig`, `saveAdminPromptConfig` | Admin global defaults |
 | `loadSession`, `saveSession` | Per-plan candidate pool + AI turn log |
-| `commitSlot`, `clearSlot` | Fill / clear a plan song slot |
+| `placeSongInSlot` | Commit a song to a slot (handles fresh, move, and overwrite atomically) |
+| `clearSongFromSlot` | Clear a slot (restores a prior title) |
 | `listSongArrangements`, `setSlotArrangementKey` | Arrangement + key picker |
 | `reorderItems` | Whole-plan item reorder via the dedicated PCO action endpoint |
+| `getRejectionReasons`, `recordRejectReason`, `removeCommonReason` | Global reject-rationale chip pool (Claude-distilled) |
 | `commitPlanItems` | Bulk insert (used by the older candidate-list flow) |
 
 ## Planning Center API touchpoints

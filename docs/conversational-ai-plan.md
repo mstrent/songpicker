@@ -268,3 +268,157 @@ the SPA debug panel.
 - **Anthropic rate**: more turns = more API calls. Sonnet 4.6 is
   fast and cached prefixes are cheap; non-issue, but measure after
   Layer 3.
+
+### Layer 7 — Action layer + drop shortlist + drop reassign (shipped)
+
+The PCO write surface had three layers tangled together: six SPA
+orchestrators each doing PCO call + optimistic state + items
+refresh + system message (with subtly different rollback). Cleaned
+up into a clear stack:
+
+- **PcoClient primitives** (server, low-level): `updatePlanItem`,
+  `clearPlanItemSong`, `reorderPlanItems`. Unchanged.
+- **Intent-shaped Cloud Functions**: `placeSongInSlot` (handles
+  fresh commits and moves via optional `fromSlotItemId`),
+  `clearSongFromSlot`. `reorderItems` stays for the swap case
+  used by the SPA's swap action.
+- **SPA action layer**: `placeSongAction`, `clearSlotAction`,
+  `swapSlotsAction`. Both DnD/manual flows and AI tool handlers
+  call these. Each does optimistic state + Cloud Function +
+  (optional) items refresh + rollback + system message.
+  `source: 'user' | 'ai'` parameter switches message formatting.
+
+Same change dropped the shortlist intermediate decision state.
+`Decision` is now `'pending' | 'reject'`; committed candidates
+are identified via `committedAt`. The Shortlist button is gone;
+the slot picker dropdown on a matched candidate commits directly
+on selection. AI's `reassign` tool also dropped — its job
+("earmark without committing") depended on shortlist, and the
+move case is now handled atomically by `commit_song`'s
+`fromSlotItemId`.
+
+Old `commitSlot` / `clearSlot` Cloud Function callables removed
+after migration; their orphaned CSS classes
+(`.decision-shortlist`, `.commit-btn`, `.unassign-btn`,
+`.assigned-arrow`) cleaned up.
+
+### Layer 8 — Unified set_slot_contents tool (shipped)
+
+The AI tool surface for slot changes had `commit_song` (with
+atomic move semantics) plus `clear_slot`, and the user-driven
+swap was a separate `reassign`-or-DnD path. Swaps were the AI's
+biggest stumbling block: it had to coordinate two `commit_song`
+calls in one turn and frequently dropped one half or
+hallucinated success without emitting either.
+
+Replaced both AI slot tools with a single declarative tool:
+
+`set_slot_contents({ assignments: [{ slotIndex, candidateId | null }, ...] })`
+
+Each assignment says what one slot should contain (a candidate
+id, or `null` to clear). The SPA computes the diff from current
+state and runs the existing two-phase batched PCO writes:
+
+- **Phase 1** clears every source slot (slots a moving candidate
+  is leaving, slots explicitly set to `null`)
+- **Phase 2** commits each target slot via `placeSongInSlot`
+  (no `fromSlotItemId` — phase 1 already cleared sources)
+
+This single shape covers fresh commit, move, overwrite, swap, and
+multi-slot batches. The AI's `liveCommittedSlot` Map tracks each
+candidate's position through in-stream optimistic moves so action
+N+1's "where is this candidate currently?" check sees action N's
+eviction. `plannedClears` and `plannedCommits` Maps are keyed by
+slot id so duplicate ops dedupe naturally; a clear of a slot
+that's also a commit target gets dropped (the commit overwrites).
+
+System messages for `set_slot_contents` classify each assignment
+locally: detects swap pairs (two assignments where the candidates
+swap their current slots) and emits one `🤖 AI swapped X and Y`
+message instead of two separate "moved" lines. Single-assignment
+operations get committed/moved/cleared messages as before.
+
+Drop list: `commit_song`, `clear_slot` tool schemas and the
+matching SPA action branches. AiAction union shrunk to four
+kinds (propose / remove / set_slot_contents / unreject).
+
+### Bug fixes worth recording (post-Layer-8)
+
+- **PCO `item_reorder` returns 204 No Content.** `PcoClient.fetch`
+  was unconditionally calling `res.json()`, which threw "Unexpected
+  end of JSON input" on every reorder. Fixed by reading as text
+  first and returning `undefined` for empty bodies. This surfaced
+  as the "DnD swap appears to fail" bug — PCO accepted the
+  reorder, but the response broke our fetch wrapper and the SPA
+  rolled back its optimistic update.
+- **PCO read-after-write on reorder isn't strongly consistent.**
+  Even with the empty-body fix, an immediate `listPlanItems`
+  could return the pre-swap ordering. `swapSlotsAction` now
+  applies the reorder locally (it knows the deterministic result)
+  rather than refetching. Cache invalidation still happens so a
+  future navigate picks up fresh data.
+- **`priorSlotTitle` taint detection.** Repeated swaps could
+  leave a candidate's `priorSlotTitle` pointing at a previous
+  song's name instead of the slot's original placeholder.
+  Restoring that on clear would label the slot with the
+  just-removed song. The clear paths now build a set of all
+  known song titles (from candidates + items.songTitle) and
+  treat any `priorSlotTitle` matching the set as tainted,
+  falling back to `fallbackSlotTitle`. The commit path
+  snapshots `preTurnSlotPlaceholders` at the start of each
+  `set_slot_contents` action so inheritance through swaps
+  works correctly.
+- **Anthropic content-filter retry.** The safety filter
+  occasionally trips on innocuous worship prompts. The provider
+  retries once on that specific error, but ONLY if no chunks have
+  streamed yet (otherwise the retry would double-emit text on
+  the client). A second failure is rewritten into a friendlier
+  user-facing message; the `suggestSongs` callable wraps the
+  whole thing in `HttpsError('aborted', message)` so the client
+  doesn't see `INTERNAL` for AI-side failures.
+- **Prompt tightenings.** Several iterations of
+  `TECHNICAL_REQUIREMENTS`:
+  - "Never narrate an action you didn't take" — the AI was
+    occasionally writing prose like "Done — committed X to slot
+    2" without actually emitting the tool call.
+  - "Be brief — one short sentence at most, no recap of the
+    resulting state" — model was over-explaining.
+  - "Remove / swap / replace / switch out ≠ reject" — the AI
+    was misreading "remove X and replace with Y" as a rejection
+    of X plus a commit of Y. Now defaults to displacement when
+    the user's intent is ambiguous between rejection and
+    displacement.
+
+### Layer 9 — Per-turn context optimization (shipped)
+
+After the conversational refactor stabilized, sessions could
+grow long (many turns, many candidates, many event markers in
+history). Anthropic's cache helps cost but doesn't bound token
+count, and worship-leader sessions span unpredictable durations
+so the cache is opportunistic at best. Two optimizations that
+reduce per-turn payload regardless of cache state:
+
+**Candidates compaction.** After the first turn a candidate
+appears in the payload, subsequent turns omit its
+`chorusSnippet` — the largest stable field. Title + author
+always go through so same-named songs disambiguate.
+`lastSentCandidateIdsRef` tracks the most recent send;
+newly-proposed candidates count as "AI just saw them" too.
+Resets on Clear conversation and plan switch, and naturally on
+tab close (since it's a ref). Tab-reopen gives a full intro,
+which is a feature.
+
+**History pruning.** Two-tier. Below
+`HISTORY_PROSE_CAP` (8 prose messages, ~4 turn-pairs): full
+history verbatim. Above: keep the most recent N prose turns
+plus any `[event]` markers after them, collapse older events
+into a single `[summary] Earlier in this session: X proposed,
+Y rejected, Z committed, ...` line at the top of history.
+Pattern-matches the system message prefixes
+(✗ Rejected / 🤖 AI committed / ↗ Committed / etc.) and emits
+category counts. Specifics deliberately dropped — the current
+candidates block + service order carry the state that matters.
+
+Both compactions live in `buildAiHistory` /
+`buildUserMessage` and stack with the existing cache
+breakpoints.
