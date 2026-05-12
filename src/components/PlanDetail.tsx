@@ -711,42 +711,55 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   }
 
 
-  // Drop handler for "filled slot dragged onto another item to reorder
-  // its position in the service order". Computes the new order, PATCHes
-  // PCO, and wipes priorSlotTitle on any candidate committed to the
-  // moved item so a future Clear falls back to the "Song N" convention
-  // at the slot's NEW position rather than restoring the title that
-  // matched its old position.
-  async function reorderSlotItem(draggedId: string, beforeId: string) {
-    if (draggedId === beforeId) return
+  // Drop handler for "filled slot dragged onto another song slot to
+  // reorder its position in the service order". Swap semantics: the
+  // dragged slot takes the target's position and the target slot takes
+  // the dragged slot's old position. Works uniformly whether the
+  // target is filled (songs visually swap) or empty (dragged song
+  // fills the empty position, empty pops out to where the dragged
+  // song came from).
+  //
+  // priorSlotTitle is wiped on candidates committed to EITHER affected
+  // slot so a future Clear falls back to the "Song N" convention at
+  // the slot's NEW position, not the title that matched the old one.
+  async function reorderSlotItem(draggedId: string, targetId: string) {
+    if (draggedId === targetId) return
     const order = (items ?? []).map((it) => it.id)
     const fromIdx = order.indexOf(draggedId)
-    const toIdx = order.indexOf(beforeId)
+    const toIdx = order.indexOf(targetId)
     if (fromIdx === -1 || toIdx === -1) return
-    const removed = [...order.slice(0, fromIdx), ...order.slice(fromIdx + 1)]
-    const insertAt = removed.indexOf(beforeId)
-    const newOrder = [
-      ...removed.slice(0, insertAt),
-      draggedId,
-      ...removed.slice(insertAt),
-    ]
+    const newOrder = [...order]
+    newOrder[fromIdx] = targetId
+    newOrder[toIdx] = draggedId
+    const draggedSlot = items?.find((it) => it.id === draggedId)
+    const targetSlot = items?.find((it) => it.id === targetId)
+    const swap = !!targetSlot?.songId
     try {
       await reorderItemsCall({
         serviceTypeId,
         planId,
         orderedItemIds: newOrder,
       })
-      // Reset priorSlotTitle on any candidate committed to the moved
-      // slot — the "Song N" fallback should now resolve from the
-      // slot's NEW position, not its old one.
+      // Both affected slots may host committed candidates whose
+      // priorSlotTitle was captured pre-move — null them out so a
+      // future clear resolves "Song N" from the slot's current
+      // position, not the old one.
+      const affectedIds = new Set([draggedId, targetId])
       setCandidates((prev) =>
         prev.map((c) =>
-          c.assignedSlotItemId === draggedId
+          c.assignedSlotItemId && affectedIds.has(c.assignedSlotItemId)
             ? { ...c, priorSlotTitle: null }
             : c,
         ),
       )
-      appendSystemMessage(`↕ Reordered slot in the service order`)
+      const draggedLabel =
+        draggedSlot?.songTitle ?? draggedSlot?.title ?? 'slot'
+      const targetLabel = targetSlot?.songTitle ?? targetSlot?.title ?? 'slot'
+      appendSystemMessage(
+        swap
+          ? `↔ Swapped "${draggedLabel}" with "${targetLabel}"`
+          : `↕ Moved "${draggedLabel}" into the "${targetLabel}" position`,
+      )
       invalidatePlanContext(serviceTypeId, planId)
       const fresh = await loadPlanContext(serviceTypeId, planId)
       setItems(fresh.items)
