@@ -1166,29 +1166,33 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       </div>
                     )}
                   </div>
-                  {filled && it.songId && (
-                    <ArrangementKeyEditor
-                      serviceTypeId={serviceTypeId}
-                      planId={planId}
-                      item={it}
-                      onSaved={async () => {
-                        invalidatePlanContext(serviceTypeId, planId)
-                        const fresh = await loadPlanContext(serviceTypeId, planId)
-                        setItems(fresh.items)
-                      }}
-                    />
-                  )}
-                  {filled && displayTitle && (
-                    <a
-                      className="spotify-link"
-                      href={spotifySearchUrl(displayTitle)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title="Search Spotify"
-                      draggable={false}
-                    >
-                      Spotify ↗
-                    </a>
+                  {filled && (it.songId || displayTitle) && (
+                    <div className="item-actions">
+                      {it.songId && (
+                        <ArrangementKeyEditor
+                          serviceTypeId={serviceTypeId}
+                          planId={planId}
+                          item={it}
+                          onSaved={async () => {
+                            invalidatePlanContext(serviceTypeId, planId)
+                            const fresh = await loadPlanContext(serviceTypeId, planId)
+                            setItems(fresh.items)
+                          }}
+                        />
+                      )}
+                      {displayTitle && (
+                        <a
+                          className="spotify-link"
+                          href={spotifySearchUrl(displayTitle)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Search Spotify"
+                          draggable={false}
+                        >
+                          Spotify ↗
+                        </a>
+                      )}
+                    </div>
                   )}
                 </li>
               )

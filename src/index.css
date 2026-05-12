@@ -1048,6 +1048,18 @@ textarea {
   font-weight: 700;
 }
 
+/* Stacked actions column on the right of a filled service-order item:
+   arrangement/key chip on top, Spotify link below. Right-aligned so
+   they sit flush against the row's edge, leaving as much horizontal
+   space as possible for long song titles and author lists. */
+.service-order .item-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
 /* Arrangement + key picker — the Key chip on a filled slot is a button
    that opens an inline panel with two dropdowns. */
 .arr-key-editor {
