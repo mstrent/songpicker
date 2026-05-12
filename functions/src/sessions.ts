@@ -34,6 +34,11 @@ export interface PersistedCandidate {
    *  the user didn't bother giving a reason. The AI sees this on the
    *  next suggest call as part of the structured candidates block. */
   rejectReason: string | null
+  /** True iff the user clicked Skip on the rationale picker for this
+   *  rejected candidate. Used purely for the SPA's reject-pool
+   *  layout — dismissed cards live in the collapsed pool alongside
+   *  the with-reason ones. */
+  rejectPickerDismissed: boolean
 }
 
 export interface Message {
@@ -91,6 +96,7 @@ function sanitizeCandidate(raw: unknown): PersistedCandidate | null {
       typeof c.rejectReason === 'string' && c.rejectReason.trim()
         ? c.rejectReason.trim()
         : null,
+    rejectPickerDismissed: c.rejectPickerDismissed === true,
   }
 }
 

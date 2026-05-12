@@ -2086,6 +2086,22 @@ textarea {
   background: var(--accent-soft);
 }
 
+/* The stack of "rejected, no reason yet" cards — each renders its own
+   picker so the user can address them in any order rather than one at
+   a time. Sits above the collapsed pool of completed (reason saved /
+   skipped) cards. */
+.rejected-needs-reason-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+.rejected-needs-reason {
+  /* Less dim than the collapsed-pool cards — these still want action. */
+  opacity: 1;
+}
+
 /* Rationale picker — chip row + freeform textarea, rendered at the top
    of the rejected pool when a candidate is in focus. Sets itself apart
    visually so the user immediately notices it after hitting Reject. */

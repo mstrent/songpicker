@@ -151,6 +151,10 @@ export interface PersistedCandidate {
    *  Null on un-rejected candidates and on rejected ones with no
    *  reason provided. Surfaced to the AI on the next suggest call. */
   rejectReason: string | null
+  /** True iff the user clicked Skip on the rationale picker. Used
+   *  only for SPA layout — dismissed cards live in the collapsed
+   *  rejected pool alongside with-reason ones. */
+  rejectPickerDismissed: boolean
 }
 
 export interface SessionMessage {
