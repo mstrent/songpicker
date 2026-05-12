@@ -73,6 +73,9 @@ export interface AiDebug {
   model: string
   systemPrompt: string
   userMessage: string
+  /** Raw tool_use blocks the model returned this turn, surfaced for
+   *  the SPA's debug panel so we can see exactly what was called. */
+  rawActions?: unknown
 }
 
 export interface CommitItem {
@@ -264,12 +267,29 @@ export interface AiCandidate {
   committed?: boolean
 }
 
+/** Actions the AI emitted on a turn — Anthropic tool calls translated
+ *  to a discriminated union the SPA applies directly. Mirrors
+ *  AiAction in functions/src/ai/types.ts. */
+export interface ProposeAction {
+  kind: 'propose'
+  suggestions: SongSuggestion[]
+}
+export interface RemoveAction {
+  kind: 'remove'
+  ids: string[]
+  reason: string
+}
+export interface ReassignAction {
+  kind: 'reassign'
+  candidateId: string
+  slotIndex: number
+}
+export type AiAction = ProposeAction | RemoveAction | ReassignAction
+
 export const suggestSongs = httpsCallable<
   {
     theme: string
     userMessage: string
-    minCount?: number
-    maxCount?: number
     planId?: string
     serviceOrder?: string
     planNotes?: string
@@ -278,9 +298,9 @@ export const suggestSongs = httpsCallable<
     alreadyInPlan?: string[]
   },
   {
-    suggestions: SongSuggestion[]
+    actions: AiAction[]
+    message: string
     debug: AiDebug
-    assistantMessage: string
     structureSource: PromptSource
     roleSource: PromptSource
   }

@@ -230,8 +230,6 @@ export const suggestSongs = onCall(
       history,
       candidates,
       alreadyInPlan,
-      minCount,
-      maxCount,
     } = req.data as {
       theme?: string
       userMessage?: string
@@ -241,8 +239,6 @@ export const suggestSongs = onCall(
       history?: Array<{ role: 'user' | 'assistant'; content: string }>
       candidates?: AiCandidate[]
       alreadyInPlan?: string[]
-      minCount?: number
-      maxCount?: number
     }
     if (!theme) throw new HttpsError('invalid-argument', 'theme required')
 
@@ -262,13 +258,11 @@ export const suggestSongs = onCall(
       candidates,
       alreadyInPlan,
       history,
-      minCount,
-      maxCount,
     })
     return {
-      suggestions: result.suggestions,
+      actions: result.actions,
+      message: result.message,
       debug: result.debug,
-      assistantMessage: result.assistantMessage,
       structureSource: structure.effective.source,
       roleSource: role.effective.source,
     }

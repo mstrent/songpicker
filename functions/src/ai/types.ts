@@ -71,25 +71,57 @@ export interface SuggestRequest {
    *  summaries). The current turn's user message is built fresh on the
    *  server and appended to this history. */
   history?: ConversationTurn[]
-  /** Lower bound on the number of suggestions the model should return. */
-  minCount?: number
-  /** Upper bound on the number of suggestions the model should return. */
-  maxCount?: number
 }
 
 export interface AiDebug {
   model: string
   systemPrompt: string
   userMessage: string
+  /** Raw tool-use blocks the model returned, surfaced as JSON in the
+   *  SPA's debug panel so we can see exactly what the AI chose to do
+   *  on each turn. */
+  rawActions?: unknown
 }
 
-export interface SuggestResult {
+/** Add new candidates to the pool. The SPA appends these the same way
+ *  user-driven Suggest used to: each suggestion becomes a pending
+ *  CandidateMatch and goes through library-match lookup. */
+export interface ProposeAction {
+  kind: 'propose'
   suggestions: SongSuggestion[]
+}
+
+/** Mark existing candidates as rejected with a reason. Same downstream
+ *  effect as the user clicking Reject and saving a freeform reason,
+ *  except the system message tags the move as AI-driven. */
+export interface RemoveAction {
+  kind: 'remove'
+  ids: string[]
+  reason: string
+}
+
+/** Move a candidate's slot earmark to a different song-slot position.
+ *  slotIndex is 1-based among song slots, matching the "[song slot N
+ *  of M]" tags the AI sees in the serviceOrder text. The SPA maps it
+ *  back to a PCO item id. */
+export interface ReassignAction {
+  kind: 'reassign'
+  candidateId: string
+  slotIndex: number
+}
+
+export type AiAction = ProposeAction | RemoveAction | ReassignAction
+
+export interface SuggestResult {
+  /** Ordered list of actions the AI chose to take this turn. Applied
+   *  by the SPA in order; each action also emits a system message in
+   *  the chat log so the user sees what changed. */
+  actions: AiAction[]
+  /** The AI's prose reply for this turn — drawn from the text content
+   *  block of its tool-use response. Empty/whitespace falls back to a
+   *  generic synthesized message so the chat log never goes silent. */
+  message: string
   debug: AiDebug
-  /** Short, human-readable summary of what the model suggested. Goes
-   *  into the chat log on the SPA side and is echoed back as a prior
-   *  assistant turn on subsequent calls. */
-  assistantMessage: string
 }
 
 export interface AiProvider {

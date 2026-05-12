@@ -108,38 +108,53 @@ System messages — previously filtered out of the AI history at
 `[event] …` lines so the AI sees decision events in conversation
 order alongside typed user turns.
 
-### Layer 3 — Replace "Refine" with a chat send; let the AI emit actions
+### Layer 3 — Replace "Refine" with a chat send; let the AI emit actions (shipped)
 
-Biggest change. Expand response schema beyond `suggestions`. Use
-Anthropic tool use (cleaner than JSON for multi-action turns):
+Anthropic tool use (no more JSON-output instruction). Three tools the
+model can invoke in any combination per turn:
 
-- `propose_songs(suggestions[])` — today's behavior.
-- `remove_candidates(ids[], reason)` — AI asks to drop candidates
-  that no longer fit.
-- `reassign(candidateId, slotRole)` — AI moves a candidate to a
-  different slot.
-- `reply(message)` — prose explanation ("I dropped Cornerstone since
-  you said too upbeat, and I'm swapping in House of the Lord for the
-  opener").
+- `propose_songs({ suggestions: [...] })` — add candidates (existing
+  behavior).
+- `remove_candidates({ ids, reason })` — mark existing candidates
+  rejected with an AI-supplied reason. SPA flips decision to reject,
+  stores the reason in the same `rejectReason` field the user UI
+  uses, and emits a `🤖 AI rejected …` system message in the chat
+  log. Skips committed candidates defensively.
+- `reassign({ candidateId, slotIndex })` — change a candidate's
+  earmark to a different 1-based song-slot position. SPA maps the
+  index back to a PCO item id.
 
-Cloud Function returns `{ actions: [...], message }` instead of
-`{ suggestions, assistantMessage }`. Client applies actions:
-`propose_songs` appends as today; `remove_candidates` flips
-`decision='reject'` with a system-message marker; `reassign` updates
-`assignedSlotItemId`. The `reply` goes in the chat log in place of
-`buildAssistantSummary`.
+The model's prose reply comes from its `text` content block — no
+`reply` tool, no synthesized bullet list. If the model only calls
+tools with no text, a short fallback synthesizes from the action
+counts so the chat log never goes silent.
 
-This layer is what flips the feel from "search box" to "chatbot."
+`SuggestResult` returns `{ actions: AiAction[], message: string,
+debug }` instead of `{ suggestions, assistantMessage }`. Client
+applies actions in order with defensive guards: dedupes propose by
+title (case-insensitive against current candidates + alreadyInPlan,
+plus within the same turn), skips reassign with out-of-range slot
+indices, leaves committed candidates untouched.
 
-For Gemini/OpenAI parity, keep a JSON-shaped fallback schema with the
-same action union. Anthropic gets native tool use.
+Tool result loops sidestepped: the SPA stores only the prose-text
+version of each assistant turn in history, so the model never sees
+its own past `tool_use` blocks. The next turn's candidates block
+reflects the consequences of those calls — no `tool_result` round-
+trips needed.
 
-### Layer 4 — Drop or repurpose silent auto-replacement
+UI: min/max count inputs are gone; the AI picks how many to propose
+per turn based on the structure-prompt role count and current pool.
+Button label collapses to "Send" / "Suggest songs" (first turn) /
+"Thinking…" (in-flight). Enter sends, Shift+Enter newlines.
 
-With Layer 3 the AI handles replacement inside a single visible turn.
-`scheduleReplacement` (`PlanDetail.tsx:484`) can be deleted — its
-purpose was masking the append-only constraint. Optionally keep as a
-"give me 3 more" button for plain-quantity refills.
+### Layer 4 — Drop silent auto-replacement (shipped)
+
+`scheduleReplacement`, `pendingReplacements`, `replacementTimer`,
+`candidatesRef`, `maxCountRef` all gone. The 600ms debounced
+auto-refill that ran silently after each Reject is now the AI's
+responsibility — if the user rejects something, they can ask the AI
+for replacements in the next turn, or the AI can preemptively offer
+some in its reply. Same outcome, but visible and conversational.
 
 ### Layer 5 (optional, larger) — Streaming + cache breakpoints
 

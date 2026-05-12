@@ -1,23 +1,12 @@
-import type { AiCandidate, SongSuggestion, SuggestRequest } from './types'
+import type { AiCandidate, SuggestRequest } from './types'
 
-// Single source of truth for the user-side text sent to the AI. Keeps the
-// three providers (Anthropic, Gemini, OpenAI) in lockstep on what each
-// suggestion call looks like, and is what the SPA debug panel surfaces.
-//
-// The chat history (prior user/assistant turns) carries the user's typed
-// inputs; this function only builds the LATEST turn, including the
-// current plan state. So past turns stay short and readable, while the
-// current turn has all the context the model needs to act.
+// Single source of truth for the user-side text the AI sees on the
+// current turn. The chat history (prior user/assistant turns) carries
+// the user's typed inputs and the AI's prose replies; this function
+// only assembles the LATEST turn, including a fresh snapshot of plan
+// state so the AI always reasons against current reality.
 export function buildUserMessage(req: SuggestRequest): string {
-  // Sensible defaults if the caller didn't specify a range — match the old
-  // single-count fallback (8) as a soft upper bound and pin a min of 4.
-  const rawMin = req.minCount ?? 4
-  const rawMax = req.maxCount ?? 8
-  const minCount = Math.max(1, Math.min(rawMin, rawMax))
-  const maxCount = Math.max(minCount, rawMax)
-  const parts: string[] = [
-    `Theme: ${req.theme}`,
-  ]
+  const parts: string[] = [`Theme: ${req.theme}`]
   if (req.planNotes && req.planNotes.trim()) {
     parts.push(`Plan notes:\n${req.planNotes.trim()}`)
   }
@@ -34,13 +23,6 @@ export function buildUserMessage(req: SuggestRequest): string {
     parts.push(`Already in plan (don't re-suggest): ${req.alreadyInPlan.join(', ')}`)
   }
   parts.push(`User request: ${req.userMessage || '(none)'}`)
-  if (minCount === maxCount) {
-    parts.push(`Return exactly ${minCount} suggestion${minCount === 1 ? '' : 's'}.`)
-  } else {
-    parts.push(
-      `Return between ${minCount} and ${maxCount} suggestions — stay within this range.`,
-    )
-  }
   return parts.join('\n')
 }
 
@@ -84,16 +66,4 @@ function decisionLabel(c: AiCandidate): string {
     default:
       return 'pending'
   }
-}
-
-// Compact rendering of "what I just suggested" for the chat log and for
-// echoing back as a prior assistant turn. Includes slot tags when present.
-export function buildAssistantSummary(suggestions: SongSuggestion[]): string {
-  if (suggestions.length === 0) return 'No suggestions returned.'
-  const lines = suggestions.map((s) => {
-    const author = s.author ? ` — ${s.author}` : ''
-    const slots = s.slots && s.slots.length > 0 ? `  (${s.slots.join(', ')})` : ''
-    return `• ${s.title}${author}${slots}`
-  })
-  return `Suggested ${suggestions.length} song${suggestions.length === 1 ? '' : 's'}:\n${lines.join('\n')}`
 }

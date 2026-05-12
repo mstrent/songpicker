@@ -155,8 +155,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   const [notesText, setNotesText] = useState('')
   const [notesSource, setNotesSource] = useState('')
   const [criteria, setCriteria] = useState('')
-  const [minCount, setMinCount] = useState(3)
-  const [maxCount, setMaxCount] = useState(8)
   const [generating, setGenerating] = useState(false)
   const [generateError, setGenerateError] = useState<string | null>(null)
   const [candidates, setCandidates] = useState<CandidateMatch[]>([])
@@ -181,7 +179,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
 
   const themeInitialized = useRef(false)
   const notesInitialized = useRef(false)
-  const countInitialized = useRef(false)
 
   const roleHook = usePromptConfig('role', planId)
   const structureHook = usePromptConfig('structure', planId)
@@ -194,17 +191,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   // as a user override, polluting storage).
   const userTouchedTheme = useRef(false)
   const userTouchedNotes = useRef(false)
-  // Debounced auto-replacement after Reject clicks. Rejecting multiple
-  // candidates in quick succession coalesces into a single call for N
-  // replacements rather than N independent calls.
-  const replacementTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pendingReplacements = useRef(0)
-  // Mirror candidates + maxCount in refs so the debounced replacement
-  // timer reads the latest values when it fires 600ms later (the
-  // closure captured at scheduleReplacement time would otherwise be
-  // stale).
-  const candidatesRef = useRef<CandidateMatch[]>([])
-  const maxCountRef = useRef(maxCount)
 
   useEffect(() => {
     let cancelled = false
@@ -216,7 +202,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setNotesSource('')
     themeInitialized.current = false
     notesInitialized.current = false
-    countInitialized.current = false
     userTouchedTheme.current = false
     userTouchedNotes.current = false
 
@@ -261,15 +246,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           const saved = ctx.userNotes
           setNotesText(saved && saved.trim() ? saved : notesSrc)
           notesInitialized.current = true
-        }
-        if (!countInitialized.current) {
-          const songSlotCount = ctx.items.filter(isSongSlot).length
-          // Floor at the number of empty slots so the AI always returns
-          // enough to populate the order; cap min at 3 so very short
-          // services still get some variety.
-          setMinCount(Math.max(songSlotCount, 3))
-          setMaxCount(Math.max(songSlotCount * 2, 8))
-          countInitialized.current = true
         }
       })
       .catch((e: Error) => !cancelled && setLoadError(e.message))
@@ -321,17 +297,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     }, 700)
     return () => clearTimeout(id)
   }, [candidates, messages, sessionLoaded, planId])
-
-  // Keep the latest candidates / maxCount available to the debounced
-  // auto-replacement timer (which fires 600ms after the last reject —
-  // the candidates closure it would otherwise capture is stale by
-  // then).
-  useEffect(() => {
-    candidatesRef.current = candidates
-  }, [candidates])
-  useEffect(() => {
-    maxCountRef.current = maxCount
-  }, [maxCount])
 
   // Reconcile committed candidates with the current PCO service order.
   // If a slot was cleared (or had a different song committed to it) via
@@ -385,35 +350,58 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     return () => clearTimeout(id)
   }, [notesText, notesSource, serviceTypeId, planId])
 
-  // Core suggestion fetcher used by both the user-driven Suggest button and
-  // the silent auto-replacement after rejections. The `addToChat` flag
-  // splits the two behaviours: user-driven calls record a chat turn and
-  // surface the spinner / errors; auto-replacements run quietly in the
-  // background.
-  async function fetchSuggestions(opts: {
-    minCount: number
-    maxCount: number
-    userMessage: string
-    addToChat: boolean
-  }) {
-    if (!theme.trim()) return
-    if (opts.addToChat) {
-      setGenerating(true)
-      setGenerateError(null)
-      patchCachedTheme(serviceTypeId, planId, theme)
-      void savePlanTheme({ planId, theme }).catch(() => {})
-      patchCachedNotes(serviceTypeId, planId, notesText)
-      void savePlanNotes({ planId, notes: notesText }).catch(() => {})
-    }
+  // Library-match lookup for a freshly-proposed candidate. Same pattern
+  // we used inline before, hoisted now that propose-songs can fire from
+  // multiple call sites (a single AI turn can emit multiple proposals).
+  function searchAndAttachSong(c: CandidateMatch) {
+    searchSongs({ query: c.suggestion.title })
+      .then((sr) => {
+        const match = sr.data.songs[0]
+        setCandidates((prev) =>
+          prev.map((cur) =>
+            cur.id === c.id
+              ? match
+                ? { ...cur, matchStatus: 'matched', song: match }
+                : { ...cur, matchStatus: 'unmatched' }
+              : cur,
+          ),
+        )
+      })
+      .catch((e: Error) => {
+        setCandidates((prev) =>
+          prev.map((cur) =>
+            cur.id === c.id ? { ...cur, matchStatus: 'error', error: e.message } : cur,
+          ),
+        )
+      })
+  }
+
+  // Send the user's turn to the AI and apply whatever actions it
+  // chose. Each AI turn can mix propose / remove / reassign in any
+  // order, plus a prose reply. The reply goes in the chat log, every
+  // action emits its own system-message marker so the user can see
+  // exactly what the AI did.
+  async function handleSuggest() {
+    if (!theme.trim() || generating) return
+    setGenerating(true)
+    setGenerateError(null)
+    patchCachedTheme(serviceTypeId, planId, theme)
+    void savePlanTheme({ planId, theme }).catch(() => {})
+    patchCachedNotes(serviceTypeId, planId, notesText)
+    void savePlanNotes({ planId, notes: notesText }).catch(() => {})
+
     try {
       const songSlotItems = (items ?? []).filter(isSongSlot)
       const totalSongSlots = songSlotItems.length
-      // Map PCO item ID → 1-based position among song slots, so each
-      // candidate's assignedSlotItemId can be rendered to the AI as
-      // "[song slot N of M]" — matching the position tags in the
-      // service-order text it also receives.
+      // Map PCO item id ↔ 1-based position among song slots. Both
+      // directions: we send positions to the AI and translate
+      // reassign actions back to item ids.
       const slotIndexByItemId = new Map<string, number>()
-      songSlotItems.forEach((it, idx) => slotIndexByItemId.set(it.id, idx + 1))
+      const itemIdBySlotIndex = new Map<number, string>()
+      songSlotItems.forEach((it, idx) => {
+        slotIndexByItemId.set(it.id, idx + 1)
+        itemIdBySlotIndex.set(idx + 1, it.id)
+      })
 
       const aiCandidates: AiCandidate[] = candidates.map((c) => {
         const slotIndex = c.assignedSlotItemId
@@ -438,11 +426,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         }
       })
 
-      // PCO-picked songs not represented in our candidate state — usually
-      // songs the user picked directly in Planning Center, outside the
-      // app. They already show inline in the service order as "picked:
-      // X"; listing them here is the belt-and-suspenders don't-re-suggest
-      // hint.
+      // PCO-picked songs not represented in our candidate state —
+      // usually songs the user picked directly in Planning Center
+      // outside the app. They already show inline in the service
+      // order as "picked: X"; listing them here is the
+      // belt-and-suspenders don't-re-suggest hint.
       const committedSongIds = new Set(
         candidates
           .filter((c) => c.committedAt != null && c.song?.id)
@@ -455,12 +443,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         .map((it) => it.songTitle!)
 
       const serviceOrder = buildServiceOrderText(items)
-      // Fold system messages into the conversation as synthetic
-      // user-side [event] lines so the AI sees decisions in context
-      // (rejected with this reason, committed this song to that slot,
-      // etc.) alongside the typed user turns. Without this the model
-      // sees gaps where state changes happened off-screen and has to
-      // re-derive context from the candidates block alone.
+      // System messages fold into AI history as [event] lines so the
+      // model sees decisions in context (rejected with this reason,
+      // committed this song to that slot, etc.) alongside typed
+      // turns. Without this the model sees gaps where state changed
+      // off-screen and has to re-derive context.
       const history: ConversationTurn[] = messages.map((m) =>
         m.role === 'system'
           ? { role: 'user' as const, content: `[event] ${m.content}` }
@@ -469,9 +456,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
 
       const res = await suggestSongs({
         theme,
-        userMessage: opts.userMessage,
-        minCount: opts.minCount,
-        maxCount: opts.maxCount,
+        userMessage: criteria,
         planId,
         serviceOrder,
         planNotes: notesText,
@@ -480,138 +465,120 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         alreadyInPlan,
       })
 
-      if (opts.addToChat) {
-        setDebug(res.data.debug ?? null)
-        const turnTs = Date.now()
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: newCandidateId(),
-            role: 'user',
-            content: opts.userMessage.trim() || '(initial request)',
-            timestamp: turnTs,
-          },
-          {
-            id: newCandidateId(),
-            role: 'assistant',
-            content: res.data.assistantMessage,
-            timestamp: turnTs + 1,
-          },
-        ])
-        // Clear the input for the next refinement.
-        setCriteria('')
-      }
+      setDebug(res.data.debug ?? null)
+      const turnTs = Date.now()
+      // Append the user + assistant chat turns first so they bracket
+      // any per-action system messages we're about to emit.
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: newCandidateId(),
+          role: 'user',
+          content: criteria.trim() || '(initial request)',
+          timestamp: turnTs,
+        },
+        {
+          id: newCandidateId(),
+          role: 'assistant',
+          content: res.data.message || '(no reply)',
+          timestamp: turnTs + 1,
+        },
+      ])
+      setCriteria('')
 
-      // The model can still over-deliver past the requested max — defend
-      // against that on the client and slice down to the user's chosen
-      // upper bound so the candidate list doesn't blow out.
-      const accepted = res.data.suggestions.slice(0, opts.maxCount)
-
+      // Apply each action in order. We splat new candidates straight
+      // into state and kick off match lookups; remove/reassign go
+      // through setCandidates updaters so concurrent state changes
+      // (rare, since the user can't interact during generating) don't
+      // clobber the AI's deltas.
+      const newOnes: CandidateMatch[] = []
+      const removalLogs: string[] = []
+      const reassignLogs: string[] = []
+      const titleById = new Map(candidates.map((c) => [c.id, c.suggestion.title]))
+      // Defensive dedupe — the system prompt tells the AI not to
+      // re-propose anything already in candidates or alreadyInPlan,
+      // but enforce it client-side so a slip-up doesn't pollute the
+      // pool. Case-insensitive. Also dedupes within a single turn.
+      const existingTitlesLower = new Set<string>([
+        ...candidates.map((c) => c.suggestion.title.toLowerCase()),
+        ...alreadyInPlan.map((t) => t.toLowerCase()),
+      ])
       const now = Date.now()
-      const newOnes: CandidateMatch[] = accepted.map((s) => ({
-        id: newCandidateId(),
-        suggestion: s,
-        matchStatus: 'checking',
-        decision: 'pending',
-        addedAt: now,
-        assignedSlotItemId: null,
-        committedAt: null,
-        priorSlotTitle: null,
-        rejectReason: null,
-      }))
-      setCandidates((prev) => [...prev, ...newOnes])
 
-      // Surface silent auto-replacements in the chat log so the user can
-      // see what the AI swapped in without it feeling magical/silent.
-      if (!opts.addToChat && accepted.length > 0) {
-        const titles = accepted.map((s) => s.title).join(', ')
-        appendSystemMessage(
-          `↻ Replaced rejected song${accepted.length === 1 ? '' : 's'} with: ${titles}`,
-        )
+      for (const action of res.data.actions) {
+        if (action.kind === 'propose') {
+          const minted: CandidateMatch[] = []
+          for (const s of action.suggestions) {
+            const key = s.title.toLowerCase()
+            if (existingTitlesLower.has(key)) continue
+            existingTitlesLower.add(key)
+            minted.push({
+              id: newCandidateId(),
+              suggestion: s,
+              matchStatus: 'checking',
+              decision: 'pending',
+              addedAt: now,
+              assignedSlotItemId: null,
+              committedAt: null,
+              priorSlotTitle: null,
+              rejectReason: null,
+            })
+          }
+          newOnes.push(...minted)
+        } else if (action.kind === 'remove') {
+          setCandidates((prev) =>
+            prev.map((c) =>
+              action.ids.includes(c.id) && !c.committedAt
+                ? { ...c, decision: 'reject', rejectReason: action.reason }
+                : c,
+            ),
+          )
+          const titles = action.ids
+            .map((id) => titleById.get(id) ?? `(unknown ${id})`)
+            .join(', ')
+          removalLogs.push(
+            `🤖 AI rejected ${titles} — reason: "${action.reason}"`,
+          )
+        } else if (action.kind === 'reassign') {
+          const targetItemId = itemIdBySlotIndex.get(action.slotIndex) ?? null
+          if (targetItemId == null) continue
+          setCandidates((prev) =>
+            prev.map((c) =>
+              c.id === action.candidateId && !c.committedAt
+                ? { ...c, assignedSlotItemId: targetItemId }
+                : c,
+            ),
+          )
+          const title = titleById.get(action.candidateId) ?? '(candidate)'
+          reassignLogs.push(
+            `🤖 AI moved "${title}" to song slot ${action.slotIndex}`,
+          )
+        }
       }
 
-      newOnes.forEach((c) => {
-        searchSongs({ query: c.suggestion.title })
-          .then((sr) => {
-            const match = sr.data.songs[0]
-            setCandidates((prev) =>
-              prev.map((cur) =>
-                cur.id === c.id
-                  ? match
-                    ? { ...cur, matchStatus: 'matched', song: match }
-                    : { ...cur, matchStatus: 'unmatched' }
-                  : cur,
-              ),
-            )
-          })
-          .catch((e: Error) => {
-            setCandidates((prev) =>
-              prev.map((cur) =>
-                cur.id === c.id
-                  ? { ...cur, matchStatus: 'error', error: e.message }
-                  : cur,
-              ),
-            )
-          })
-      })
+      if (newOnes.length > 0) {
+        setCandidates((prev) => [...prev, ...newOnes])
+        newOnes.forEach(searchAndAttachSong)
+      }
+      // System messages for AI-driven changes. Emitted after the
+      // user/assistant chat turns so the chronology reads top-to-
+      // bottom: user typed → AI replied → AI did X, Y, Z.
+      if (newOnes.length > 0) {
+        appendSystemMessage(
+          `🤖 AI proposed ${newOnes.length} new song${newOnes.length === 1 ? '' : 's'}`,
+        )
+      }
+      for (const log of removalLogs) appendSystemMessage(log)
+      for (const log of reassignLogs) appendSystemMessage(log)
+      // If the AI's reject pushed any rejected card into the pool,
+      // pop it open so the user sees the change without an extra
+      // click — same UX as a user-driven reject.
+      if (removalLogs.length > 0) setRejectedPoolOpen(true)
     } catch (e) {
-      if (opts.addToChat) {
-        setGenerateError((e as Error).message)
-      } else {
-        // Silent failures for auto-replacement — user didn't ask, don't
-        // interrupt their flow. Worth logging for debugging.
-        console.warn('[songpicker] auto-replacement failed:', e)
-      }
+      setGenerateError((e as Error).message)
     } finally {
-      if (opts.addToChat) setGenerating(false)
+      setGenerating(false)
     }
-  }
-
-  async function handleSuggest() {
-    if (!theme.trim() || generating) return
-    await fetchSuggestions({
-      minCount,
-      maxCount,
-      userMessage: criteria,
-      addToChat: true,
-    })
-  }
-
-  function scheduleReplacement() {
-    pendingReplacements.current += 1
-    if (replacementTimer.current) clearTimeout(replacementTimer.current)
-    replacementTimer.current = setTimeout(() => {
-      const n = pendingReplacements.current
-      pendingReplacements.current = 0
-      replacementTimer.current = null
-      if (n <= 0) return
-      // After refinement turns the list can grow past the user's
-      // requested max. In that case rejecting shouldn't keep refilling
-      // the list — they're trying to trim down. Skip replacement
-      // whenever the post-rejection active count is already at or
-      // above maxCount, and only ask for enough to bring us back up to
-      // max when there IS room.
-      const activeCount = candidatesRef.current.filter(
-        (c) => c.decision !== 'reject',
-      ).length
-      const maxC = maxCountRef.current
-      if (activeCount >= maxC) {
-        appendSystemMessage(
-          `↻ Skipped auto-replacement — ${activeCount} song${activeCount === 1 ? '' : 's'} still on the list, at or above the requested max of ${maxC}`,
-        )
-        return
-      }
-      const fillCount = Math.min(n, maxC - activeCount)
-      void fetchSuggestions({
-        // Auto-replacement pins min=max so the model returns exactly
-        // the number of replacement songs we asked for — capped at
-        // the room remaining under maxCount.
-        minCount: fillCount,
-        maxCount: fillCount,
-        userMessage: `(auto-replacement for ${fillCount} rejected song${fillCount === 1 ? '' : 's'})`,
-        addToChat: false,
-      })
-    }, 600)
   }
 
   function clearCandidates() {
@@ -666,9 +633,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       // without a second click.
       setRationaleFocusId(id)
       setRejectedPoolOpen(true)
-      // Newly rejected → schedule a replacement so the pool stays the
-      // same effective size.
-      scheduleReplacement()
     } else if (oldDecision === 'reject' && newDecision !== 'reject') {
       appendSystemMessage(`↩ Unrejected: ${target.suggestion.title}`)
     }
@@ -1510,54 +1474,29 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           <span>
             {messages.length === 0
               ? 'Criteria (mood, tempo, era, must-include, avoid)'
-              : 'Refine'}
+              : 'Chat with the AI'}
           </span>
           <textarea
             rows={messages.length === 0 ? 4 : 2}
             value={criteria}
             onChange={(e) => setCriteria(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter sends, Shift+Enter inserts a newline. Matches the
+              // chat-style convention; multi-line refinements still
+              // possible when you really need them.
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                if (!generating && theme.trim()) void handleSuggest()
+              }
+            }}
             placeholder={
               messages.length === 0
                 ? "e.g. upbeat opener, slower communion song, include 'Cornerstone'"
-                : "e.g. give me a few more upbeat openers, or swap the closer for something slower"
+                : "e.g. drop the upbeat ones, give me two slower options for the closer, swap candidate X for something newer"
             }
           />
         </label>
         <div className="row">
-          <label className="inline">
-            <span>Min</span>
-            <input
-              type="number"
-              min={1}
-              max={50}
-              value={minCount}
-              onChange={(e) => {
-                const v = parseInt(e.target.value, 10)
-                if (!Number.isNaN(v)) {
-                  setMinCount(Math.max(1, v))
-                  if (v > maxCount) setMaxCount(v)
-                }
-              }}
-              title="Minimum number of suggestions the AI should return"
-            />
-          </label>
-          <label className="inline">
-            <span>Max</span>
-            <input
-              type="number"
-              min={1}
-              max={50}
-              value={maxCount}
-              onChange={(e) => {
-                const v = parseInt(e.target.value, 10)
-                if (!Number.isNaN(v)) {
-                  setMaxCount(Math.max(1, v))
-                  if (v < minCount) setMinCount(v)
-                }
-              }}
-              title="Maximum number of suggestions the AI should return"
-            />
-          </label>
           <button
             className="ai-button"
             onClick={handleSuggest}
@@ -1565,10 +1504,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           >
             <span className="sparkle" aria-hidden>✨</span>
             {generating
-              ? 'Generating…'
+              ? 'Thinking…'
               : messages.length === 0
                 ? 'Suggest songs'
-                : 'Send refinement'}
+                : 'Send'}
           </button>
           {candidates.length > 0 && (
             <button className="ghost" onClick={clearCandidates} disabled={generating}>
@@ -1599,7 +1538,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             {focused && (
               <div className="rationale-picker">
                 <div className="rationale-header">
-                  Why did you reject <strong>“{focused.suggestion.title}”</strong>?
+                  <span className="rationale-question">
+                    Why did you reject{' '}
+                    <strong>“{focused.suggestion.title}”</strong>?
+                  </span>
                   <button
                     type="button"
                     className="rationale-skip"
