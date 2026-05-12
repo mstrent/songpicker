@@ -93,8 +93,6 @@ function renderCandidates(candidates: AiCandidate[]): string {
 function decisionLabel(c: AiCandidate): string {
   if (c.committed) return 'committed'
   switch (c.decision) {
-    case 'shortlist':
-      return 'shortlisted'
     case 'reject':
       return 'rejected'
     case 'pending':

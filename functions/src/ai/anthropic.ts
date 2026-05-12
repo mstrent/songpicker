@@ -6,7 +6,6 @@ import type {
   ClearSlotAction,
   CommitSongAction,
   ProposeAction,
-  ReassignAction,
   RemoveAction,
   SongSuggestion,
   StreamChunk,
@@ -74,19 +73,6 @@ const TOOLS: Anthropic.Tool[] = [
         },
       },
       required: ['ids', 'reason'],
-    },
-  },
-  {
-    name: 'reassign',
-    description:
-      "Move a candidate's earmark to a different song slot in the service order. slotIndex is 1-based among song slots and corresponds to the '[song slot N of M]' tags in the service order text.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        candidateId: { type: 'string' },
-        slotIndex: { type: 'integer', minimum: 1 },
-      },
-      required: ['candidateId', 'slotIndex'],
     },
   },
   {
@@ -294,8 +280,6 @@ function toAction(name: string, input: unknown): AiAction | null {
       return parsePropose(obj)
     case 'remove_candidates':
       return parseRemove(obj)
-    case 'reassign':
-      return parseReassign(obj)
     case 'commit_song':
       return parseCommit(obj)
     case 'clear_slot':
@@ -341,13 +325,6 @@ function parseRemove(obj: Record<string, unknown>): RemoveAction | null {
   return { kind: 'remove', ids, reason }
 }
 
-function parseReassign(obj: Record<string, unknown>): ReassignAction | null {
-  if (typeof obj.candidateId !== 'string' || !obj.candidateId) return null
-  const idx = typeof obj.slotIndex === 'number' ? Math.floor(obj.slotIndex) : NaN
-  if (!Number.isFinite(idx) || idx < 1) return null
-  return { kind: 'reassign', candidateId: obj.candidateId, slotIndex: idx }
-}
-
 function parseCommit(obj: Record<string, unknown>): CommitSongAction | null {
   if (typeof obj.candidateId !== 'string' || !obj.candidateId) return null
   const idx = typeof obj.slotIndex === 'number' ? Math.floor(obj.slotIndex) : NaN
@@ -378,7 +355,6 @@ function fallbackMessage(actions: AiAction[]): string {
   const counts = {
     proposed: 0,
     removed: 0,
-    reassigned: 0,
     committed: 0,
     cleared: 0,
     unrejected: 0,
@@ -386,7 +362,6 @@ function fallbackMessage(actions: AiAction[]): string {
   for (const a of actions) {
     if (a.kind === 'propose') counts.proposed += a.suggestions.length
     else if (a.kind === 'remove') counts.removed += a.ids.length
-    else if (a.kind === 'reassign') counts.reassigned += 1
     else if (a.kind === 'commit') counts.committed += 1
     else if (a.kind === 'clear_slot') counts.cleared += 1
     else if (a.kind === 'unreject') counts.unrejected += a.ids.length
@@ -396,8 +371,6 @@ function fallbackMessage(actions: AiAction[]): string {
     parts.push(`proposed ${counts.proposed} song${counts.proposed === 1 ? '' : 's'}`)
   if (counts.removed)
     parts.push(`removed ${counts.removed} candidate${counts.removed === 1 ? '' : 's'}`)
-  if (counts.reassigned)
-    parts.push(`reassigned ${counts.reassigned} slot${counts.reassigned === 1 ? '' : 's'}`)
   if (counts.committed)
     parts.push(`committed ${counts.committed} song${counts.committed === 1 ? '' : 's'}`)
   if (counts.cleared)

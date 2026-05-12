@@ -119,7 +119,7 @@ export const savePlanNotes = httpsCallable<
 >(functions, 'savePlanNotes')
 
 export type MatchStatus = 'checking' | 'matched' | 'unmatched' | 'error'
-export type Decision = 'pending' | 'shortlist' | 'reject'
+export type Decision = 'pending' | 'reject'
 
 export interface PersistedSongRef {
   id: string
@@ -179,25 +179,10 @@ export const saveSession = httpsCallable<
   { ok: boolean }
 >(functions, 'saveSession')
 
-export const commitSlot = httpsCallable<
-  {
-    serviceTypeId: string
-    planId: string
-    itemId: string
-    songId: string
-    /** Sent so the PCO item title is rewritten to match the song name —
-     *  Planning Center's web UI does this automatically when you link a
-     *  song, but the API doesn't. */
-    songTitle?: string
-  },
-  { ok: boolean }
->(functions, 'commitSlot')
-
 /** Intent-shaped placement endpoint. Use this for all
  *  "ensure this song is in this slot" intents — fresh commits AND
  *  moves. When fromSlotItemId is provided, the old slot is cleared
- *  first (PCO has no atomic move). Replaces direct use of
- *  commitSlot for the SPA's action layer. */
+ *  first (PCO has no atomic move). */
 export const placeSongInSlot = httpsCallable<
   {
     serviceTypeId: string
@@ -214,8 +199,7 @@ export const placeSongInSlot = httpsCallable<
   { ok: boolean }
 >(functions, 'placeSongInSlot')
 
-/** Intent-shaped clear endpoint — renames the older clearSlot
- *  for consistency. */
+/** Intent-shaped clear endpoint. */
 export const clearSongFromSlot = httpsCallable<
   {
     serviceTypeId: string
@@ -225,20 +209,6 @@ export const clearSongFromSlot = httpsCallable<
   },
   { ok: boolean }
 >(functions, 'clearSongFromSlot')
-
-export const clearSlot = httpsCallable<
-  {
-    serviceTypeId: string
-    planId: string
-    itemId: string
-    /** Title to PATCH onto the item alongside clearing the song. Used to
-     *  revert the title that the prior commit overwrote with the song
-     *  name — caller passes the stored prior title or a "Song N"
-     *  fallback. */
-    title?: string
-  },
-  { ok: boolean }
->(functions, 'clearSlot')
 
 export const reorderItems = httpsCallable<
   {
@@ -316,11 +286,6 @@ export interface RemoveAction {
   ids: string[]
   reason: string
 }
-export interface ReassignAction {
-  kind: 'reassign'
-  candidateId: string
-  slotIndex: number
-}
 export interface CommitSongAction {
   kind: 'commit'
   candidateId: string
@@ -337,7 +302,6 @@ export interface UnrejectAction {
 export type AiAction =
   | ProposeAction
   | RemoveAction
-  | ReassignAction
   | CommitSongAction
   | ClearSlotAction
   | UnrejectAction

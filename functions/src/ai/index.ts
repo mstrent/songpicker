@@ -16,7 +16,6 @@ export type {
   ClearSlotAction,
   CommitSongAction,
   ProposeAction,
-  ReassignAction,
   RemoveAction,
   SongSuggestion,
   StreamChunk,

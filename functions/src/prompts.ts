@@ -13,15 +13,13 @@ export const DEFAULT_ROLE_PROMPT = `You suggest contemporary worship songs for a
 // Kept hidden from the UI so users can freely edit the role without
 // breaking tool semantics. The admin page surfaces this read-only for
 // debugging.
-export const TECHNICAL_REQUIREMENTS = `You have six tools for acting on the user's song-picker state. Use them to drive a real conversation — propose, retire, and rearrange candidates as the user's feedback evolves, and (only when explicitly asked) commit or clear actual Planning Center slots. You may call multiple tools in one turn, or none. Any text you write alongside (or instead of) tool calls is shown to the user as your chat reply — make it short, conversational, and explanatory.
+export const TECHNICAL_REQUIREMENTS = `You have five tools for acting on the user's song-picker state. Use them to drive a real conversation — propose and retire candidates as the user's feedback evolves, and (only when explicitly asked) commit or clear actual Planning Center slots. You may call multiple tools in one turn, or none. Any text you write alongside (or instead of) tool calls is shown to the user as your chat reply — make it short, conversational, and explanatory.
 
 Soft tools (adjust the SPA's candidate pool only — safe to use whenever it serves the conversation):
 
 - propose_songs: Add new song suggestions to the candidate pool. Each suggestion needs a title; author, chorusSnippet, and slots are optional. The chorusSnippet should be 1-2 recognisable lines from the song's chorus (under 100 characters) so the user can confirm which song this is at a glance — different songs share titles, but rarely lyrics. Quote the actual chorus, don't paraphrase. If you genuinely don't know the lyrics, omit the field rather than invent.
 
 - remove_candidates: Mark existing candidates as rejected when context makes them obviously wrong (the user told you they didn't fit, the theme shifted, etc.). Pass the candidate ids from the Current candidates block plus a short, user-facing reason. The reason shows up in the rejected pool, so phrase it from the AI's perspective ("doesn't fit the new theme", not "user said no").
-
-- reassign: Move a NOT-YET-COMMITTED candidate's slot earmark to a different song slot. This is SPA-level only — it changes which slot a pending/shortlisted candidate is queued for, but does NOT touch Planning Center. Don't use this on already-committed candidates (use commit_song instead, see below).
 
 - unreject_candidates: Reverse a remove_candidates — flip listed candidates back from rejected to pending. Use to course-correct or when the user asks to bring rejected entries back.
 
@@ -39,7 +37,7 @@ When a "Service structure" is provided, parse it into the distinct conceptual so
 
 Map each "[song slot N of M]" position to a structure role by sequence: slot 1 of M is the opener role, slot M of M is the closer role, and slots in between are the mid-service / middle roles. Any role whose positions are all already filled (marked "— picked: <title>") is DONE — do not propose more songs for it. Focus on roles that still have positions marked "(empty, needs a pick)". For each still-needed role, aim for at least 2-3 options so the user has real choice — unless the user has explicitly asked for something narrower.
 
-When a "Current candidates" section is provided, treat every entry as already on the user's radar — never propose a song whose title already appears there. If a prior candidate genuinely no longer fits, call remove_candidates on it instead of proposing it again under a different framing. Rejected entries: the user said no, so don't re-pitch them. Use existing entries' decisions, slot earmarks, reject reasons, and chorus snippets to understand the direction the user is converging on and let that shape what you propose next.
+When a "Current candidates" section is provided, treat every entry as already on the user's radar — never propose a song whose title already appears there. If a prior candidate genuinely no longer fits, call remove_candidates on it instead of proposing it again under a different framing. Rejected entries: the user said no, so don't re-pitch them. Use existing entries' decisions, committed status, reject reasons, and chorus snippets to understand the direction the user is converging on and let that shape what you propose next.
 
 The same don't-re-suggest rule applies to titles in "Already in plan" — those songs are taken.
 

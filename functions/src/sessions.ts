@@ -1,7 +1,7 @@
 import { getFirestore } from 'firebase-admin/firestore'
 
 export type MatchStatus = 'checking' | 'matched' | 'unmatched' | 'error'
-export type Decision = 'pending' | 'shortlist' | 'reject'
+export type Decision = 'pending' | 'reject'
 
 export interface PersistedSongRef {
   id: string
@@ -61,7 +61,12 @@ function sanitizeCandidate(raw: unknown): PersistedCandidate | null {
   if (!raw || typeof raw !== 'object') return null
   const c = raw as Record<string, unknown>
   if (typeof c.id !== 'string' || typeof c.title !== 'string') return null
-  const decision = c.decision === 'shortlist' || c.decision === 'reject' ? c.decision : 'pending'
+  // Backward-compat: older sessions stored 'shortlist' as an intermediate
+  // decision; the SPA no longer exposes that UI, so anything that isn't
+  // a rejection collapses to 'pending'. Committed candidates are
+  // identified separately via committedAt — losing the shortlist tag
+  // here doesn't lose the commit.
+  const decision = c.decision === 'reject' ? 'reject' : 'pending'
   const matchStatus =
     c.matchStatus === 'matched' || c.matchStatus === 'unmatched' || c.matchStatus === 'error'
       ? c.matchStatus

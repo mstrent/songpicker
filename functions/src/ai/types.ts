@@ -12,7 +12,7 @@ export interface ConversationTurn {
   content: string
 }
 
-export type AiCandidateDecision = 'pending' | 'shortlist' | 'reject'
+export type AiCandidateDecision = 'pending' | 'reject'
 
 /** Structured view of one candidate the SPA is currently holding. The
  *  AI sees the entire pool — pending, shortlisted, rejected, committed —
@@ -106,16 +106,6 @@ export interface RemoveAction {
   reason: string
 }
 
-/** Move a candidate's slot earmark to a different song-slot position.
- *  slotIndex is 1-based among song slots, matching the "[song slot N
- *  of M]" tags the AI sees in the serviceOrder text. The SPA maps it
- *  back to a PCO item id. */
-export interface ReassignAction {
-  kind: 'reassign'
-  candidateId: string
-  slotIndex: number
-}
-
 /** Actually commit a candidate to a Planning Center song slot. SPA
  *  calls the commitSlot Cloud Function with the candidate's matched
  *  PCO song id; the optimistic local state flips committedAt
@@ -145,7 +135,6 @@ export interface UnrejectAction {
 export type AiAction =
   | ProposeAction
   | RemoveAction
-  | ReassignAction
   | CommitSongAction
   | ClearSlotAction
   | UnrejectAction
