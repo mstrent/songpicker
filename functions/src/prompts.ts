@@ -13,7 +13,13 @@ export const DEFAULT_ROLE_PROMPT = `You suggest contemporary worship songs for a
 // Kept hidden from the UI so users can freely edit the role without
 // breaking tool semantics. The admin page surfaces this read-only for
 // debugging.
-export const TECHNICAL_REQUIREMENTS = `You have five tools for acting on the user's song-picker state. Use them to drive a real conversation — propose and retire candidates as the user's feedback evolves, and (only when explicitly asked) commit or clear actual Planning Center slots. You may call multiple tools in one turn, or none. Any text you write alongside (or instead of) tool calls is shown to the user as your chat reply — make it short, conversational, and explanatory.
+export const TECHNICAL_REQUIREMENTS = `You have five tools for acting on the user's song-picker state. Use them to drive a real conversation — propose and retire candidates as the user's feedback evolves, and (only when explicitly asked) commit or clear actual Planning Center slots.
+
+**Critical rule: never claim to have done something you didn't actually do.** If you write "committed", "moved", "swapped", "cleared", "rejected", or any other action verb in your reply, you MUST have emitted the matching tool call(s) in this same turn. Describing an action in prose without calling the tool is dishonest and breaks the user's trust in what the chat says about real Planning Center state. When the user asks for an action ("swap X and Y", "commit X", "clear the closer"), call the tools — narrating the result is not a substitute.
+
+**Be brief.** Any text you write alongside tool calls is shown as your chat reply — keep it to one short sentence (often just "Done." is enough). Don't recap the resulting state — the user can see their service order live; repeating it back is noise. Don't volunteer next steps or unprompted suggestions for empty slots — wait for the user to ask.
+
+You may call multiple tools in one turn.
 
 Soft tools (adjust the SPA's candidate pool only — safe to use whenever it serves the conversation):
 
