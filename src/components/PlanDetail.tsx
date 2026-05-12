@@ -196,6 +196,18 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   // message (or any new message lands), keep the log pinned to the
   // bottom so new content stays visible without manual scrolling.
   const chatLogRef = useRef<HTMLDivElement | null>(null)
+  // Debounced auto-AI-turn after a reject or reject-reason save.
+  // Fires ~1s after the user stops rejecting things, so the AI can
+  // react to fresh feedback without the user having to click Send.
+  // Unlike the old silent scheduleReplacement (Layer 4), this routes
+  // through the normal streaming chat-turn pipeline — visible in the
+  // log with a prose reply and per-action system messages.
+  const autoRefineTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // generating mirrored as a ref so the debounced timer reads the
+  // current value when it fires, not the value captured at schedule
+  // time (which would skip the firing once a slow manual Send is
+  // still in flight, etc.).
+  const generatingRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -220,6 +232,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setRationaleFocusId(null)
     setReasonDrafts({})
     setRejectedPoolOpen(false)
+    // Cancel any pending auto-refine carried over from a prior plan.
+    if (autoRefineTimer.current) {
+      clearTimeout(autoRefineTimer.current)
+      autoRefineTimer.current = null
+    }
 
     // Load the persisted candidate pool + future chat history for this plan.
     // Survives page refreshes and lets iteration span multiple sittings.
@@ -286,6 +303,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     if (!el) return
     el.scrollTop = el.scrollHeight
   }, [messages])
+
+  // Keep the generating mirror in sync.
+  useEffect(() => {
+    generatingRef.current = generating
+  }, [generating])
 
   // If the focused candidate is no longer rejected (un-rejected, cleared,
   // etc.), drop the focus so the rationale picker doesn't dangle on a
@@ -397,8 +419,22 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   // SuggestResponse still lands on `data` so we get debug payloads
   // and the model's full prose reply (used as a fallback if the
   // stream produced no text).
-  async function handleSuggest() {
+  //
+  // `autoRefresh` distinguishes two call paths:
+  //   - manual Send (default): user typed something, criteria becomes
+  //     the user turn in the chat log, then clears.
+  //   - auto-refresh (debounced after rejects): no user typed input,
+  //     a system marker takes the place of the user turn so the chat
+  //     log shows the AI is reacting on its own, and criteria stays
+  //     intact so the user's next manual draft isn't clobbered.
+  async function handleSuggest(opts?: { autoRefresh?: boolean }) {
+    const autoRefresh = opts?.autoRefresh === true
     if (!theme.trim() || generating) return
+    // Cancel any pending auto-refine — this turn covers it.
+    if (autoRefineTimer.current) {
+      clearTimeout(autoRefineTimer.current)
+      autoRefineTimer.current = null
+    }
     setGenerating(true)
     setGenerateError(null)
     patchCachedTheme(serviceTypeId, planId, theme)
@@ -406,10 +442,12 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     patchCachedNotes(serviceTypeId, planId, notesText)
     void savePlanNotes({ planId, notes: notesText }).catch(() => {})
 
-    // Snapshot the typed input, then clear immediately so the user can
-    // start composing their next turn while the model is mid-stream.
-    const turnUserMessage = criteria
-    setCriteria('')
+    // Snapshot the typed input. Manual sends clear it (so the user can
+    // start composing the next turn while the model streams);
+    // auto-refresh leaves it alone (the user didn't initiate, don't
+    // wipe their in-progress draft).
+    const turnUserMessage = autoRefresh ? '' : criteria
+    if (!autoRefresh) setCriteria('')
 
     try {
       const songSlotItems = (items ?? []).filter(isSongSlot)
@@ -465,21 +503,29 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           : { role: m.role, content: m.content },
       )
 
-      // Pre-allocate ids for the user + placeholder assistant
-      // messages so stream chunks can find the assistant message to
-      // append into. The assistant content starts empty and grows
-      // delta-by-delta.
-      const userMsgId = newCandidateId()
+      // Pre-allocate an id for the placeholder assistant message so
+      // stream chunks can find it to append into. Manual sends also
+      // prepend a user message; auto-refresh prepends a system
+      // marker instead so the chat log shows the AI is reacting on
+      // its own rather than to a (nonexistent) typed turn.
       const assistantMsgId = newCandidateId()
       const turnTs = Date.now()
+      const turnPrefix: SessionMessage = autoRefresh
+        ? {
+            id: newCandidateId(),
+            role: 'system',
+            content: '↻ Auto-refining after recent activity',
+            timestamp: turnTs,
+          }
+        : {
+            id: newCandidateId(),
+            role: 'user',
+            content: turnUserMessage.trim() || '(initial request)',
+            timestamp: turnTs,
+          }
       setMessages((prev) => [
         ...prev,
-        {
-          id: userMsgId,
-          role: 'user',
-          content: turnUserMessage.trim() || '(initial request)',
-          timestamp: turnTs,
-        },
+        turnPrefix,
         {
           id: assistantMsgId,
           role: 'assistant',
@@ -615,6 +661,24 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setCandidates([])
     setMessages([])
     setDebug(null)
+    if (autoRefineTimer.current) {
+      clearTimeout(autoRefineTimer.current)
+      autoRefineTimer.current = null
+    }
+  }
+
+  // Debounce window: every reject or reason-save resets the timer, so
+  // rapid rejections coalesce into a single AI turn instead of firing
+  // one per click. The timer's callback re-checks generating + reject
+  // count at fire time (closure-captured state at schedule time would
+  // be stale).
+  function scheduleAutoRefine() {
+    if (autoRefineTimer.current) clearTimeout(autoRefineTimer.current)
+    autoRefineTimer.current = setTimeout(() => {
+      autoRefineTimer.current = null
+      if (generatingRef.current) return
+      void handleSuggest({ autoRefresh: true })
+    }, 1000)
   }
 
   function appendSystemMessage(content: string) {
@@ -663,6 +727,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       // without a second click.
       setRationaleFocusId(id)
       setRejectedPoolOpen(true)
+      // Kick the debounced auto-refresh so the AI reacts to the
+      // rejection without requiring a manual Send. Rapid follow-up
+      // rejects reset the timer and coalesce into one turn.
+      scheduleAutoRefine()
     } else if (oldDecision === 'reject' && newDecision !== 'reject') {
       appendSystemMessage(`↩ Unrejected: ${target.suggestion.title}`)
     }
@@ -699,6 +767,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       return
     }
     setCandidateReason(candidateId, trimmed)
+    // The reason adds context the AI hasn't seen yet — schedule a
+    // refresh so it can react with the new information.
+    scheduleAutoRefine()
     try {
       const res = await recordRejectReason({ reason: trimmed })
       setReasonChips(res.data.common)
@@ -1541,7 +1612,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         <div className="row">
           <button
             className="ai-button"
-            onClick={handleSuggest}
+            onClick={() => void handleSuggest()}
             disabled={generating || !theme.trim()}
           >
             <span className="sparkle" aria-hidden>✨</span>
