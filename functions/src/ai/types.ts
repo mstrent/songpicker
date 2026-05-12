@@ -124,7 +124,21 @@ export interface SuggestResult {
   debug: AiDebug
 }
 
+/** A single piece of progress streamed back to the client as the AI
+ *  turn unfolds. Two shapes:
+ *   - `text`: a delta fragment of the model's prose reply, appended to
+ *     the assistant chat message as it arrives.
+ *   - `action`: a fully-decoded tool_use block ready to apply.
+ *  The full SuggestResult is still returned at the end of the call,
+ *  so non-streaming clients see the same shape they always did. */
+export type StreamChunk =
+  | { kind: 'text'; delta: string }
+  | { kind: 'action'; action: AiAction }
+
 export interface AiProvider {
   name: 'anthropic'
-  suggestSongs(req: SuggestRequest): Promise<SuggestResult>
+  suggestSongs(
+    req: SuggestRequest,
+    onChunk?: (chunk: StreamChunk) => void | Promise<void>,
+  ): Promise<SuggestResult>
 }

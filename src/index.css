@@ -1381,6 +1381,17 @@ textarea {
   border-image: var(--ai-gradient) 1;
   border-image-slice: 1;
 }
+.streaming-cursor {
+  display: inline-block;
+  margin-left: 1px;
+  color: var(--accent);
+  animation: streaming-cursor-blink 1s steps(2, end) infinite;
+}
+@keyframes streaming-cursor-blink {
+  to {
+    opacity: 0;
+  }
+}
 .plan-detail .suggest-form .chat-msg-system {
   align-self: center;
   text-align: center;

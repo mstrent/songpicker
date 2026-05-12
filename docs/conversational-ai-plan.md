@@ -156,19 +156,45 @@ responsibility — if the user rejects something, they can ask the AI
 for replacements in the next turn, or the AI can preemptively offer
 some in its reply. Same outcome, but visible and conversational.
 
-### Layer 5 (optional, larger) — Streaming + cache breakpoints
+### Layer 5 — Streaming + cache breakpoints (shipped)
 
-Once `assistantMessage` is real prose (could be a few sentences),
-latency matters.
+**Streaming.** `firebase-functions` v7 callables natively support
+streaming via `onCall(opts, async (req, res) => { res.sendChunk(…) })`
+plus the client's `httpsCallable(...).stream(payload)`. Each chunk is
+a tagged `StreamChunk`:
 
-- Switch `suggestSongs` from `onCall` to a streaming HTTPS endpoint.
-  Callable functions don't stream. Anthropic SDK supports
-  `messages.stream`.
-- Add `cache_control` breakpoints to the *user* turn prefix (theme +
-  structure + serviceOrder + planNotes) — not just the system prompt
-  as today (`anthropic.ts:22`). Conversational mode means many short
-  refining turns where this prefix barely changes; cache hits should
-  dominate.
+- `{ kind: 'text', delta }` — appended to the in-flight assistant
+  message as it arrives.
+- `{ kind: 'action', action }` — a fully-decoded tool call, applied
+  the moment its JSON arrives (proposes mint candidates, removes
+  flip `decision=reject`, reassigns update `assignedSlotItemId`).
+
+`anthropic.ts` switched from `messages.create` to `messages.stream`
+and iterates events: `content_block_start` opens a tool buffer,
+`content_block_delta` feeds either text deltas to `onChunk` or
+partial tool JSON into the buffer, `content_block_stop` finalises a
+tool by parsing its buffered JSON. The final aggregated message is
+still parsed once the stream completes so the `SuggestResponse`
+return value carries `actions` + `message` + `debug` for callers
+that prefer the non-streaming shape (and so the SPA can still pull
+`debug` off the resolved `data`).
+
+The SPA reserves an assistant message id up front, appends text
+deltas into its content in-place, applies each action chunk as it
+arrives (with the same dedupe + slot-mapping guards as before), and
+falls back to `final.message` if the stream produced no text. A
+typing-cursor (▍ blinking) renders on the last assistant message
+while `generating` is true; the chat log auto-scrolls to the bottom
+on every message update.
+
+**Cache breakpoints.** `buildUserMessage` now returns
+`{ stable, volatile }`. The user message goes to Anthropic as two
+content blocks; the stable block (theme + plan notes + structure +
+service order) carries `cache_control: { type: 'ephemeral' }`. The
+system prompt keeps its existing cache marker. Both breakpoints are
+no-ops below Anthropic's 1024-token minimum, but kick in for larger
+sessions and compound across turns. `flattenUserMessage` is used for
+the SPA debug panel.
 
 ## Sequencing
 

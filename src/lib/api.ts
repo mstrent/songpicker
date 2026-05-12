@@ -286,24 +286,37 @@ export interface ReassignAction {
 }
 export type AiAction = ProposeAction | RemoveAction | ReassignAction
 
+/** One progress chunk streamed as the AI turn unfolds. Text deltas
+ *  append to the in-progress assistant message; action chunks are
+ *  applied immediately so candidates / removals / reassignments
+ *  appear in the UI as soon as the model commits to them. */
+export type StreamChunk =
+  | { kind: 'text'; delta: string }
+  | { kind: 'action'; action: AiAction }
+
+export interface SuggestRequest {
+  theme: string
+  userMessage: string
+  planId?: string
+  serviceOrder?: string
+  planNotes?: string
+  history?: ConversationTurn[]
+  candidates?: AiCandidate[]
+  alreadyInPlan?: string[]
+}
+
+export interface SuggestResponse {
+  actions: AiAction[]
+  message: string
+  debug: AiDebug
+  structureSource: PromptSource
+  roleSource: PromptSource
+}
+
 export const suggestSongs = httpsCallable<
-  {
-    theme: string
-    userMessage: string
-    planId?: string
-    serviceOrder?: string
-    planNotes?: string
-    history?: ConversationTurn[]
-    candidates?: AiCandidate[]
-    alreadyInPlan?: string[]
-  },
-  {
-    actions: AiAction[]
-    message: string
-    debug: AiDebug
-    structureSource: PromptSource
-    roleSource: PromptSource
-  }
+  SuggestRequest,
+  SuggestResponse,
+  StreamChunk
 >(functions, 'suggestSongs')
 
 export interface PromptConfig {

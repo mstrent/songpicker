@@ -1,29 +1,54 @@
 import type { AiCandidate, SuggestRequest } from './types'
 
+/** Two-part user message: the `stable` half (theme + plan notes +
+ *  structure + service order) tends not to change between turns of
+ *  the same session, so it gets a cache_control breakpoint in the
+ *  Anthropic request. The `volatile` half (candidates + alreadyInPlan
+ *  + the user's latest typed input) is fresh every turn and lives
+ *  past the cache boundary. */
+export interface BuiltUserMessage {
+  stable: string
+  volatile: string
+}
+
 // Single source of truth for the user-side text the AI sees on the
 // current turn. The chat history (prior user/assistant turns) carries
 // the user's typed inputs and the AI's prose replies; this function
 // only assembles the LATEST turn, including a fresh snapshot of plan
 // state so the AI always reasons against current reality.
-export function buildUserMessage(req: SuggestRequest): string {
-  const parts: string[] = [`Theme: ${req.theme}`]
+export function buildUserMessage(req: SuggestRequest): BuiltUserMessage {
+  const stableParts: string[] = [`Theme: ${req.theme}`]
   if (req.planNotes && req.planNotes.trim()) {
-    parts.push(`Plan notes:\n${req.planNotes.trim()}`)
+    stableParts.push(`Plan notes:\n${req.planNotes.trim()}`)
   }
   if (req.structurePrompt && req.structurePrompt.trim()) {
-    parts.push(`Service structure: ${req.structurePrompt.trim()}`)
+    stableParts.push(`Service structure: ${req.structurePrompt.trim()}`)
   }
   if (req.serviceOrder && req.serviceOrder.trim()) {
-    parts.push(`Current service order:\n${req.serviceOrder.trim()}`)
+    stableParts.push(`Current service order:\n${req.serviceOrder.trim()}`)
   }
+
+  const volatileParts: string[] = []
   if (req.candidates && req.candidates.length > 0) {
-    parts.push(`Current candidates:\n${renderCandidates(req.candidates)}`)
+    volatileParts.push(`Current candidates:\n${renderCandidates(req.candidates)}`)
   }
   if (req.alreadyInPlan && req.alreadyInPlan.length > 0) {
-    parts.push(`Already in plan (don't re-suggest): ${req.alreadyInPlan.join(', ')}`)
+    volatileParts.push(
+      `Already in plan (don't re-suggest): ${req.alreadyInPlan.join(', ')}`,
+    )
   }
-  parts.push(`User request: ${req.userMessage || '(none)'}`)
-  return parts.join('\n')
+  volatileParts.push(`User request: ${req.userMessage || '(none)'}`)
+
+  return {
+    stable: stableParts.join('\n'),
+    volatile: volatileParts.join('\n'),
+  }
+}
+
+/** Flat-string form for the SPA debug panel and any caller that
+ *  doesn't care about the cache boundary. */
+export function flattenUserMessage(b: BuiltUserMessage): string {
+  return [b.stable, b.volatile].filter((s) => s).join('\n')
 }
 
 // One line per candidate, dense enough for the AI to scan and address

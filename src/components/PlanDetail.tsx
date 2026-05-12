@@ -12,6 +12,7 @@ import {
   savePlanTheme,
   searchSongs,
   suggestSongs,
+  type AiAction,
   type AiCandidate,
   type AiDebug,
   type CommonReason,
@@ -191,6 +192,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   // as a user override, polluting storage).
   const userTouchedTheme = useRef(false)
   const userTouchedNotes = useRef(false)
+  // Auto-scroll target: as text streams into the in-flight assistant
+  // message (or any new message lands), keep the log pinned to the
+  // bottom so new content stays visible without manual scrolling.
+  const chatLogRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -272,6 +277,15 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       cancelled = true
     }
   }, [])
+
+  // Pin the chat log to the bottom whenever messages change so
+  // streaming text + new turns stay in view. Cheap — only fires on
+  // messages array updates, which is the same trigger as new content.
+  useEffect(() => {
+    const el = chatLogRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+  }, [messages])
 
   // If the focused candidate is no longer rejected (un-rejected, cleared,
   // etc.), drop the focus so the rationale picker doesn't dangle on a
@@ -377,10 +391,12 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   }
 
   // Send the user's turn to the AI and apply whatever actions it
-  // chose. Each AI turn can mix propose / remove / reassign in any
-  // order, plus a prose reply. The reply goes in the chat log, every
-  // action emits its own system-message marker so the user can see
-  // exactly what the AI did.
+  // chose. Streams: text deltas append to the assistant chat message
+  // as the model types; each tool_use becomes an applied action plus
+  // a 🤖 system message the moment its JSON arrives. The final
+  // SuggestResponse still lands on `data` so we get debug payloads
+  // and the model's full prose reply (used as a fallback if the
+  // stream produced no text).
   async function handleSuggest() {
     if (!theme.trim() || generating) return
     setGenerating(true)
@@ -389,6 +405,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     void savePlanTheme({ planId, theme }).catch(() => {})
     patchCachedNotes(serviceTypeId, planId, notesText)
     void savePlanNotes({ planId, notes: notesText }).catch(() => {})
+
+    // Snapshot the typed input, then clear immediately so the user can
+    // start composing their next turn while the model is mid-stream.
+    const turnUserMessage = criteria
+    setCriteria('')
 
     try {
       const songSlotItems = (items ?? []).filter(isSongSlot)
@@ -426,11 +447,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         }
       })
 
-      // PCO-picked songs not represented in our candidate state —
-      // usually songs the user picked directly in Planning Center
-      // outside the app. They already show inline in the service
-      // order as "picked: X"; listing them here is the
-      // belt-and-suspenders don't-re-suggest hint.
       const committedSongIds = new Set(
         candidates
           .filter((c) => c.committedAt != null && c.song?.id)
@@ -443,76 +459,60 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         .map((it) => it.songTitle!)
 
       const serviceOrder = buildServiceOrderText(items)
-      // System messages fold into AI history as [event] lines so the
-      // model sees decisions in context (rejected with this reason,
-      // committed this song to that slot, etc.) alongside typed
-      // turns. Without this the model sees gaps where state changed
-      // off-screen and has to re-derive context.
       const history: ConversationTurn[] = messages.map((m) =>
         m.role === 'system'
           ? { role: 'user' as const, content: `[event] ${m.content}` }
           : { role: m.role, content: m.content },
       )
 
-      const res = await suggestSongs({
-        theme,
-        userMessage: criteria,
-        planId,
-        serviceOrder,
-        planNotes: notesText,
-        history,
-        candidates: aiCandidates,
-        alreadyInPlan,
-      })
-
-      setDebug(res.data.debug ?? null)
+      // Pre-allocate ids for the user + placeholder assistant
+      // messages so stream chunks can find the assistant message to
+      // append into. The assistant content starts empty and grows
+      // delta-by-delta.
+      const userMsgId = newCandidateId()
+      const assistantMsgId = newCandidateId()
       const turnTs = Date.now()
-      // Append the user + assistant chat turns first so they bracket
-      // any per-action system messages we're about to emit.
       setMessages((prev) => [
         ...prev,
         {
-          id: newCandidateId(),
+          id: userMsgId,
           role: 'user',
-          content: criteria.trim() || '(initial request)',
+          content: turnUserMessage.trim() || '(initial request)',
           timestamp: turnTs,
         },
         {
-          id: newCandidateId(),
+          id: assistantMsgId,
           role: 'assistant',
-          content: res.data.message || '(no reply)',
+          content: '',
           timestamp: turnTs + 1,
         },
       ])
-      setCriteria('')
 
-      // Apply each action in order. We splat new candidates straight
-      // into state and kick off match lookups; remove/reassign go
-      // through setCandidates updaters so concurrent state changes
-      // (rare, since the user can't interact during generating) don't
-      // clobber the AI's deltas.
-      const newOnes: CandidateMatch[] = []
-      const removalLogs: string[] = []
-      const reassignLogs: string[] = []
-      const titleById = new Map(candidates.map((c) => [c.id, c.suggestion.title]))
-      // Defensive dedupe — the system prompt tells the AI not to
-      // re-propose anything already in candidates or alreadyInPlan,
-      // but enforce it client-side so a slip-up doesn't pollute the
-      // pool. Case-insensitive. Also dedupes within a single turn.
+      // Per-turn dedupe set used while applying propose actions —
+      // case-insensitive against existing candidates + alreadyInPlan,
+      // also dedupes within the same turn.
       const existingTitlesLower = new Set<string>([
         ...candidates.map((c) => c.suggestion.title.toLowerCase()),
         ...alreadyInPlan.map((t) => t.toLowerCase()),
       ])
-      const now = Date.now()
+      // Title lookup for system messages on remove/reassign actions.
+      // Built once from the pre-turn candidate list; new candidates
+      // proposed in this same turn get folded in as they arrive.
+      const titleById = new Map(
+        candidates.map((c): [string, string] => [c.id, c.suggestion.title]),
+      )
 
-      for (const action of res.data.actions) {
+      let streamedText = ''
+
+      const applyAction = (action: AiAction) => {
+        const now = Date.now()
         if (action.kind === 'propose') {
           const minted: CandidateMatch[] = []
           for (const s of action.suggestions) {
             const key = s.title.toLowerCase()
             if (existingTitlesLower.has(key)) continue
             existingTitlesLower.add(key)
-            minted.push({
+            const c: CandidateMatch = {
               id: newCandidateId(),
               suggestion: s,
               matchStatus: 'checking',
@@ -522,9 +522,17 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
               committedAt: null,
               priorSlotTitle: null,
               rejectReason: null,
-            })
+            }
+            minted.push(c)
+            titleById.set(c.id, c.suggestion.title)
           }
-          newOnes.push(...minted)
+          if (minted.length > 0) {
+            setCandidates((prev) => [...prev, ...minted])
+            minted.forEach(searchAndAttachSong)
+            appendSystemMessage(
+              `🤖 AI proposed ${minted.length} new song${minted.length === 1 ? '' : 's'}`,
+            )
+          }
         } else if (action.kind === 'remove') {
           setCandidates((prev) =>
             prev.map((c) =>
@@ -536,12 +544,13 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           const titles = action.ids
             .map((id) => titleById.get(id) ?? `(unknown ${id})`)
             .join(', ')
-          removalLogs.push(
+          appendSystemMessage(
             `🤖 AI rejected ${titles} — reason: "${action.reason}"`,
           )
+          setRejectedPoolOpen(true)
         } else if (action.kind === 'reassign') {
           const targetItemId = itemIdBySlotIndex.get(action.slotIndex) ?? null
-          if (targetItemId == null) continue
+          if (targetItemId == null) return
           setCandidates((prev) =>
             prev.map((c) =>
               c.id === action.candidateId && !c.committedAt
@@ -550,30 +559,51 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             ),
           )
           const title = titleById.get(action.candidateId) ?? '(candidate)'
-          reassignLogs.push(
+          appendSystemMessage(
             `🤖 AI moved "${title}" to song slot ${action.slotIndex}`,
           )
         }
       }
 
-      if (newOnes.length > 0) {
-        setCandidates((prev) => [...prev, ...newOnes])
-        newOnes.forEach(searchAndAttachSong)
+      const { stream, data } = await suggestSongs.stream({
+        theme,
+        userMessage: turnUserMessage,
+        planId,
+        serviceOrder,
+        planNotes: notesText,
+        history,
+        candidates: aiCandidates,
+        alreadyInPlan,
+      })
+
+      for await (const chunk of stream) {
+        if (chunk.kind === 'text') {
+          streamedText += chunk.delta
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? { ...m, content: m.content + chunk.delta }
+                : m,
+            ),
+          )
+        } else if (chunk.kind === 'action') {
+          applyAction(chunk.action)
+        }
       }
-      // System messages for AI-driven changes. Emitted after the
-      // user/assistant chat turns so the chronology reads top-to-
-      // bottom: user typed → AI replied → AI did X, Y, Z.
-      if (newOnes.length > 0) {
-        appendSystemMessage(
-          `🤖 AI proposed ${newOnes.length} new song${newOnes.length === 1 ? '' : 's'}`,
+
+      const final = await data
+      setDebug(final.debug ?? null)
+      // If streaming produced no text but the callable's fallback
+      // synthesized a status line, drop it into the placeholder so the
+      // chat log isn't blank. Also handles the unlikely case where the
+      // client used the stream but never got any text deltas.
+      if (!streamedText.trim() && final.message) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId ? { ...m, content: final.message } : m,
+          ),
         )
       }
-      for (const log of removalLogs) appendSystemMessage(log)
-      for (const log of reassignLogs) appendSystemMessage(log)
-      // If the AI's reject pushed any rejected card into the pool,
-      // pop it open so the user sees the change without an extra
-      // click — same UX as a user-driven reject.
-      if (removalLogs.length > 0) setRejectedPoolOpen(true)
     } catch (e) {
       setGenerateError((e as Error).message)
     } finally {
@@ -1444,8 +1474,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           />
         </label>
         {messages.length > 0 && (
-          <div className="chat-log">
-            {messages.map((m) => {
+          <div className="chat-log" ref={chatLogRef}>
+            {messages.map((m, idx) => {
               if (m.role === 'system') {
                 return (
                   <div key={m.id} className="chat-msg chat-msg-system">
@@ -1453,6 +1483,15 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                   </div>
                 )
               }
+              // The in-flight assistant message gets a typing cursor
+              // so the user can see it's still being generated even
+              // when the model pauses between tokens. We detect it as
+              // the last message in the log while generating is true
+              // and the role is assistant.
+              const isStreaming =
+                generating &&
+                m.role === 'assistant' &&
+                idx === messages.length - 1
               return (
                 <div key={m.id} className={`chat-msg chat-msg-${m.role}`}>
                   <span className="chat-role">
@@ -1464,7 +1503,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       </>
                     )}
                   </span>
-                  <div className="chat-content">{m.content}</div>
+                  <div className="chat-content">
+                    {m.content}
+                    {isStreaming && <span className="streaming-cursor" aria-hidden>▍</span>}
+                  </div>
                 </div>
               )
             })}

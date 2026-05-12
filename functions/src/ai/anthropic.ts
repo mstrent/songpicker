@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { buildUserMessage } from './userMessage'
+import { buildUserMessage, flattenUserMessage } from './userMessage'
 import type {
   AiAction,
   AiProvider,
@@ -7,6 +7,7 @@ import type {
   ReassignAction,
   RemoveAction,
   SongSuggestion,
+  StreamChunk,
   SuggestRequest,
   SuggestResult,
 } from './types'
@@ -95,31 +96,93 @@ export class AnthropicProvider implements AiProvider {
     this.client = new Anthropic({ apiKey })
   }
 
-  async suggestSongs(req: SuggestRequest): Promise<SuggestResult> {
-    const userMessage = buildUserMessage(req)
+  async suggestSongs(
+    req: SuggestRequest,
+    onChunk?: (chunk: StreamChunk) => void | Promise<void>,
+  ): Promise<SuggestResult> {
+    const built = buildUserMessage(req)
     const systemPrompt = req.systemPrompt
     const history = req.history ?? []
-    const res = await this.client.messages.create({
+
+    // Cache_control breakpoints: one on the system prompt (constant per
+    // session), one on the stable half of the current user turn (theme
+    // + notes + structure + service order — these change rarely
+    // mid-session). Anthropic caches up through each breakpoint and
+    // serves the matching prefix on subsequent turns. Below the 1024-
+    // token cache minimum the markers are no-ops; above it, savings
+    // compound across a conversation.
+    const params: Anthropic.MessageCreateParams = {
       model: MODEL,
       max_tokens: 4000,
       tools: TOOLS,
-      // Free the model to chat, call tools, or both. Forcing tool use
-      // every turn would prevent purely-conversational replies.
       tool_choice: { type: 'auto' },
       system: [
         { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
       ],
       messages: [
         ...history.map((t) => ({ role: t.role, content: t.content })),
-        { role: 'user' as const, content: userMessage },
+        {
+          role: 'user' as const,
+          content: [
+            {
+              type: 'text' as const,
+              text: built.stable,
+              cache_control: { type: 'ephemeral' as const },
+            },
+            { type: 'text' as const, text: built.volatile },
+          ],
+        },
       ],
-    })
+    }
 
-    const { actions, message, rawActions } = parseResponse(res.content)
+    // Stream the response so the SPA can show the AI's prose reply as
+    // it types and apply each tool_use the moment it completes. The
+    // final aggregated message is still parsed for the return value,
+    // so non-streaming callers behave the same.
+    const stream = this.client.messages.stream(params)
+
+    // Buffer partial tool_use inputs keyed by content-block index;
+    // input_json_delta events stream in as fragments and we have to
+    // concatenate before parsing.
+    const toolBuffers = new Map<number, { name: string; json: string }>()
+
+    for await (const event of stream) {
+      if (event.type === 'content_block_start') {
+        if (event.content_block.type === 'tool_use') {
+          toolBuffers.set(event.index, {
+            name: event.content_block.name,
+            json: '',
+          })
+        }
+      } else if (event.type === 'content_block_delta') {
+        if (event.delta.type === 'text_delta') {
+          if (onChunk) {
+            await onChunk({ kind: 'text', delta: event.delta.text })
+          }
+        } else if (event.delta.type === 'input_json_delta') {
+          const buf = toolBuffers.get(event.index)
+          if (buf) buf.json += event.delta.partial_json
+        }
+      } else if (event.type === 'content_block_stop') {
+        const buf = toolBuffers.get(event.index)
+        if (buf) {
+          const action = safeBuildAction(buf.name, buf.json)
+          if (action && onChunk) await onChunk({ kind: 'action', action })
+        }
+      }
+    }
+
+    const finalMessage = await stream.finalMessage()
+    const { actions, message, rawActions } = parseResponse(finalMessage.content)
     return {
       actions,
       message: message || fallbackMessage(actions),
-      debug: { model: MODEL, systemPrompt, userMessage, rawActions },
+      debug: {
+        model: MODEL,
+        systemPrompt,
+        userMessage: flattenUserMessage(built),
+        rawActions,
+      },
     }
   }
 }
@@ -130,11 +193,10 @@ interface ParseOutput {
   rawActions: unknown[]
 }
 
-// Anthropic returns content as a mix of `text` and `tool_use` blocks.
-// We collect text into the prose reply and translate tool_use blocks
-// into our AiAction discriminated union. Unknown tool names and
-// malformed inputs are silently skipped so a single bad block doesn't
-// blank the whole turn.
+// Final-message parsing. Same code path the non-streaming version used
+// to take — runs once we've consumed the stream so the SPA can be given
+// a complete actions[] in the callable's return value too (in addition
+// to the streamed per-action chunks).
 function parseResponse(content: Anthropic.ContentBlock[]): ParseOutput {
   const textChunks: string[] = []
   const actions: AiAction[] = []
@@ -155,6 +217,19 @@ function parseResponse(content: Anthropic.ContentBlock[]): ParseOutput {
     actions,
     message: textChunks.join('\n\n'),
     rawActions,
+  }
+}
+
+function safeBuildAction(name: string, partialJson: string): AiAction | null {
+  // Empty input is valid for tools with no required fields, but our
+  // three all require at least one field so empty json never produces
+  // a usable action.
+  if (!partialJson.trim()) return null
+  try {
+    const input = JSON.parse(partialJson)
+    return toAction(name, input)
+  } catch {
+    return null
   }
 }
 

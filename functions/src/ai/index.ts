@@ -17,6 +17,7 @@ export type {
   ReassignAction,
   RemoveAction,
   SongSuggestion,
+  StreamChunk,
   SuggestRequest,
   SuggestResult,
 } from './types'

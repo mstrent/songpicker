@@ -3,7 +3,7 @@ import { setGlobalOptions } from 'firebase-functions/v2'
 import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/https'
 
 import { getAiProvider } from './ai'
-import type { AiCandidate } from './ai/types'
+import type { AiCandidate, StreamChunk } from './ai/types'
 import { PcoClient } from './pco/client'
 import { pMap } from './pco/concurrency'
 import {
@@ -217,9 +217,17 @@ export const searchSongs = onCall(async (req) => {
   return { songs }
 })
 
-export const suggestSongs = onCall(
+// Streaming callable: streams text deltas and tool actions as the AI
+// produces them, and resolves with the full SuggestResult for callers
+// that prefer the non-streaming shape (or for the final state the SPA
+// wants regardless — debug payload, structure/role source).
+export const suggestSongs = onCall<
+  unknown,
+  Promise<unknown>,
+  StreamChunk
+>(
   { secrets: [ANTHROPIC_API_KEY] },
-  async (req) => {
+  async (req, res) => {
     const { uid } = requireAllowed(req)
     const {
       theme,
@@ -248,17 +256,28 @@ export const suggestSongs = onCall(
     ])
 
     const ai = getAiProvider(ANTHROPIC_API_KEY.value())
-    const result = await ai.suggestSongs({
-      theme,
-      userMessage: userMessage ?? '',
-      structurePrompt: structure.effective.value,
-      systemPrompt: composeSystemPrompt(role.effective.value),
-      serviceOrder,
-      planNotes,
-      candidates,
-      alreadyInPlan,
-      history,
-    })
+    // sendChunk is a no-op when the client called the regular (non-
+    // streaming) callable, per the firebase-functions docs — so we can
+    // always pass the onChunk through without checking acceptsStreaming.
+    const onChunk = res
+      ? async (chunk: StreamChunk) => {
+          await res.sendChunk(chunk)
+        }
+      : undefined
+    const result = await ai.suggestSongs(
+      {
+        theme,
+        userMessage: userMessage ?? '',
+        structurePrompt: structure.effective.value,
+        systemPrompt: composeSystemPrompt(role.effective.value),
+        serviceOrder,
+        planNotes,
+        candidates,
+        alreadyInPlan,
+        history,
+      },
+      onChunk,
+    )
     return {
       actions: result.actions,
       message: result.message,
