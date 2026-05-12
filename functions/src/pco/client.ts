@@ -488,36 +488,26 @@ export class PcoClient {
     return { arrangementId, keyId: firstKeyId, keyName }
   }
 
-  // PATCH every item in `orderedItemIds` with its new 1-based sequence
-  // number. PCO Services orders plan items by the `sequence` attribute,
-  // and renumbering all of them is the simplest deterministic way to
-  // commit a reorder — gaps and ties get resolved unambiguously.
-  // Bounded concurrency keeps us well under the 100-req/20s rate limit
-  // for typical plan sizes (≤25 items).
+  // Reorder all items in a plan in one request. PCO's `sequence`
+  // attribute on Item is read-only via PATCH ("Forbidden Attribute" —
+  // we tried). The supported endpoint is the dedicated action
+  // POST /service_types/{stid}/plans/{pid}/item_reorder with a
+  // PlanItemReorder body whose attributes.sequence array lists the
+  // item IDs in the desired order.
   async reorderPlanItems(
     serviceTypeId: string,
     planId: string,
     orderedItemIds: string[],
   ): Promise<void> {
-    const tasks = orderedItemIds.map((itemId, idx) => ({ itemId, sequence: idx + 1 }))
-    await import('./concurrency').then(({ pMap }) =>
-      pMap(
-        tasks,
-        async ({ itemId, sequence }) => {
-          const body = JSON.stringify({
-            data: {
-              type: 'Item',
-              id: itemId,
-              attributes: { sequence },
-            },
-          })
-          await this.fetch(
-            `/service_types/${serviceTypeId}/plans/${planId}/items/${itemId}`,
-            { method: 'PATCH', body },
-          )
-        },
-        4,
-      ),
+    const body = JSON.stringify({
+      data: {
+        type: 'PlanItemReorder',
+        attributes: { sequence: orderedItemIds },
+      },
+    })
+    await this.fetch(
+      `/service_types/${serviceTypeId}/plans/${planId}/item_reorder`,
+      { method: 'POST', body },
     )
   }
 

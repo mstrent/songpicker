@@ -938,8 +938,16 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
               const draggable = isSong && filled
               const isCommitTarget =
                 dragKind === 'candidate' && isSong && !filled
+              // Only song slots (filled OR empty) accept reorder drops —
+              // dropping onto a Welcome / Announcements / Sermon item
+              // would be confusing because those aren't the "spots"
+              // worship leaders think of as positions to slot songs
+              // into.
               const isReorderTarget =
-                dragKind === 'slot' && dragSourceId !== null && dragSourceId !== it.id
+                dragKind === 'slot' &&
+                dragSourceId !== null &&
+                dragSourceId !== it.id &&
+                isSong
               const isDropTarget = isCommitTarget || isReorderTarget
               const isBeingDragged =
                 dragKind === 'slot' && dragSourceId === it.id
