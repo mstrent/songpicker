@@ -174,56 +174,113 @@ export class AnthropicProvider implements AiProvider {
       ],
     }
 
+    // Track whether any chunks have actually streamed back. Used to
+    // decide whether a content-filter retry is safe: if we already
+    // forwarded text to the client, retrying would double-emit it.
+    let chunksSent = 0
+    const trackedOnChunk = onChunk
+      ? async (c: StreamChunk) => {
+          chunksSent += 1
+          await onChunk(c)
+        }
+      : undefined
+
+    const runStream = async (): Promise<SuggestResult> => {
+      const stream = this.client.messages.stream(params)
+      // Buffer partial tool_use inputs keyed by content-block index;
+      // input_json_delta events stream in as fragments and we have to
+      // concatenate before parsing.
+      const toolBuffers = new Map<number, { name: string; json: string }>()
+      for await (const event of stream) {
+        if (event.type === 'content_block_start') {
+          if (event.content_block.type === 'tool_use') {
+            toolBuffers.set(event.index, {
+              name: event.content_block.name,
+              json: '',
+            })
+          }
+        } else if (event.type === 'content_block_delta') {
+          if (event.delta.type === 'text_delta') {
+            if (trackedOnChunk) {
+              await trackedOnChunk({ kind: 'text', delta: event.delta.text })
+            }
+          } else if (event.delta.type === 'input_json_delta') {
+            const buf = toolBuffers.get(event.index)
+            if (buf) buf.json += event.delta.partial_json
+          }
+        } else if (event.type === 'content_block_stop') {
+          const buf = toolBuffers.get(event.index)
+          if (buf) {
+            const action = safeBuildAction(buf.name, buf.json)
+            if (action && trackedOnChunk)
+              await trackedOnChunk({ kind: 'action', action })
+          }
+        }
+      }
+      const finalMessage = await stream.finalMessage()
+      const { actions, message, rawActions } = parseResponse(finalMessage.content)
+      return {
+        actions,
+        message: message || fallbackMessage(actions),
+        debug: {
+          model: MODEL,
+          systemPrompt,
+          userMessage: flattenUserMessage(built),
+          rawActions,
+        },
+      }
+    }
+
     // Stream the response so the SPA can show the AI's prose reply as
     // it types and apply each tool_use the moment it completes. The
     // final aggregated message is still parsed for the return value,
     // so non-streaming callers behave the same.
-    const stream = this.client.messages.stream(params)
-
-    // Buffer partial tool_use inputs keyed by content-block index;
-    // input_json_delta events stream in as fragments and we have to
-    // concatenate before parsing.
-    const toolBuffers = new Map<number, { name: string; json: string }>()
-
-    for await (const event of stream) {
-      if (event.type === 'content_block_start') {
-        if (event.content_block.type === 'tool_use') {
-          toolBuffers.set(event.index, {
-            name: event.content_block.name,
-            json: '',
-          })
-        }
-      } else if (event.type === 'content_block_delta') {
-        if (event.delta.type === 'text_delta') {
-          if (onChunk) {
-            await onChunk({ kind: 'text', delta: event.delta.text })
+    //
+    // Retry once on content-filter errors. Anthropic's output filter
+    // is non-deterministic — a second generation of the same prompt
+    // often passes when the first fails. Only safe to retry when no
+    // chunks have streamed yet, otherwise the client would see
+    // duplicated text. Content-filter blocks normally trigger before
+    // the first delta, so the retry path is the common case.
+    try {
+      return await runStream()
+    } catch (e) {
+      if (chunksSent === 0 && isContentFilterError(e)) {
+        console.warn(
+          '[anthropic] content filter blocked output; retrying once',
+        )
+        try {
+          return await runStream()
+        } catch (e2) {
+          if (isContentFilterError(e2)) {
+            throw new Error(
+              "Anthropic's safety filter blocked the response twice in a row. This is usually transient — try again, or rephrase your request.",
+            )
           }
-        } else if (event.delta.type === 'input_json_delta') {
-          const buf = toolBuffers.get(event.index)
-          if (buf) buf.json += event.delta.partial_json
-        }
-      } else if (event.type === 'content_block_stop') {
-        const buf = toolBuffers.get(event.index)
-        if (buf) {
-          const action = safeBuildAction(buf.name, buf.json)
-          if (action && onChunk) await onChunk({ kind: 'action', action })
+          throw e2
         }
       }
-    }
-
-    const finalMessage = await stream.finalMessage()
-    const { actions, message, rawActions } = parseResponse(finalMessage.content)
-    return {
-      actions,
-      message: message || fallbackMessage(actions),
-      debug: {
-        model: MODEL,
-        systemPrompt,
-        userMessage: flattenUserMessage(built),
-        rawActions,
-      },
+      throw e
     }
   }
+}
+
+// Anthropic's content filter surfaces in a few wrapper shapes
+// depending on whether the block hits the request or the streaming
+// output. Match by message text since the SDK doesn't expose a
+// specific error class for this. We unwrap `cause` recursively
+// because the stream SDK wraps the SSE error in an APIConnectionError.
+function isContentFilterError(e: unknown): boolean {
+  if (!e || typeof e !== 'object') return false
+  const err = e as { message?: string; cause?: unknown }
+  const msg = err.message ?? ''
+  if (/content[ _-]?filter/i.test(msg) || /blocked by content/i.test(msg)) {
+    return true
+  }
+  if (err.cause && err.cause !== err) {
+    return isContentFilterError(err.cause)
+  }
+  return false
 }
 
 interface ParseOutput {

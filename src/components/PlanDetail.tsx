@@ -481,6 +481,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     const turnUserMessage = autoRefresh ? '' : criteria
     if (!autoRefresh) setCriteria('')
 
+    // Hoisted so the catch block can find the placeholder it inserted
+    // (when something goes wrong before the stream produces text) and
+    // replace its content with an inline error notice.
+    let assistantMsgId: string | null = null
+
     try {
       const songSlotItems = (items ?? []).filter(isSongSlot)
       const totalSongSlots = songSlotItems.length
@@ -540,7 +545,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       // prepend a user message; auto-refresh prepends a system
       // marker instead so the chat log shows the AI is reacting on
       // its own rather than to a (nonexistent) typed turn.
-      const assistantMsgId = newCandidateId()
+      const newAssistantMsgId = newCandidateId()
+      assistantMsgId = newAssistantMsgId
       const turnTs = Date.now()
       const turnPrefix: SessionMessage = autoRefresh
         ? {
@@ -559,7 +565,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         ...prev,
         turnPrefix,
         {
-          id: assistantMsgId,
+          id: newAssistantMsgId,
           role: 'assistant',
           content: '',
           timestamp: turnTs + 1,
@@ -737,7 +743,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           streamedText += chunk.delta
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === assistantMsgId
+              m.id === newAssistantMsgId
                 ? { ...m, content: m.content + chunk.delta }
                 : m,
             ),
@@ -756,7 +762,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       if (!streamedText.trim() && final.message) {
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === assistantMsgId ? { ...m, content: final.message } : m,
+            m.id === newAssistantMsgId ? { ...m, content: final.message } : m,
           ),
         )
       }
@@ -790,7 +796,22 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         }
       }
     } catch (e) {
-      setGenerateError((e as Error).message)
+      const errMsg = (e as Error).message
+      setGenerateError(errMsg)
+      // Replace the empty assistant placeholder with an inline error
+      // message so the chat log doesn't leave a blank AI bubble next
+      // to the error notice. Only when nothing streamed in — if
+      // partial text arrived, keep it.
+      const placeholderId = assistantMsgId
+      if (placeholderId) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === placeholderId && !m.content.trim()
+              ? { ...m, content: `⚠ ${errMsg}` }
+              : m,
+          ),
+        )
+      }
     } finally {
       setGenerating(false)
       // This turn served whatever signals had accumulated — reset

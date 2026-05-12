@@ -266,27 +266,41 @@ export const suggestSongs = onCall<
           await res.sendChunk(chunk)
         }
       : undefined
-    const result = await ai.suggestSongs(
-      {
-        theme,
-        userMessage: userMessage ?? '',
-        structurePrompt: structure.effective.value,
-        systemPrompt: composeSystemPrompt(role.effective.value),
-        serviceOrder,
-        planNotes,
-        candidates,
-        alreadyInPlan,
-        history,
-        autoRefresh,
-      },
-      onChunk,
-    )
-    return {
-      actions: result.actions,
-      message: result.message,
-      debug: result.debug,
-      structureSource: structure.effective.source,
-      roleSource: role.effective.source,
+    try {
+      const result = await ai.suggestSongs(
+        {
+          theme,
+          userMessage: userMessage ?? '',
+          structurePrompt: structure.effective.value,
+          systemPrompt: composeSystemPrompt(role.effective.value),
+          serviceOrder,
+          planNotes,
+          candidates,
+          alreadyInPlan,
+          history,
+          autoRefresh,
+        },
+        onChunk,
+      )
+      return {
+        actions: result.actions,
+        message: result.message,
+        debug: result.debug,
+        structureSource: structure.effective.source,
+        roleSource: role.effective.source,
+      }
+    } catch (e) {
+      // Surface AI errors as a clean HttpsError instead of letting
+      // firebase-functions wrap them as "INTERNAL", which is what the
+      // client sees and is useless to a user. The anthropic provider
+      // already rewrites content-filter blocks into a friendly message;
+      // anything else falls through with its raw message.
+      const err = e as Error
+      console.error('[suggestSongs] failed:', err)
+      throw new HttpsError(
+        'aborted',
+        err.message || 'The AI request failed unexpectedly',
+      )
     }
   },
 )
