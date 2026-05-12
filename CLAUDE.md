@@ -97,16 +97,15 @@ concatenated to the resolved role before being sent as the model's
 system message — never surfaced to users via the persona editor, only
 visible read-only on the Admin page.
 
-## AI provider preference
+## AI provider
 
-- Default: **Anthropic Claude Sonnet 4.6** (`AI_PROVIDER=anthropic`).
-- Gemini's free tier is denied to Google Workspace accounts (the
-  account that pays for Firebase) — `limit: 0` on the free-tier
-  metric, 403 on premium models. Don't propose Gemini as a free path
-  for Workspace users.
-- Each provider's `suggestSongs` returns a shared `debug` shape via
-  `buildUserMessage` so the SPA's debug panel always reflects what
-  was actually sent.
+- Anthropic Claude Sonnet 4.6, via `@anthropic-ai/sdk`. Single
+  provider — we used to abstract over Gemini and OpenAI too, but
+  trimmed those out. The `AiProvider` interface in
+  `functions/src/ai/types.ts` is kept so a future provider can slot
+  in, but `getAiProvider()` just returns `AnthropicProvider`.
+- `suggestSongs` returns a `debug` payload via `buildUserMessage` so
+  the SPA's debug panel always reflects what was actually sent.
 
 ## Dev workflow
 
@@ -119,12 +118,11 @@ visible read-only on the Admin page.
 - Emulator state is persisted to `.emulator-data/` via import +
   export-on-exit. Gitignored.
 - `functions/.env` for emulator-time `defineString` params
-  (`ALLOWED_EMAIL`, `AI_PROVIDER`, `ADMIN_EMAILS`,
-  `INCLUDED_SERVICE_TYPES`). Pushes to prod on `npm run deploy`.
+  (`ALLOWED_EMAIL`, `ADMIN_EMAILS`, `INCLUDED_SERVICE_TYPES`). Pushes
+  to prod on `npm run deploy`.
 - `functions/.secret.local` for emulator-time secret values
-  (`PCO_APP_ID`, `PCO_SECRET`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`).
-  Bootstrap from prod with
-  `firebase functions:secrets:access <NAME>`. Gitignored.
+  (`PCO_APP_ID`, `PCO_SECRET`, `ANTHROPIC_API_KEY`). Bootstrap from
+  prod with `firebase functions:secrets:access <NAME>`. Gitignored.
 
 ## SPA patterns
 

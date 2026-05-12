@@ -48,9 +48,9 @@ title, arrangement, and key all set in one go.
 - **Auth**: Firebase Auth — Google sign-in with single-email allowlist
   enforced both client-side (Firestore rules) and server-side
   (`ALLOWED_EMAIL` param in Cloud Functions).
-- **AI**: provider-agnostic. Anthropic Claude Sonnet 4.6 (default),
-  Google Gemini, and OpenAI GPT all implement a shared
-  `suggestSongs` interface; switch via the `AI_PROVIDER` param.
+- **AI**: Anthropic Claude Sonnet 4.6. The `AiProvider` interface
+  in `functions/src/ai/types.ts` is kept so another provider can
+  slot in later, but only Anthropic is wired up today.
 - **Planning Center**: Services API v2 with a per-user Personal
   Access Token.
 
@@ -83,8 +83,9 @@ All hosted on Firebase free tier.
 │       ├── pco/               PCO API client (plain fetch, no SDK):
 │       │                      client, credentials, concurrency (rate-
 │       │                      limited pMap), song-slot heuristics, types
-│       └── ai/                Provider-agnostic AI: anthropic, gemini,
-│                              openai, shared types + buildUserMessage
+│       └── ai/                Anthropic provider + shared types +
+│                              buildUserMessage (AiProvider abstraction
+│                              kept for future swap-in)
 ├── firebase.json              Hosting + Functions + Firestore + Emulators
 ├── firestore.rules            Owner-email gate; admin-SDK-only docs
 ├── firestore.indexes.json
@@ -103,7 +104,7 @@ All hosted on Firebase free tier.
 | `listPlans`, `getPlanContext` | Plan list + detail (notes, items, leaders) |
 | `savePlanTheme`, `savePlanNotes` | Auto-saved per-plan overrides |
 | `searchSongs` | Song-library lookup (with parenthetical-stripped retry) |
-| `suggestSongs` | Provider-agnostic AI suggestions |
+| `suggestSongs` | AI suggestions (Claude Sonnet 4.6) |
 | `getPromptConfig`, `savePromptConfig` | Per-user persona + service-flow prompts |
 | `getAdminStatus`, `getAdminPromptConfig`, `saveAdminPromptConfig` | Admin global defaults |
 | `loadSession`, `saveSession` | Per-plan candidate pool + AI turn log |
@@ -164,17 +165,14 @@ Set the non-secret params for the Functions runtime in `functions/.env`:
 
 ```
 ALLOWED_EMAIL=you@example.com
-AI_PROVIDER=anthropic                  # or "gemini" or "openai"
 ADMIN_EMAILS=you@example.com           # comma-separated; empty disables /#admin
 INCLUDED_SERVICE_TYPES=Sunday Services # comma-separated; empty = include all
 ```
 
-Set the AI key for whichever provider you picked (only one is required):
+Set the Anthropic API key:
 
 ```bash
 firebase functions:secrets:set ANTHROPIC_API_KEY
-firebase functions:secrets:set GEMINI_API_KEY
-firebase functions:secrets:set OPENAI_API_KEY
 ```
 
 > **Planning Center credentials are per-user, not global.** After

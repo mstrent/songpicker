@@ -144,6 +144,10 @@ export interface PersistedCandidate {
    *  uncommitted candidates and on candidates persisted before this
    *  field existed. */
   priorSlotTitle: string | null
+  /** Free-text reason the user gave when rejecting this candidate.
+   *  Null on un-rejected candidates and on rejected ones with no
+   *  reason provided. Surfaced to the AI on the next suggest call. */
+  rejectReason: string | null
 }
 
 export interface SessionMessage {
@@ -243,23 +247,38 @@ export interface ConversationTurn {
   content: string
 }
 
+/** Structured candidate snapshot sent to the AI on every suggest call.
+ *  Matches AiCandidate in functions/src/ai/types.ts. The AI sees the
+ *  whole pool (pending, shortlisted, rejected, committed) with stable
+ *  ids so it can reason about specific entries rather than inferring
+ *  state from bare title arrays. */
+export interface AiCandidate {
+  id: string
+  title: string
+  author?: string
+  chorusSnippet?: string
+  slots?: string[]
+  decision: Decision
+  rejectReason?: string
+  assignedSlot?: { index: number; total: number }
+  committed?: boolean
+}
+
 export const suggestSongs = httpsCallable<
   {
     theme: string
     userMessage: string
-    exclude?: string[]
     minCount?: number
     maxCount?: number
     planId?: string
     serviceOrder?: string
     planNotes?: string
     history?: ConversationTurn[]
-    shortlistedTitles?: string[]
-    rejectedTitles?: string[]
+    candidates?: AiCandidate[]
+    alreadyInPlan?: string[]
   },
   {
     suggestions: SongSuggestion[]
-    provider: string
     debug: AiDebug
     assistantMessage: string
     structureSource: PromptSource
@@ -309,3 +328,33 @@ export const commitPlanItems = httpsCallable<
   { serviceTypeId: string; planId: string; items: CommitItem[] },
   { created: number }
 >(functions, 'commitPlanItems')
+
+/** A reason chip in the global rejection-reasons list. `source` tracks
+ *  where the chip came from: 'seed' (baked-in defaults), 'manual'
+ *  (typed by a user), 'ai' (distilled from freeform reasons). */
+export interface CommonReason {
+  text: string
+  addedAt: number
+  source: 'manual' | 'ai' | 'seed'
+}
+
+export interface RejectionReasonsView {
+  common: CommonReason[]
+  freeformSinceDistill: number
+  lastDistilledAt: number
+}
+
+export const getRejectionReasons = httpsCallable<void, RejectionReasonsView>(
+  functions,
+  'getRejectionReasons',
+)
+
+export const recordRejectReason = httpsCallable<
+  { reason: string },
+  RejectionReasonsView
+>(functions, 'recordRejectReason')
+
+export const removeCommonReason = httpsCallable<
+  { text: string },
+  RejectionReasonsView
+>(functions, 'removeCommonReason')

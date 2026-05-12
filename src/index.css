@@ -2075,6 +2075,145 @@ textarea {
   background: var(--accent-soft);
 }
 
+/* Rationale picker — chip row + freeform textarea, rendered at the top
+   of the rejected pool when a candidate is in focus. Sets itself apart
+   visually so the user immediately notices it after hitting Reject. */
+.rationale-picker {
+  margin-top: 0.7rem;
+  padding: 0.7rem 0.85rem;
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  display: grid;
+  gap: 0.55rem;
+}
+.rationale-header {
+  font-size: 0.85rem;
+  color: var(--fg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+.rationale-skip {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.rationale-skip:hover {
+  color: var(--fg);
+}
+.rationale-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.rationale-chip {
+  display: inline-flex;
+  align-items: stretch;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  overflow: hidden;
+  font-size: 0.8rem;
+}
+.rationale-chip-text {
+  background: transparent;
+  border: none;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+  color: var(--fg);
+  font-weight: 500;
+}
+.rationale-chip-text:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.rationale-chip-remove {
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--border);
+  padding: 0 0.5rem;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1;
+}
+.rationale-chip-remove:hover {
+  background: var(--error);
+  color: var(--surface);
+}
+.rationale-freeform {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+.rationale-input {
+  flex: 1;
+  resize: vertical;
+  min-height: 2.4rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+}
+.rationale-save {
+  background: var(--accent);
+  color: var(--surface);
+  border: none;
+  padding: 0 0.9rem;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.rationale-save:disabled {
+  background: var(--border-strong);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+/* Per-card rationale display: the captured reason renders inline on the
+   rejected card with an inline edit affordance, and an "+ add reason"
+   link shows when no reason was captured. */
+.rejected-card .rejected-reason {
+  font-size: 0.82rem;
+  color: var(--muted);
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.rejected-card .rejected-reason-label {
+  font-weight: 600;
+  color: var(--fg);
+}
+.rejected-card .rejected-reason-text {
+  font-style: italic;
+}
+.rejected-card .rejected-reason-edit,
+.rejected-card .rejected-reason-add {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-size: 0.78rem;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+.rejected-card .rejected-reason-edit:hover,
+.rejected-card .rejected-reason-add:hover {
+  color: var(--fg);
+}
+.rejected-card .rejected-reason-add {
+  justify-self: start;
+}
+
 .candidate .chorus-snippet {
   color: var(--fg);
   font-size: 0.9rem;

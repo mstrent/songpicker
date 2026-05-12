@@ -2,14 +2,19 @@ import React, { useEffect, useRef, useState } from 'react'
 import {
   clearSlot,
   commitSlot,
+  getRejectionReasons,
   loadSession,
+  recordRejectReason,
+  removeCommonReason,
   reorderItems as reorderItemsCall,
   saveSession,
   savePlanNotes,
   savePlanTheme,
   searchSongs,
   suggestSongs,
+  type AiCandidate,
   type AiDebug,
+  type CommonReason,
   type ConversationTurn,
   type Decision,
   type MatchStatus,
@@ -61,6 +66,10 @@ interface CandidateMatch {
    *  by clearPickedSlot to restore that title in PCO instead of leaving
    *  the song name behind. */
   priorSlotTitle: string | null
+  /** Free-text reason for rejecting. Drives the AI's "use the reject
+   *  reasons to understand direction" behavior. Null on unrejected
+   *  candidates, or rejected ones the user didn't bother annotating. */
+  rejectReason: string | null
 }
 
 function newCandidateId(): string {
@@ -94,6 +103,7 @@ function toPersisted(c: CandidateMatch): PersistedCandidate {
     assignedSlotItemId: c.assignedSlotItemId,
     committedAt: c.committedAt,
     priorSlotTitle: c.priorSlotTitle,
+    rejectReason: c.rejectReason,
   }
 }
 
@@ -125,6 +135,7 @@ function fromPersisted(p: PersistedCandidate): CandidateMatch {
     assignedSlotItemId: p.assignedSlotItemId,
     committedAt: p.committedAt,
     priorSlotTitle: p.priorSlotTitle ?? null,
+    rejectReason: p.rejectReason ?? null,
   }
 }
 
@@ -151,8 +162,22 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   const [candidates, setCandidates] = useState<CandidateMatch[]>([])
   const [messages, setMessages] = useState<SessionMessage[]>([])
   const [sessionLoaded, setSessionLoaded] = useState(false)
-  const [provider, setProvider] = useState<string | null>(null)
   const [debug, setDebug] = useState<AiDebug | null>(null)
+  // Global one-tap reason chips for the reject-rationale UI. Loaded
+  // once per plan view and refreshed after every chip-list mutation
+  // (record/remove). Empty until the callable returns.
+  const [reasonChips, setReasonChips] = useState<CommonReason[]>([])
+  // When set, the rationale picker panel renders at the top of the
+  // rejected pool, scoped to this candidate. Cleared on submit or
+  // when the candidate is no longer in the reject state.
+  const [rationaleFocusId, setRationaleFocusId] = useState<string | null>(null)
+  // Per-candidate draft text for the freeform textarea. Keyed by
+  // candidate id so multiple drafts coexist across re-focusing.
+  const [reasonDrafts, setReasonDrafts] = useState<Record<string, string>>({})
+  // Whether the rejected-pool <details> is open. Defaults closed; we
+  // flip to true the first time anything gets rejected so the user
+  // sees the rationale UI without an extra click.
+  const [rejectedPoolOpen, setRejectedPoolOpen] = useState(false)
 
   const themeInitialized = useRef(false)
   const notesInitialized = useRef(false)
@@ -198,8 +223,13 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setCandidates([])
     setMessages([])
     setSessionLoaded(false)
-    setProvider(null)
     setDebug(null)
+
+    // Reset rationale UI state when switching plans so stale draft text
+    // or focus from a different plan doesn't leak over.
+    setRationaleFocusId(null)
+    setReasonDrafts({})
+    setRejectedPoolOpen(false)
 
     // Load the persisted candidate pool + future chat history for this plan.
     // Survives page refreshes and lets iteration span multiple sittings.
@@ -248,6 +278,35 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       cancelled = true
     }
   }, [serviceTypeId, planId])
+
+  // Load the global reject-reason chip pool. App-wide list, so we fetch
+  // once on mount and refresh in place after any add/remove call.
+  useEffect(() => {
+    let cancelled = false
+    getRejectionReasons()
+      .then((res) => {
+        if (cancelled) return
+        setReasonChips(res.data.common)
+      })
+      .catch(() => {
+        // Non-fatal: chip row is empty until the user wires a successful
+        // call. The freeform textarea still works.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // If the focused candidate is no longer rejected (un-rejected, cleared,
+  // etc.), drop the focus so the rationale picker doesn't dangle on a
+  // candidate that's no longer in the reject state.
+  useEffect(() => {
+    if (!rationaleFocusId) return
+    const c = candidates.find((x) => x.id === rationaleFocusId)
+    if (!c || c.decision !== 'reject') {
+      setRationaleFocusId(null)
+    }
+  }, [candidates, rationaleFocusId])
 
   // Debounced auto-save: persists candidate pool + messages ~700ms after
   // the latest change. Only fires once the session has finished loading
@@ -347,45 +406,81 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       void savePlanNotes({ planId, notes: notesText }).catch(() => {})
     }
     try {
-      const exclude = [
-        ...candidates.map((c) => c.suggestion.title),
-        ...(items ?? [])
-          .filter((it) => it.songId && it.songTitle)
-          .map((it) => it.songTitle!),
-      ]
-      const shortlistedTitles = candidates
-        .filter((c) => c.decision === 'shortlist')
-        .map((c) => c.suggestion.title)
-      const rejectedTitles = candidates
-        .filter((c) => c.decision === 'reject')
-        .map((c) => c.suggestion.title)
-      const serviceOrder = buildServiceOrderText(items)
-      // System messages live in the chat log for the user's benefit
-      // (reject/unreject/commit/auto-replace markers) — they're not
-      // sent to the model. AI decisions already get the structured
-      // shortlisted/rejected state on every call.
-      const history = messages
-        .filter((m): m is SessionMessage & { role: 'user' | 'assistant' } =>
-          m.role !== 'system',
+      const songSlotItems = (items ?? []).filter(isSongSlot)
+      const totalSongSlots = songSlotItems.length
+      // Map PCO item ID → 1-based position among song slots, so each
+      // candidate's assignedSlotItemId can be rendered to the AI as
+      // "[song slot N of M]" — matching the position tags in the
+      // service-order text it also receives.
+      const slotIndexByItemId = new Map<string, number>()
+      songSlotItems.forEach((it, idx) => slotIndexByItemId.set(it.id, idx + 1))
+
+      const aiCandidates: AiCandidate[] = candidates.map((c) => {
+        const slotIndex = c.assignedSlotItemId
+          ? slotIndexByItemId.get(c.assignedSlotItemId)
+          : undefined
+        return {
+          id: c.id,
+          title: c.suggestion.title,
+          author: c.suggestion.author,
+          chorusSnippet: c.suggestion.chorusSnippet,
+          slots:
+            c.suggestion.slots && c.suggestion.slots.length > 0
+              ? c.suggestion.slots
+              : undefined,
+          decision: c.decision,
+          rejectReason: c.rejectReason ?? undefined,
+          assignedSlot:
+            slotIndex !== undefined && totalSongSlots > 0
+              ? { index: slotIndex, total: totalSongSlots }
+              : undefined,
+          committed: c.committedAt != null,
+        }
+      })
+
+      // PCO-picked songs not represented in our candidate state — usually
+      // songs the user picked directly in Planning Center, outside the
+      // app. They already show inline in the service order as "picked:
+      // X"; listing them here is the belt-and-suspenders don't-re-suggest
+      // hint.
+      const committedSongIds = new Set(
+        candidates
+          .filter((c) => c.committedAt != null && c.song?.id)
+          .map((c) => c.song!.id),
+      )
+      const alreadyInPlan = (items ?? [])
+        .filter(
+          (it) => it.songId && it.songTitle && !committedSongIds.has(it.songId),
         )
-        .map((m) => ({ role: m.role, content: m.content }))
+        .map((it) => it.songTitle!)
+
+      const serviceOrder = buildServiceOrderText(items)
+      // Fold system messages into the conversation as synthetic
+      // user-side [event] lines so the AI sees decisions in context
+      // (rejected with this reason, committed this song to that slot,
+      // etc.) alongside the typed user turns. Without this the model
+      // sees gaps where state changes happened off-screen and has to
+      // re-derive context from the candidates block alone.
+      const history: ConversationTurn[] = messages.map((m) =>
+        m.role === 'system'
+          ? { role: 'user' as const, content: `[event] ${m.content}` }
+          : { role: m.role, content: m.content },
+      )
 
       const res = await suggestSongs({
         theme,
         userMessage: opts.userMessage,
-        exclude,
         minCount: opts.minCount,
         maxCount: opts.maxCount,
         planId,
         serviceOrder,
         planNotes: notesText,
-        history: history as ConversationTurn[],
-        shortlistedTitles,
-        rejectedTitles,
+        history,
+        candidates: aiCandidates,
+        alreadyInPlan,
       })
 
       if (opts.addToChat) {
-        setProvider(res.data.provider)
         setDebug(res.data.debug ?? null)
         const turnTs = Date.now()
         setMessages((prev) => [
@@ -422,6 +517,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         assignedSlotItemId: null,
         committedAt: null,
         priorSlotTitle: null,
+        rejectReason: null,
       }))
       setCandidates((prev) => [...prev, ...newOnes])
 
@@ -548,10 +644,14 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         // Drop any pending assignment when leaving shortlist (committed
         // assignments survive — that history is real).
         const clearAssignment = newDecision !== 'shortlist' && !c.committedAt
+        // Un-rejection wipes any stored reason — the candidate is back in
+        // play, the prior rationale no longer applies.
+        const clearReason = newDecision !== 'reject'
         return {
           ...c,
           decision: newDecision,
           assignedSlotItemId: clearAssignment ? null : c.assignedSlotItemId,
+          rejectReason: clearReason ? null : c.rejectReason,
         }
       }),
     )
@@ -561,11 +661,73 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     // typed refinements.
     if (newDecision === 'reject' && oldDecision !== 'reject') {
       appendSystemMessage(`✗ Rejected: ${target.suggestion.title}`)
+      // Auto-focus the rationale picker on the freshly-rejected card
+      // and pop the rejected pool open so the chips are visible
+      // without a second click.
+      setRationaleFocusId(id)
+      setRejectedPoolOpen(true)
       // Newly rejected → schedule a replacement so the pool stays the
       // same effective size.
       scheduleReplacement()
     } else if (oldDecision === 'reject' && newDecision !== 'reject') {
       appendSystemMessage(`↩ Unrejected: ${target.suggestion.title}`)
+    }
+  }
+
+  // Set a candidate's reject reason locally (no server call). Used by
+  // chip clicks where the global list already knows about the reason.
+  function setCandidateReason(candidateId: string, reason: string | null) {
+    const trimmed = reason ? reason.trim() : null
+    setCandidates((prev) =>
+      prev.map((c) =>
+        c.id === candidateId && c.decision === 'reject'
+          ? { ...c, rejectReason: trimmed && trimmed.length > 0 ? trimmed : null }
+          : c,
+      ),
+    )
+    // Clear any draft text now that we've committed a reason.
+    setReasonDrafts((prev) => {
+      if (!(candidateId in prev)) return prev
+      const next = { ...prev }
+      delete next[candidateId]
+      return next
+    })
+    setRationaleFocusId(null)
+  }
+
+  // Save a freeform-typed reason. Same as setCandidateReason plus a
+  // server-side call so the global log + distillation trigger see the
+  // new text. Refreshes chips from the response.
+  async function saveFreeformReason(candidateId: string, reason: string) {
+    const trimmed = reason.trim()
+    if (!trimmed) {
+      setCandidateReason(candidateId, null)
+      return
+    }
+    setCandidateReason(candidateId, trimmed)
+    try {
+      const res = await recordRejectReason({ reason: trimmed })
+      setReasonChips(res.data.common)
+    } catch {
+      // Recording is best-effort — local reason is already saved. The
+      // global chip pool just won't grow this time.
+    }
+  }
+
+  async function removeReasonChip(text: string) {
+    // Optimistic local update so the chip disappears immediately.
+    setReasonChips((prev) => prev.filter((c) => c.text !== text))
+    try {
+      const res = await removeCommonReason({ text })
+      setReasonChips(res.data.common)
+    } catch {
+      // Restore by refetching if the call failed.
+      try {
+        const res = await getRejectionReasons()
+        setReasonChips(res.data.common)
+      } catch {
+        // Give up; user can refresh.
+      }
     }
   }
 
@@ -1421,12 +1583,94 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       {(() => {
         const rejected = candidates.filter((c) => c.decision === 'reject')
         if (rejected.length === 0) return null
+        const focused = rationaleFocusId
+          ? rejected.find((c) => c.id === rationaleFocusId) ?? null
+          : null
         return (
-          <details className="rejected-pool">
+          <details
+            className="rejected-pool"
+            open={rejectedPoolOpen}
+            onToggle={(e) => setRejectedPoolOpen(e.currentTarget.open)}
+          >
             <summary>
               <span className="chevron" aria-hidden>▸</span>
               <span>{rejected.length} rejected</span>
             </summary>
+            {focused && (
+              <div className="rationale-picker">
+                <div className="rationale-header">
+                  Why did you reject <strong>“{focused.suggestion.title}”</strong>?
+                  <button
+                    type="button"
+                    className="rationale-skip"
+                    onClick={() => setRationaleFocusId(null)}
+                    title="Dismiss without saving a reason"
+                  >
+                    Skip
+                  </button>
+                </div>
+                {reasonChips.length > 0 && (
+                  <div className="rationale-chips">
+                    {reasonChips.map((chip) => (
+                      <span key={chip.text} className="rationale-chip">
+                        <button
+                          type="button"
+                          className="rationale-chip-text"
+                          onClick={() => setCandidateReason(focused.id, chip.text)}
+                          title="Use this reason"
+                        >
+                          {chip.text}
+                        </button>
+                        <button
+                          type="button"
+                          className="rationale-chip-remove"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void removeReasonChip(chip.text)
+                          }}
+                          title="Remove this chip from the global list"
+                          aria-label={`Remove "${chip.text}" from common reasons`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="rationale-freeform">
+                  <textarea
+                    className="rationale-input"
+                    placeholder="Or type your own reason… (the AI will use it on the next suggestion)"
+                    rows={2}
+                    value={reasonDrafts[focused.id] ?? ''}
+                    onChange={(e) =>
+                      setReasonDrafts((prev) => ({
+                        ...prev,
+                        [focused.id]: e.target.value,
+                      }))
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        const draft = reasonDrafts[focused.id] ?? ''
+                        void saveFreeformReason(focused.id, draft)
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="rationale-save"
+                    onClick={() => {
+                      const draft = reasonDrafts[focused.id] ?? ''
+                      void saveFreeformReason(focused.id, draft)
+                    }}
+                    disabled={!(reasonDrafts[focused.id] ?? '').trim()}
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            )}
             <ul className="rejected-list">
               {rejected.map((c) => (
                 <li key={c.id} className="rejected-card">
@@ -1441,6 +1685,31 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       “{c.suggestion.chorusSnippet}”
                     </div>
                   )}
+                  {c.rejectReason ? (
+                    <div className="rejected-reason">
+                      <span className="rejected-reason-label">Reason:</span>{' '}
+                      <span className="rejected-reason-text">
+                        “{c.rejectReason}”
+                      </span>
+                      <button
+                        type="button"
+                        className="rejected-reason-edit"
+                        onClick={() => setRationaleFocusId(c.id)}
+                        title="Edit this reason"
+                      >
+                        edit
+                      </button>
+                    </div>
+                  ) : rationaleFocusId !== c.id ? (
+                    <button
+                      type="button"
+                      className="rejected-reason-add"
+                      onClick={() => setRationaleFocusId(c.id)}
+                      title="Tell the AI why you rejected this"
+                    >
+                      + add reason
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="decision-btn"
@@ -1516,7 +1785,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             <span className="gradient-text">
               AI candidates ({active.length})
             </span>
-            {provider && <span className="provider-tag">via {providerLabel(provider)}</span>}
+            <span className="provider-tag">via {AI_PROVIDER_LABEL}</span>
           </h3>
           <ul>
             {active.map((c) => {
@@ -1811,18 +2080,7 @@ function formatSongDisamb(it: PlanItem): string {
   return parts.length > 0 ? `(${parts.join(', ')})` : ''
 }
 
-function providerLabel(name: string): string {
-  switch (name) {
-    case 'anthropic':
-      return 'Claude Sonnet 4.6'
-    case 'gemini':
-      return 'Gemini 2.5 Flash'
-    case 'openai':
-      return 'GPT-4o'
-    default:
-      return name
-  }
-}
+const AI_PROVIDER_LABEL = 'Claude Sonnet 4.6'
 
 // True iff `iso` parses to a date within the last `days` days. Used to
 // flag "recently played" candidates so the user can avoid repeating

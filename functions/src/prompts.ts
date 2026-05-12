@@ -23,6 +23,8 @@ If a "Current service order" is also provided, map each "[song slot N of M]" pos
 
 Within the user's requested min–max range, try to cover every still-needed role with at least 3 options so the user has real choice; only fall below that when the requested maximum doesn't leave room. Never exceed the requested maximum. When no service structure is provided, omit "slots" or use an empty array.
 
+When a "Current candidates" section is provided, treat every entry as already on the user's radar — never propose a song whose title already appears there, regardless of decision (pending, shortlisted, rejected, committed). Rejected entries especially: the user explicitly said no, so don't re-pitch them even with a different framing. Use the entries' decisions, slot earmarks, reject reasons, and chorus snippets to understand what direction the user is converging on, and let that shape what you suggest next. The same goes for any titles in "Already in plan" — those songs are taken.
+
 Do not invent songs that don't exist.`
 
 export function hardcodedDefaultFor(type: PromptType): string {

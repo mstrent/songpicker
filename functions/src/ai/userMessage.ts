@@ -1,4 +1,4 @@
-import type { SongSuggestion, SuggestRequest } from './types'
+import type { AiCandidate, SongSuggestion, SuggestRequest } from './types'
 
 // Single source of truth for the user-side text sent to the AI. Keeps the
 // three providers (Anthropic, Gemini, OpenAI) in lockstep on what each
@@ -27,11 +27,11 @@ export function buildUserMessage(req: SuggestRequest): string {
   if (req.serviceOrder && req.serviceOrder.trim()) {
     parts.push(`Current service order:\n${req.serviceOrder.trim()}`)
   }
-  if (req.shortlistedTitles?.length) {
-    parts.push(`Already shortlisted: ${req.shortlistedTitles.join(', ')}`)
+  if (req.candidates && req.candidates.length > 0) {
+    parts.push(`Current candidates:\n${renderCandidates(req.candidates)}`)
   }
-  if (req.rejectedTitles?.length) {
-    parts.push(`Already rejected: ${req.rejectedTitles.join(', ')}`)
+  if (req.alreadyInPlan && req.alreadyInPlan.length > 0) {
+    parts.push(`Already in plan (don't re-suggest): ${req.alreadyInPlan.join(', ')}`)
   }
   parts.push(`User request: ${req.userMessage || '(none)'}`)
   if (minCount === maxCount) {
@@ -41,12 +41,49 @@ export function buildUserMessage(req: SuggestRequest): string {
       `Return between ${minCount} and ${maxCount} suggestions — stay within this range.`,
     )
   }
-  if (req.exclude?.length) {
-    parts.push(
-      `\nDo NOT suggest any of these (already considered): ${req.exclude.join(', ')}`,
-    )
-  }
   return parts.join('\n')
+}
+
+// One line per candidate, dense enough for the AI to scan and address
+// any entry by id. Mirrors the SPA's mental model (decision + optional
+// slot earmark + chorus snippet for disambiguation) without leaking
+// purely internal fields like matchStatus or addedAt.
+function renderCandidates(candidates: AiCandidate[]): string {
+  return candidates
+    .map((c) => {
+      const parts: string[] = [`  ${c.id} — "${c.title}"`]
+      if (c.author) parts.push(`(${c.author})`)
+      parts.push(`— ${decisionLabel(c)}`)
+      if (c.assignedSlot) {
+        parts.push(
+          `— earmarked for song slot ${c.assignedSlot.index} of ${c.assignedSlot.total}`,
+        )
+      }
+      if (c.slots && c.slots.length > 0) {
+        parts.push(`— tagged: ${c.slots.join(', ')}`)
+      }
+      if (c.chorusSnippet) {
+        parts.push(`— chorus: "${c.chorusSnippet}"`)
+      }
+      if (c.rejectReason) {
+        parts.push(`— reason: "${c.rejectReason}"`)
+      }
+      return parts.join(' ')
+    })
+    .join('\n')
+}
+
+function decisionLabel(c: AiCandidate): string {
+  if (c.committed) return 'committed'
+  switch (c.decision) {
+    case 'shortlist':
+      return 'shortlisted'
+    case 'reject':
+      return 'rejected'
+    case 'pending':
+    default:
+      return 'pending'
+  }
 }
 
 // Compact rendering of "what I just suggested" for the chat log and for

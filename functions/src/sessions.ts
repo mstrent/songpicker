@@ -29,6 +29,11 @@ export interface PersistedCandidate {
    *  song name. Lets a later "clear" restore the original slot label
    *  instead of leaving the song name behind. */
   priorSlotTitle: string | null
+  /** Free-text reason the user gave when rejecting this candidate.
+   *  Null/empty on un-rejected candidates and on rejected ones where
+   *  the user didn't bother giving a reason. The AI sees this on the
+   *  next suggest call as part of the structured candidates block. */
+  rejectReason: string | null
 }
 
 export interface Message {
@@ -82,6 +87,10 @@ function sanitizeCandidate(raw: unknown): PersistedCandidate | null {
     committedAt: typeof c.committedAt === 'number' ? c.committedAt : null,
     priorSlotTitle:
       typeof c.priorSlotTitle === 'string' ? c.priorSlotTitle : null,
+    rejectReason:
+      typeof c.rejectReason === 'string' && c.rejectReason.trim()
+        ? c.rejectReason.trim()
+        : null,
   }
 }
 

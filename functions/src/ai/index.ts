@@ -1,22 +1,15 @@
 import { AnthropicProvider } from './anthropic'
-import { GeminiProvider } from './gemini'
-import { OpenAiProvider } from './openai'
 import type { AiProvider } from './types'
 
-export function getAiProvider(name: string, apiKey: string): AiProvider {
-  switch (name) {
-    case 'anthropic':
-      return new AnthropicProvider(apiKey)
-    case 'openai':
-      return new OpenAiProvider(apiKey)
-    case 'gemini':
-      return new GeminiProvider(apiKey)
-    default:
-      throw new Error(`Unknown AI provider: ${name}`)
-  }
+// Single-provider for now (Anthropic / Claude Sonnet 4.6). The AiProvider
+// abstraction is kept intentionally so a future provider can be added
+// without rewiring callers — wire it up here when that day comes.
+export function getAiProvider(apiKey: string): AiProvider {
+  return new AnthropicProvider(apiKey)
 }
 
 export type {
+  AiCandidate,
   AiDebug,
   AiProvider,
   SongSuggestion,

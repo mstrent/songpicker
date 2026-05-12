@@ -7,12 +7,10 @@ import { defineSecret, defineString } from 'firebase-functions/params'
 //
 // PCO credentials are now per-user (stored in Firestore at pcoCredentials/{uid}),
 // not globals — see functions/src/pco/credentials.ts.
-export const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY')
 export const ANTHROPIC_API_KEY = defineSecret('ANTHROPIC_API_KEY')
 
 // Set with: firebase functions:config:set or via param env file
 export const ALLOWED_EMAIL = defineString('ALLOWED_EMAIL', { default: '' })
-export const AI_PROVIDER = defineString('AI_PROVIDER', { default: 'gemini' })
 
 // Comma-separated emails of users who can edit the system-wide prompt
 // defaults via the Admin page. Empty disables the admin page entirely.

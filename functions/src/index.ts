@@ -3,6 +3,7 @@ import { setGlobalOptions } from 'firebase-functions/v2'
 import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/https'
 
 import { getAiProvider } from './ai'
+import type { AiCandidate } from './ai/types'
 import { PcoClient } from './pco/client'
 import { pMap } from './pco/concurrency'
 import {
@@ -29,16 +30,20 @@ import {
   type PromptType,
 } from './prompts'
 import {
+  listRejectionReasons,
+  publicShape as publicRejectionReasonsShape,
+  recordRejectReason as recordRejectReasonInternal,
+  removeCommonReason as removeCommonReasonInternal,
+} from './rejectionReasons'
+import {
   loadPickerSession,
   savePickerSession,
   type PickerSession,
 } from './sessions'
 import {
   ADMIN_EMAILS,
-  AI_PROVIDER,
   ALLOWED_EMAIL,
   ANTHROPIC_API_KEY,
-  GEMINI_API_KEY,
   INCLUDED_SERVICE_TYPES,
 } from './config'
 
@@ -212,65 +217,41 @@ export const searchSongs = onCall(async (req) => {
   return { songs }
 })
 
-// To add another provider (openai, ...):
-//   1. firebase functions:secrets:set <PROVIDER>_API_KEY
-//   2. add the secret to secrets[] below and the imports
-//   3. add a case to the switch
-// Each secret listed in secrets[] must exist in Secret Manager at deploy
-// time, so only bind providers whose keys you've actually set.
 export const suggestSongs = onCall(
-  { secrets: [ANTHROPIC_API_KEY, GEMINI_API_KEY] },
+  { secrets: [ANTHROPIC_API_KEY] },
   async (req) => {
     const { uid } = requireAllowed(req)
     const {
       theme,
       userMessage,
-      exclude,
       planId,
       serviceOrder,
       planNotes,
       history,
-      shortlistedTitles,
-      rejectedTitles,
+      candidates,
+      alreadyInPlan,
       minCount,
       maxCount,
     } = req.data as {
       theme?: string
       userMessage?: string
-      exclude?: string[]
       planId?: string
       serviceOrder?: string
       planNotes?: string
       history?: Array<{ role: 'user' | 'assistant'; content: string }>
-      shortlistedTitles?: string[]
-      rejectedTitles?: string[]
+      candidates?: AiCandidate[]
+      alreadyInPlan?: string[]
       minCount?: number
       maxCount?: number
     }
     if (!theme) throw new HttpsError('invalid-argument', 'theme required')
-
-    const provider = AI_PROVIDER.value()
-    let apiKey: string
-    switch (provider) {
-      case 'anthropic':
-        apiKey = ANTHROPIC_API_KEY.value()
-        break
-      case 'gemini':
-        apiKey = GEMINI_API_KEY.value()
-        break
-      default:
-        throw new HttpsError(
-          'failed-precondition',
-          `Provider "${provider}" not wired. Bind its secret in suggestSongs and add a case here.`,
-        )
-    }
 
     const [structure, role] = await Promise.all([
       loadResolved(uid, 'structure', planId),
       loadResolved(uid, 'role', planId),
     ])
 
-    const ai = getAiProvider(provider, apiKey)
+    const ai = getAiProvider(ANTHROPIC_API_KEY.value())
     const result = await ai.suggestSongs({
       theme,
       userMessage: userMessage ?? '',
@@ -278,10 +259,9 @@ export const suggestSongs = onCall(
       systemPrompt: composeSystemPrompt(role.effective.value),
       serviceOrder,
       planNotes,
-      shortlistedTitles,
-      rejectedTitles,
+      candidates,
+      alreadyInPlan,
       history,
-      exclude,
       minCount,
       maxCount,
     })
@@ -289,7 +269,6 @@ export const suggestSongs = onCall(
       suggestions: result.suggestions,
       debug: result.debug,
       assistantMessage: result.assistantMessage,
-      provider,
       structureSource: structure.effective.source,
       roleSource: role.effective.source,
     }
@@ -534,4 +513,48 @@ export const commitPlanItems = onCall(async (req) => {
     created += 1
   }
   return { created }
+})
+
+// Reject-rationale chip pool. Single global list across all users; any
+// authenticated allowed user can add/remove chips. The SPA surfaces
+// these as one-tap reasons on rejected candidate cards.
+export const getRejectionReasons = onCall(async (req) => {
+  requireAllowed(req)
+  const doc = await listRejectionReasons()
+  return publicRejectionReasonsShape(doc)
+})
+
+// Bound the secret here too so the inline distillation path (when
+// freeformSinceDistill crosses the threshold) can reach Claude.
+export const recordRejectReason = onCall(
+  { secrets: [ANTHROPIC_API_KEY] },
+  async (req) => {
+    requireAllowed(req)
+    const { reason } = req.data as { reason?: string }
+    if (!reason || typeof reason !== 'string' || !reason.trim()) {
+      throw new HttpsError('invalid-argument', 'reason (non-empty string) required')
+    }
+    // Best-effort: if the secret isn't actually wired the inline call
+    // still records the reason and skips distillation silently.
+    const apiKey = (() => {
+      try {
+        return ANTHROPIC_API_KEY.value()
+      } catch {
+        return null
+      }
+    })()
+    const doc = await recordRejectReasonInternal(reason, apiKey)
+    return publicRejectionReasonsShape(doc)
+  },
+)
+
+export const removeCommonReason = onCall(async (req) => {
+  requireAllowed(req)
+  const { text } = req.data as { text?: string }
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    throw new HttpsError('invalid-argument', 'text (non-empty string) required')
+  }
+  await removeCommonReasonInternal(text)
+  const doc = await listRejectionReasons()
+  return publicRejectionReasonsShape(doc)
 })

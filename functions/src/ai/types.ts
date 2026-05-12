@@ -12,6 +12,37 @@ export interface ConversationTurn {
   content: string
 }
 
+export type AiCandidateDecision = 'pending' | 'shortlist' | 'reject'
+
+/** Structured view of one candidate the SPA is currently holding. The
+ *  AI sees the entire pool — pending, shortlisted, rejected, committed —
+ *  with stable ids so it can reason about and refer back to specific
+ *  entries instead of inferring state from bare title lists. */
+export interface AiCandidate {
+  id: string
+  title: string
+  author?: string
+  /** 1–2 line snippet from the chorus, when the AI returned one. */
+  chorusSnippet?: string
+  /** Conceptual roles the AI tagged this candidate with at suggest
+   *  time (e.g. "opener", "closer"). */
+  slots?: string[]
+  decision: AiCandidateDecision
+  /** Free-text reason the user gave on reject. Populated once Layer 2
+   *  ships the rationale UI; safe to be missing in the meantime. */
+  rejectReason?: string
+  /** Position info for the service-order slot this candidate is
+   *  earmarked for (1-based among song slots). Set whenever the
+   *  candidate has an assigned slot, committed or not. The AI can
+   *  cross-reference this against the "[song slot N of M]" tags in
+   *  the Current service order. */
+  assignedSlot?: { index: number; total: number }
+  /** True iff the candidate has been committed into Planning Center.
+   *  Committed picks also appear inline in the Current service order;
+   *  duplicating them here gives the AI an id to address them by. */
+  committed?: boolean
+}
+
 export interface SuggestRequest {
   /** The user's latest typed input — initial criteria on first turn, a
    *  refinement on subsequent turns. */
@@ -26,14 +57,16 @@ export interface SuggestRequest {
   /** Pre-formatted, human-readable plan notes (sermon theme, scripture,
    *  general notes, etc.) from Planning Center. */
   planNotes?: string
-  /** Titles already in PCO or already suggested — model should not
-   *  return any of these again. */
-  exclude?: string[]
-  /** Titles the user has actively shortlisted. Surfaced as state in the
-   *  current user message so the model can reason around them. */
-  shortlistedTitles?: string[]
-  /** Titles the user has rejected. Same state surface as shortlisted. */
-  rejectedTitles?: string[]
+  /** Full snapshot of the SPA's candidate pool. Supersedes the older
+   *  flat shortlistedTitles / rejectedTitles / exclude arrays — the
+   *  AI must not re-propose anything in this list. */
+  candidates?: AiCandidate[]
+  /** Titles of songs already picked in Planning Center that the SPA
+   *  doesn't have a candidate record for (e.g. picked manually in PCO
+   *  before we started suggesting). The serviceOrder text already
+   *  shows them as "picked: <title>"; this array is the
+   *  belt-and-suspenders list of titles to never re-suggest. */
+  alreadyInPlan?: string[]
   /** Prior chat turns (typed user inputs + synthesised assistant
    *  summaries). The current turn's user message is built fresh on the
    *  server and appended to this history. */
@@ -60,6 +93,6 @@ export interface SuggestResult {
 }
 
 export interface AiProvider {
-  name: 'anthropic' | 'openai' | 'gemini'
+  name: 'anthropic'
   suggestSongs(req: SuggestRequest): Promise<SuggestResult>
 }
