@@ -627,39 +627,14 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setDragOverTrash(false)
   }
 
-  // Build a styled clone of the source element to use as the drag
-  // ghost. The browser's default drag image is a screenshot of the
-  // source styled with the surrounding background, which can read as
-  // "blank" depending on the card's CSS. A cloned + tilted + shadowed
-  // copy gives a clearly visible greyed-out ghost that tracks the
-  // cursor while the source stays in place.
-  function attachDragImage(e: React.DragEvent, src: HTMLElement) {
-    const clone = src.cloneNode(true) as HTMLElement
-    clone.style.position = 'fixed'
-    clone.style.top = '-9999px'
-    clone.style.left = '-9999px'
-    clone.style.width = `${src.offsetWidth}px`
-    clone.style.opacity = '0.85'
-    clone.style.pointerEvents = 'none'
-    clone.style.boxShadow = '0 14px 30px rgba(0, 0, 0, 0.25)'
-    clone.style.transform = 'rotate(-1.5deg)'
-    clone.style.background = 'var(--surface)'
-    document.body.appendChild(clone)
-    try {
-      e.dataTransfer.setDragImage(clone, Math.min(src.offsetWidth / 2, 200), 28)
-    } catch {
-      // Some sandboxed contexts disallow setDragImage; fall back to the
-      // browser default silently.
-    }
-    // The browser snapshots the drag image synchronously after this
-    // event handler returns. Clean up on the next tick.
-    setTimeout(() => clone.remove(), 0)
-  }
 
   // Drop handler for "candidate dragged onto empty slot". Reuses the
   // commit path, but synthesises a candidate with the new
   // assignedSlotItemId so commitCandidate sees the slot assignment on
-  // its first read (avoids a setState + read race).
+  // its first read (avoids a setState + read race). Also promotes the
+  // candidate to 'shortlist' since the "Committed" badge UI gates on
+  // decision === 'shortlist' — without this the badge silently never
+  // renders for drag-committed candidates.
   async function dropCandidateOnSlot(candidateId: string, slotItemId: string) {
     const candidate = candidates.find((c) => c.id === candidateId)
     if (!candidate || !candidate.song) return
@@ -667,11 +642,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     if (!slot || slot.songId) return // only empty song slots accept a drop
     const withSlot: CandidateMatch = {
       ...candidate,
+      decision: 'shortlist',
       assignedSlotItemId: slotItemId,
       committedAt: null,
     }
-    // Push the assignment into state so the dropdown / "→ slotN" label
-    // also tracks the drop, then run the existing commit flow.
     setCandidates((prev) =>
       prev.map((c) => (c.id === candidateId ? withSlot : c)),
     )
@@ -821,39 +795,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                   it.leaders.length > 0 ||
                   it.songAuthor ||
                   it.songCcli)
-              const dragHandlers: React.HTMLAttributes<HTMLLIElement> = {}
               const draggable = isSong && filled
-              if (draggable) {
-                dragHandlers.onDragStart = (e) => {
-                  // text/plain is required for Firefox to accept the
-                  // drag at all; the real payload lives in React state.
-                  e.dataTransfer.setData('text/plain', it.id)
-                  e.dataTransfer.effectAllowed = 'move'
-                  setDragKind('slot')
-                  setDragSourceId(it.id)
-                  attachDragImage(e, e.currentTarget)
-                }
-                dragHandlers.onDragEnd = endDrag
-              }
               const isDropTarget =
                 dragKind === 'candidate' && isSong && !filled
-              if (isDropTarget) {
-                dragHandlers.onDragOver = (e) => {
-                  e.preventDefault()
-                  e.dataTransfer.dropEffect = 'move'
-                  if (dragOverItemId !== it.id) setDragOverItemId(it.id)
-                }
-                dragHandlers.onDragLeave = () => {
-                  if (dragOverItemId === it.id) setDragOverItemId(null)
-                }
-                dragHandlers.onDrop = (e) => {
-                  e.preventDefault()
-                  if (dragKind === 'candidate' && dragSourceId) {
-                    void dropCandidateOnSlot(dragSourceId, it.id)
-                  }
-                  endDrag()
-                }
-              }
               const isBeingDragged =
                 dragKind === 'slot' && dragSourceId === it.id
               return (
@@ -865,7 +809,35 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     isBeingDragged ? ' is-dragging' : ''
                   }`}
                   draggable={draggable || undefined}
-                  {...dragHandlers}
+                  onDragStart={(e) => {
+                    if (!draggable) return
+                    e.dataTransfer.setData('text/plain', it.id)
+                    e.dataTransfer.effectAllowed = 'move'
+                    setDragKind('slot')
+                    setDragSourceId(it.id)
+                  }}
+                  onDragEnd={() => {
+                    if (draggable) endDrag()
+                  }}
+                  onDragOver={(e) => {
+                    if (!isDropTarget) return
+                    e.preventDefault()
+                    e.dataTransfer.dropEffect = 'move'
+                    if (dragOverItemId !== it.id) setDragOverItemId(it.id)
+                  }}
+                  onDragLeave={() => {
+                    if (isDropTarget && dragOverItemId === it.id) {
+                      setDragOverItemId(null)
+                    }
+                  }}
+                  onDrop={(e) => {
+                    if (!isDropTarget) return
+                    e.preventDefault()
+                    if (dragKind === 'candidate' && dragSourceId) {
+                      void dropCandidateOnSlot(dragSourceId, it.id)
+                    }
+                    endDrag()
+                  }}
                 >
                   <span className="seq">{it.sequence}</span>
                   <div className="ibody">
@@ -1297,7 +1269,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     e.dataTransfer.effectAllowed = 'move'
                     setDragKind('candidate')
                     setDragSourceId(c.id)
-                    attachDragImage(e, e.currentTarget)
                   }}
                   onDragEnd={endDrag}
                 >
