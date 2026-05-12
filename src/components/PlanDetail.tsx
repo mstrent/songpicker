@@ -1566,15 +1566,30 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       <>
                         <span className="badge matched">in library</span>
                         {c.song!.lastScheduledAt ? (
-                          <span
-                            className="last-played"
-                            title={new Date(c.song!.lastScheduledAt).toLocaleString()}
-                          >
-                            last played {relativeTime(c.song!.lastScheduledAt)}
-                            {c.song!.lastScheduledShortDates && (
-                              <> · {c.song!.lastScheduledShortDates}</>
-                            )}
-                          </span>
+                          (() => {
+                            const recent = playedWithinDays(
+                              c.song!.lastScheduledAt,
+                              28,
+                            )
+                            return (
+                              <span
+                                className={`last-played${recent ? ' last-played-recent' : ''}`}
+                                title={
+                                  recent
+                                    ? `Played ${relativeTime(c.song!.lastScheduledAt)} — recent enough that congregations may notice if you repeat it`
+                                    : new Date(
+                                        c.song!.lastScheduledAt,
+                                      ).toLocaleString()
+                                }
+                              >
+                                last played{' '}
+                                {relativeTime(c.song!.lastScheduledAt)}
+                                {c.song!.lastScheduledShortDates && (
+                                  <> · {c.song!.lastScheduledShortDates}</>
+                                )}
+                              </span>
+                            )
+                          })()
                         ) : (
                           <span className="last-played">never played</span>
                         )}
@@ -1788,6 +1803,15 @@ function providerLabel(name: string): string {
     default:
       return name
   }
+}
+
+// True iff `iso` parses to a date within the last `days` days. Used to
+// flag "recently played" candidates so the user can avoid repeating
+// what the congregation just heard.
+function playedWithinDays(iso: string, days: number): boolean {
+  const t = new Date(iso).getTime()
+  if (Number.isNaN(t)) return false
+  return Date.now() - t < days * 24 * 60 * 60 * 1000
 }
 
 function relativeTime(iso: string): string {

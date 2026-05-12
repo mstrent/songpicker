@@ -2017,3 +2017,14 @@ textarea {
 .badge.unmatched { background: var(--warm-soft); color: var(--warm-strong); }
 .badge.error { background: var(--error-soft); color: var(--error); }
 .last-played { color: var(--muted); }
+/* "Played recently" — within the last 4 weeks. Visual nudge to think
+   twice (worship leaders generally want to space repeats out) without
+   excluding the song. Uses the --warm palette so it reads as a
+   caution, not a hard error. */
+.last-played-recent {
+  color: var(--warm-strong);
+  background: var(--warm-soft);
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  font-weight: 600;
+}
