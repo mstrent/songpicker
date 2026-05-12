@@ -41,6 +41,13 @@ export interface AiCandidate {
    *  Committed picks also appear inline in the Current service order;
    *  duplicating them here gives the AI an id to address them by. */
   committed?: boolean
+  /** True iff the candidate has been successfully matched to a song
+   *  in the user's Planning Center library. Only library-matched
+   *  candidates can be committed via set_slot_contents — the AI
+   *  should check this before planning commits and fall back to a
+   *  different candidate (or explain to the user) when their first
+   *  pick isn't matched. */
+  inLibrary?: boolean
 }
 
 export interface SuggestRequest {

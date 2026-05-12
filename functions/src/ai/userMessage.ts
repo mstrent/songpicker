@@ -71,6 +71,9 @@ function renderCandidates(candidates: AiCandidate[]): string {
       const parts: string[] = [`  ${c.id} — "${c.title}"`]
       if (c.author) parts.push(`(${c.author})`)
       parts.push(`— ${decisionLabel(c)}`)
+      if (c.inLibrary === false) {
+        parts.push(`— NOT IN LIBRARY (can't be committed via set_slot_contents)`)
+      }
       if (c.assignedSlot) {
         parts.push(
           `— earmarked for song slot ${c.assignedSlot.index} of ${c.assignedSlot.total}`,

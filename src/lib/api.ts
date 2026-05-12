@@ -272,6 +272,10 @@ export interface AiCandidate {
   rejectReason?: string
   assignedSlot?: { index: number; total: number }
   committed?: boolean
+  /** True iff the candidate has a matched song in the user's
+   *  Planning Center library. Only library-matched candidates can be
+   *  committed; the AI checks this when planning commits. */
+  inLibrary?: boolean
 }
 
 /** Actions the AI emitted on a turn — Anthropic tool calls translated

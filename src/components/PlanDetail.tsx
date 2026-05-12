@@ -536,6 +536,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
               ? { index: slotIndex, total: totalSongSlots }
               : undefined,
           committed: c.committedAt != null,
+          inLibrary: c.matchStatus === 'matched',
         }
       })
 
