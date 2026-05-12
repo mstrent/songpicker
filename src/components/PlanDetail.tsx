@@ -14,7 +14,6 @@ import {
   suggestSongs,
   type AiAction,
   type AiCandidate,
-  type AiDebug,
   type CommonReason,
   type ConversationTurn,
   type Decision,
@@ -176,7 +175,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   const [candidates, setCandidates] = useState<CandidateMatch[]>([])
   const [messages, setMessages] = useState<SessionMessage[]>([])
   const [sessionLoaded, setSessionLoaded] = useState(false)
-  const [debug, setDebug] = useState<AiDebug | null>(null)
   // Global one-tap reason chips for the reject-rationale UI. Loaded
   // once per plan view and refreshed after every chip-list mutation
   // (record/remove). Empty until the callable returns.
@@ -257,7 +255,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setCandidates([])
     setMessages([])
     setSessionLoaded(false)
-    setDebug(null)
 
     // Reset rationale UI state when switching plans so stale draft text
     // or focus from a different plan doesn't leak over.
@@ -1134,7 +1131,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       }
 
       const final = await data
-      setDebug(final.debug ?? null)
       // If streaming produced no text but the callable's fallback
       // synthesized a status line, drop it into the placeholder so the
       // chat log isn't blank. Also handles the unlikely case where the
@@ -1250,7 +1246,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   function clearCandidates() {
     setCandidates([])
     setMessages([])
-    setDebug(null)
     // Reset the "AI has seen these candidates" tracker so the next
     // Suggest call re-introduces any remaining candidates with full
     // info. Clearing the conversation effectively wipes the AI's
@@ -2648,28 +2643,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         )
       })()}
 
-      {debug && (
-        <details className="ai-debug">
-          <summary>
-            <span className="chevron" aria-hidden>▸</span>
-            <span>Context sent to AI</span>
-          </summary>
-          <div className="debug-body">
-            <div className="debug-row">
-              <span className="debug-label">Model</span>
-              <code>{debug.model}</code>
-            </div>
-            <div className="debug-row">
-              <span className="debug-label">System prompt</span>
-              <pre>{debug.systemPrompt}</pre>
-            </div>
-            <div className="debug-row">
-              <span className="debug-label">User message</span>
-              <pre>{debug.userMessage}</pre>
-            </div>
-          </div>
-        </details>
-      )}
         </div>
 
         <div className="plan-right">

@@ -574,8 +574,7 @@ textarea {
    in plan-left in the DOM (so they stay with the form in two-column
    mode), but on narrow viewports the reading flow wants candidates
    before these inspection panels. */
-.plan-detail .rejected-pool,
-.plan-detail .ai-debug {
+.plan-detail .rejected-pool {
   order: 1;
 }
 
@@ -596,10 +595,9 @@ textarea {
     gap: 0.4rem;
     min-width: 0;
   }
-  /* Two-column mode: keep natural DOM order — rejected pool + AI debug
-     panel sit at the bottom of the left column. */
-  .plan-detail .rejected-pool,
-  .plan-detail .ai-debug {
+  /* Two-column mode: keep natural DOM order — rejected pool sits at
+     the bottom of the left column. */
+  .plan-detail .rejected-pool {
     order: unset;
   }
 }
@@ -608,9 +606,9 @@ textarea {
    feel separated without cavernous whitespace. Only used between the
    service-order block and the suggest form (and between candidates and
    the suggest form in single-column mode). The collapsed
-   rejected-pool and ai-debug disclosures down at the bottom don't
-   need their own dividers — they're small, secondary, and already
-   visually distinct from the form above them. */
+   rejected-pool disclosure down at the bottom doesn't need its own
+   divider — it's small, secondary, and already visually distinct
+   from the form above it. */
 .plan-detail .suggest-section::before,
 .plan-detail .candidates::before {
   content: '';
@@ -1619,14 +1617,8 @@ textarea {
   line-height: 1.3;
 }
 
-.ai-debug {
-  margin: 0;
-}
-/* Shared summary style for the small disclosure pills at the bottom of
-   the left column (rejected pool + Context sent to AI). Defined once on
-   both so they read as a matched pair. */
-.rejected-pool summary,
-.ai-debug summary {
+/* Summary pill style for the collapsed rejected pool. */
+.rejected-pool summary {
   cursor: pointer;
   color: var(--muted);
   font-size: 0.85rem;
@@ -1639,46 +1631,22 @@ textarea {
   gap: 0.4rem;
   border: 1px dashed var(--border);
 }
-.rejected-pool summary::-webkit-details-marker,
-.ai-debug summary::-webkit-details-marker {
+.rejected-pool summary::-webkit-details-marker {
   display: none;
 }
-.rejected-pool summary:hover,
-.ai-debug summary:hover {
+.rejected-pool summary:hover {
   color: var(--fg);
   border-color: var(--border-strong);
   background: var(--surface);
 }
-.rejected-pool summary .chevron,
-.ai-debug summary .chevron {
+.rejected-pool summary .chevron {
   display: inline-block;
   transition: transform 0.15s ease;
   font-size: 0.85em;
   color: var(--muted);
 }
-.rejected-pool[open] summary .chevron,
-.ai-debug[open] summary .chevron {
+.rejected-pool[open] summary .chevron {
   transform: rotate(90deg);
-}
-.ai-debug .debug-body {
-  margin-top: 0.6rem;
-  display: grid;
-  gap: 0.85rem;
-  padding: 0.85rem 1rem;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.ai-debug .debug-row {
-  display: grid;
-  gap: 0.3rem;
-}
-.ai-debug .debug-label {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 700;
-  color: var(--muted);
 }
 /* Admin page */
 
@@ -1960,19 +1928,6 @@ textarea {
   background: var(--error-soft);
 }
 
-.ai-debug code,
-.ai-debug pre {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.82rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.45rem 0.6rem;
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--fg);
-}
 .candidate .author {
   color: var(--muted);
   font-weight: 400;
