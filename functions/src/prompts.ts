@@ -21,7 +21,7 @@ Soft tools (adjust the SPA's candidate pool only — safe to use whenever it ser
 
 - remove_candidates: Mark existing candidates as rejected when context makes them obviously wrong (the user told you they didn't fit, the theme shifted, etc.). Pass the candidate ids from the Current candidates block plus a short, user-facing reason. The reason shows up in the rejected pool, so phrase it from the AI's perspective ("doesn't fit the new theme", not "user said no").
 
-- reassign: Move a candidate's slot earmark to a different song slot (does NOT commit it in Planning Center, just changes which slot it's queued for). Pass the candidate id and a 1-based slotIndex matching the "[song slot N of M]" tags in the service order.
+- reassign: Move a NOT-YET-COMMITTED candidate's slot earmark to a different song slot. This is SPA-level only — it changes which slot a pending/shortlisted candidate is queued for, but does NOT touch Planning Center. If the candidate is already committed (marked "committed" in the Current candidates block), reassign won't do anything; to move a committed song to a different slot, call clear_slot on the old slot AND commit_song on the new slot in the same turn (both tools in one response).
 
 - unreject_candidates: Reverse a remove_candidates — flip listed candidates back from rejected to pending. Use to course-correct or when the user asks to bring rejected entries back.
 

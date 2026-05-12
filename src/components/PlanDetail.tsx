@@ -642,6 +642,22 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         } else if (action.kind === 'reassign') {
           const targetItemId = itemIdBySlotIndex.get(action.slotIndex) ?? null
           if (targetItemId == null) return
+          const candidate = preTurnCandidatesById.get(action.candidateId)
+          const title =
+            candidate?.suggestion.title ??
+            titleById.get(action.candidateId) ??
+            '(candidate)'
+          // reassign only adjusts the SPA-level earmark — it doesn't
+          // touch Planning Center. So it's the wrong tool for moving
+          // a song that's already committed in PCO; that needs a
+          // clear_slot + commit_song pair. Warn the AI here so the
+          // [event] line shows up in the next turn's history.
+          if (candidate?.committedAt) {
+            appendSystemMessage(
+              `⚠ AI used reassign on "${title}", but it's already committed to a Planning Center slot. To move a committed song, call clear_slot on the old slot and commit_song on the new slot in the same turn.`,
+            )
+            return
+          }
           setCandidates((prev) =>
             prev.map((c) =>
               c.id === action.candidateId && !c.committedAt
@@ -649,7 +665,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                 : c,
             ),
           )
-          const title = titleById.get(action.candidateId) ?? '(candidate)'
           appendSystemMessage(
             `🤖 AI moved "${title}" to song slot ${action.slotIndex}`,
           )
@@ -693,11 +708,16 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           // reconciliation effect until items refreshes after the
           // PCO call settles (otherwise the effect would see "new
           // committedAt vs. stale items" and wipe the commit).
+          // decision='shortlist' so the existing committed-badge UI
+          // — which lives inside the shortlist branch on the
+          // candidate card — actually renders. Conceptually fine:
+          // the AI chose to commit it, that's an implicit shortlist.
           setCandidates((prev) =>
             prev.map((c) =>
               c.id === action.candidateId
                 ? {
                     ...c,
+                    decision: 'shortlist',
                     committedAt: now,
                     assignedSlotItemId: targetItemId,
                     priorSlotTitle,
