@@ -1595,9 +1595,27 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         planId,
         orderedItemIds: newOrder,
       })
+      // Apply the swap locally rather than refetching. PCO's
+      // read-after-write on item_reorder can return the pre-swap
+      // ordering for a beat — that's what was leaving the UI showing
+      // the old positions until a manual reload caught up. We know
+      // exactly what the post-swap state looks like (same items, two
+      // positions traded, their sequence values traded with them),
+      // so we apply it directly and bust the cache so a later
+      // navigate-away-and-back picks up fresh data from PCO.
+      setItems((prev) => {
+        if (!prev) return prev
+        const ai = prev.findIndex((it) => it.id === slotA.id)
+        const bi = prev.findIndex((it) => it.id === slotB.id)
+        if (ai === -1 || bi === -1) return prev
+        const a = prev[ai]
+        const b = prev[bi]
+        const next = [...prev]
+        next[ai] = { ...b, sequence: a.sequence }
+        next[bi] = { ...a, sequence: b.sequence }
+        return next
+      })
       invalidatePlanContext(serviceTypeId, planId)
-      const fresh = await loadPlanContext(serviceTypeId, planId)
-      setItems(fresh.items)
       const affected = new Set([slotA.id, slotB.id])
       setCandidates((prev) =>
         prev.map((c) =>
