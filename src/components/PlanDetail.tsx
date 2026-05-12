@@ -711,55 +711,124 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   }
 
 
-  // Drop handler for "filled slot dragged onto another song slot to
-  // reorder its position in the service order". Swap semantics: the
-  // dragged slot takes the target's position and the target slot takes
-  // the dragged slot's old position. Works uniformly whether the
-  // target is filled (songs visually swap) or empty (dragged song
-  // fills the empty position, empty pops out to where the dragged
-  // song came from).
+  // Drop handler for a filled song slot dragged onto another song slot.
+  // Branches on the target's state per the user's mental model — slots
+  // are fixed positions, songs move between them:
   //
-  // priorSlotTitle is wiped on candidates committed to EITHER affected
-  // slot so a future Clear falls back to the "Song N" convention at
-  // the slot's NEW position, not the title that matched the old one.
+  //   - target empty  → MOVE the song. Source vacates (title reverts
+  //     to its stored priorSlotTitle, song relationship cleared),
+  //     destination receives the song with full commit semantics.
+  //   - target filled → SWAP positions via item_reorder. Both slots
+  //     move positions; their attached songs follow. priorSlotTitle is
+  //     wiped on both candidates so a future Clear falls back to
+  //     "Song N" at the slot's new position.
   async function reorderSlotItem(draggedId: string, targetId: string) {
     if (draggedId === targetId) return
+    const draggedSlot = (items ?? []).find((it) => it.id === draggedId)
+    const targetSlot = (items ?? []).find((it) => it.id === targetId)
+    if (!draggedSlot || !targetSlot) return
+
+    if (!targetSlot.songId) {
+      await moveSongToEmptySlot(draggedSlot, targetSlot)
+    } else {
+      await swapTwoFilledSlots(draggedSlot, targetSlot)
+    }
+  }
+
+  // Vacate the source slot (restoring its prior title) and commit the
+  // source's song to the empty destination. Candidate that owned the
+  // source's commitment migrates to the destination with its
+  // priorSlotTitle replaced by the destination slot's pre-move title,
+  // so a future Clear on the destination restores its identity (e.g.
+  // "Song 2") rather than the source's identity.
+  async function moveSongToEmptySlot(source: PlanItem, target: PlanItem) {
+    const committedCand = candidates.find(
+      (c) =>
+        c.assignedSlotItemId === source.id &&
+        c.committedAt != null &&
+        c.song,
+    )
+    const songId = committedCand?.song?.id ?? source.songId
+    const songTitle = committedCand?.song?.title ?? source.songTitle
+    if (!songId || !songTitle) {
+      setGenerateError(
+        `Can't move "${source.songTitle ?? source.title}" — missing song info on the source slot.`,
+      )
+      return
+    }
+    const sourceRestoreTitle =
+      committedCand?.priorSlotTitle?.trim() || fallbackSlotTitle(source.id)
+    const destPriorTitle = target.title?.trim() || fallbackSlotTitle(target.id)
+    try {
+      await clearSlot({
+        serviceTypeId,
+        planId,
+        itemId: source.id,
+        title: sourceRestoreTitle,
+      })
+      await commitSlot({
+        serviceTypeId,
+        planId,
+        itemId: target.id,
+        songId,
+        songTitle,
+      })
+      // Migrate the committed candidate to the destination, refreshing
+      // its priorSlotTitle so a future Clear restores the destination
+      // slot's identity rather than the source's.
+      if (committedCand) {
+        setCandidates((prev) =>
+          prev.map((c) =>
+            c.id === committedCand.id
+              ? {
+                  ...c,
+                  assignedSlotItemId: target.id,
+                  priorSlotTitle: destPriorTitle,
+                }
+              : c,
+          ),
+        )
+      }
+      appendSystemMessage(
+        `↕ Moved "${songTitle}" into the ${destPriorTitle} slot`,
+      )
+      invalidatePlanContext(serviceTypeId, planId)
+      const fresh = await loadPlanContext(serviceTypeId, planId)
+      setItems(fresh.items)
+    } catch (e) {
+      setGenerateError((e as Error).message)
+    }
+  }
+
+  // Both slots are filled — swap their service-order positions via the
+  // PCO item_reorder action. Slots and songs travel together (the song
+  // stays with its slot). Both candidates' priorSlotTitle is wiped
+  // since each affected slot now sits at a different position.
+  async function swapTwoFilledSlots(a: PlanItem, b: PlanItem) {
     const order = (items ?? []).map((it) => it.id)
-    const fromIdx = order.indexOf(draggedId)
-    const toIdx = order.indexOf(targetId)
-    if (fromIdx === -1 || toIdx === -1) return
+    const aIdx = order.indexOf(a.id)
+    const bIdx = order.indexOf(b.id)
+    if (aIdx === -1 || bIdx === -1) return
     const newOrder = [...order]
-    newOrder[fromIdx] = targetId
-    newOrder[toIdx] = draggedId
-    const draggedSlot = items?.find((it) => it.id === draggedId)
-    const targetSlot = items?.find((it) => it.id === targetId)
-    const swap = !!targetSlot?.songId
+    newOrder[aIdx] = b.id
+    newOrder[bIdx] = a.id
     try {
       await reorderItemsCall({
         serviceTypeId,
         planId,
         orderedItemIds: newOrder,
       })
-      // Both affected slots may host committed candidates whose
-      // priorSlotTitle was captured pre-move — null them out so a
-      // future clear resolves "Song N" from the slot's current
-      // position, not the old one.
-      const affectedIds = new Set([draggedId, targetId])
+      const affected = new Set([a.id, b.id])
       setCandidates((prev) =>
         prev.map((c) =>
-          c.assignedSlotItemId && affectedIds.has(c.assignedSlotItemId)
+          c.assignedSlotItemId && affected.has(c.assignedSlotItemId)
             ? { ...c, priorSlotTitle: null }
             : c,
         ),
       )
-      const draggedLabel =
-        draggedSlot?.songTitle ?? draggedSlot?.title ?? 'slot'
-      const targetLabel = targetSlot?.songTitle ?? targetSlot?.title ?? 'slot'
-      appendSystemMessage(
-        swap
-          ? `↔ Swapped "${draggedLabel}" with "${targetLabel}"`
-          : `↕ Moved "${draggedLabel}" into the "${targetLabel}" position`,
-      )
+      const aLabel = a.songTitle ?? a.title ?? 'slot'
+      const bLabel = b.songTitle ?? b.title ?? 'slot'
+      appendSystemMessage(`↔ Swapped "${aLabel}" with "${bLabel}"`)
       invalidatePlanContext(serviceTypeId, planId)
       const fresh = await loadPlanContext(serviceTypeId, planId)
       setItems(fresh.items)
