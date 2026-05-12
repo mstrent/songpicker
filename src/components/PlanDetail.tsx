@@ -551,11 +551,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         .map((it) => it.songTitle!)
 
       const serviceOrder = buildServiceOrderText(items)
-      const history: ConversationTurn[] = messages.map((m) =>
-        m.role === 'system'
-          ? { role: 'user' as const, content: `[event] ${m.content}` }
-          : { role: m.role, content: m.content },
-      )
+      const history: ConversationTurn[] = buildAiHistory(messages)
 
       // Pre-allocate an id for the placeholder assistant message so
       // stream chunks can find it to append into. Manual sends also
@@ -2918,6 +2914,96 @@ function formatNotesSource(notes: PlanNote[] | null): string {
     .filter((n) => n.content && n.content.trim())
     .map((n) => n.content.trim())
     .join('\n\n')
+}
+
+// Cap on how many user/assistant prose turn-pairs we keep verbatim
+// in the AI's history. Older prose turns drop entirely; older
+// `[event]` system markers get collapsed into a single counts-only
+// summary at the top of the history. 8 prose messages ≈ 4 turn-pairs.
+const HISTORY_PROSE_CAP = 8
+
+// Convert a SessionMessage[] into the ConversationTurn[] shape the AI
+// receives, with two-tier pruning so a long-running session doesn't
+// blow up the per-turn token count. Recent prose + recent events go
+// verbatim; older content collapses into a `[summary]` line.
+function buildAiHistory(messages: SessionMessage[]): ConversationTurn[] {
+  const proseCount = messages.filter((m) => m.role !== 'system').length
+  if (proseCount <= HISTORY_PROSE_CAP) {
+    return foldMessagesToHistory(messages)
+  }
+  // Find the cutoff: the earliest message we keep verbatim. Walk
+  // back from the end, counting prose turns, until we've gathered
+  // HISTORY_PROSE_CAP of them. Everything before that is "old".
+  let proseFound = 0
+  let cutoff = 0
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role !== 'system') proseFound += 1
+    if (proseFound >= HISTORY_PROSE_CAP) {
+      cutoff = i
+      break
+    }
+  }
+  const oldMessages = messages.slice(0, cutoff)
+  const recentMessages = messages.slice(cutoff)
+  const out = foldMessagesToHistory(recentMessages)
+  const summary = summarizeOldEvents(oldMessages)
+  if (summary) {
+    out.unshift({ role: 'user', content: `[summary] ${summary}` })
+  }
+  return out
+}
+
+function foldMessagesToHistory(
+  messages: SessionMessage[],
+): ConversationTurn[] {
+  return messages.map((m) =>
+    m.role === 'system'
+      ? { role: 'user' as const, content: `[event] ${m.content}` }
+      : { role: m.role, content: m.content },
+  )
+}
+
+// Compress a slice of old messages into a single counts-only line.
+// Pattern-matches the system message prefixes we emit (✗ Rejected,
+// 🤖 AI committed, ↗ Committed, etc.) so the categories stay stable
+// across user/AI/reconciliation event sources. Specifics
+// (which songs, which slots, exact reasons) are deliberately dropped —
+// the current candidates block + service order already convey the
+// state that matters; this summary is just orientation for the AI
+// that "stuff happened earlier" without re-sending every event.
+function summarizeOldEvents(messages: SessionMessage[]): string {
+  const events = messages.filter((m) => m.role === 'system')
+  if (events.length === 0) return ''
+  let rejected = 0
+  let unrejected = 0
+  let committed = 0
+  let moved = 0
+  let swapped = 0
+  let cleared = 0
+  let proposed = 0
+  for (const e of events) {
+    const c = e.content
+    if (/^✗ Rejected:/.test(c) || /AI rejected/.test(c)) rejected += 1
+    else if (/^↩ Unrejected:/.test(c) || /AI restored/.test(c)) unrejected += 1
+    else if (/AI committed|^↗ Committed/.test(c)) committed += 1
+    else if (/AI moved|^↕ Moved/.test(c)) moved += 1
+    else if (/AI swapped|^↔ Swapped/.test(c)) swapped += 1
+    else if (/AI cleared|^↶ Cleared/.test(c)) cleared += 1
+    else if (/AI proposed/.test(c)) {
+      const match = /AI proposed (\d+)/.exec(c)
+      proposed += match ? parseInt(match[1], 10) : 1
+    }
+  }
+  const parts: string[] = []
+  if (proposed) parts.push(`${proposed} song${proposed === 1 ? '' : 's'} proposed`)
+  if (rejected) parts.push(`${rejected} rejected`)
+  if (unrejected) parts.push(`${unrejected} restored`)
+  if (committed) parts.push(`${committed} committed to slot${committed === 1 ? '' : 's'}`)
+  if (moved) parts.push(`${moved} moved`)
+  if (swapped) parts.push(`${swapped} swap${swapped === 1 ? '' : 's'}`)
+  if (cleared) parts.push(`${cleared} slot${cleared === 1 ? '' : 's'} cleared`)
+  if (parts.length === 0) return ''
+  return `Earlier in this session: ${parts.join(', ')}.`
 }
 
 // Render the plan's items as a human-readable list for the AI prompt.
