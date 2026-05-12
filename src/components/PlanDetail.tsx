@@ -3,6 +3,7 @@ import {
   clearSlot,
   commitSlot,
   loadSession,
+  reorderItems as reorderItemsCall,
   saveSession,
   savePlanNotes,
   savePlanTheme,
@@ -710,6 +711,50 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   }
 
 
+  // Drop handler for "filled slot dragged onto another item to reorder
+  // its position in the service order". Computes the new order, PATCHes
+  // PCO, and wipes priorSlotTitle on any candidate committed to the
+  // moved item so a future Clear falls back to the "Song N" convention
+  // at the slot's NEW position rather than restoring the title that
+  // matched its old position.
+  async function reorderSlotItem(draggedId: string, beforeId: string) {
+    if (draggedId === beforeId) return
+    const order = (items ?? []).map((it) => it.id)
+    const fromIdx = order.indexOf(draggedId)
+    const toIdx = order.indexOf(beforeId)
+    if (fromIdx === -1 || toIdx === -1) return
+    const removed = [...order.slice(0, fromIdx), ...order.slice(fromIdx + 1)]
+    const insertAt = removed.indexOf(beforeId)
+    const newOrder = [
+      ...removed.slice(0, insertAt),
+      draggedId,
+      ...removed.slice(insertAt),
+    ]
+    try {
+      await reorderItemsCall({
+        serviceTypeId,
+        planId,
+        orderedItemIds: newOrder,
+      })
+      // Reset priorSlotTitle on any candidate committed to the moved
+      // slot — the "Song N" fallback should now resolve from the
+      // slot's NEW position, not its old one.
+      setCandidates((prev) =>
+        prev.map((c) =>
+          c.assignedSlotItemId === draggedId
+            ? { ...c, priorSlotTitle: null }
+            : c,
+        ),
+      )
+      appendSystemMessage(`↕ Reordered slot in the service order`)
+      invalidatePlanContext(serviceTypeId, planId)
+      const fresh = await loadPlanContext(serviceTypeId, planId)
+      setItems(fresh.items)
+    } catch (e) {
+      setGenerateError((e as Error).message)
+    }
+  }
+
   // Drop handler for "candidate dragged onto empty slot". Reuses the
   // commit path, but synthesises a candidate with the new
   // assignedSlotItemId so commitCandidate sees the slot assignment on
@@ -891,8 +936,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                   it.songAuthor ||
                   it.songCcli)
               const draggable = isSong && filled
-              const isDropTarget =
+              const isCommitTarget =
                 dragKind === 'candidate' && isSong && !filled
+              const isReorderTarget =
+                dragKind === 'slot' && dragSourceId !== null && dragSourceId !== it.id
+              const isDropTarget = isCommitTarget || isReorderTarget
               const isBeingDragged =
                 dragKind === 'slot' && dragSourceId === it.id
               return (
@@ -900,9 +948,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                   key={it.id}
                   className={`${cls}${isDropTarget ? ' drag-target' : ''}${
                     isDropTarget && dragOverItemId === it.id ? ' drag-over' : ''
-                  }${draggable ? ' is-draggable' : ''}${
-                    isBeingDragged ? ' is-dragging' : ''
-                  }`}
+                  }${isReorderTarget ? ' drag-target-reorder' : ''}${
+                    draggable ? ' is-draggable' : ''
+                  }${isBeingDragged ? ' is-dragging' : ''}`}
                   draggable={draggable || undefined}
                   onDragStart={(e) => {
                     if (!draggable) return
@@ -937,6 +985,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     e.preventDefault()
                     if (dragKind === 'candidate' && dragSourceId) {
                       void dropCandidateOnSlot(dragSourceId, it.id)
+                    } else if (dragKind === 'slot' && dragSourceId) {
+                      void reorderSlotItem(dragSourceId, it.id)
                     }
                     endDrag()
                   }}

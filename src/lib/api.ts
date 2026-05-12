@@ -194,6 +194,17 @@ export const clearSlot = httpsCallable<
   { ok: boolean }
 >(functions, 'clearSlot')
 
+export const reorderItems = httpsCallable<
+  {
+    serviceTypeId: string
+    planId: string
+    /** The plan's items in their NEW desired order. The server PATCHes
+     *  each one with sequence = index + 1. */
+    orderedItemIds: string[]
+  },
+  { ok: boolean }
+>(functions, 'reorderItems')
+
 export const searchSongs = httpsCallable<{ query: string }, { songs: Song[] }>(
   functions,
   'searchSongs',

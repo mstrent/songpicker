@@ -438,6 +438,29 @@ export const commitSlot = onCall(async (req) => {
   return { ok: true }
 })
 
+export const reorderItems = onCall(async (req) => {
+  const { uid } = requireAllowed(req)
+  const { serviceTypeId, planId, orderedItemIds } = req.data as {
+    serviceTypeId?: string
+    planId?: string
+    orderedItemIds?: string[]
+  }
+  if (
+    !serviceTypeId ||
+    !planId ||
+    !Array.isArray(orderedItemIds) ||
+    orderedItemIds.length === 0
+  ) {
+    throw new HttpsError(
+      'invalid-argument',
+      'serviceTypeId, planId, and non-empty orderedItemIds required',
+    )
+  }
+  const client = await pcoForUser(uid)
+  await client.reorderPlanItems(serviceTypeId, planId, orderedItemIds)
+  return { ok: true }
+})
+
 export const clearSlot = onCall(async (req) => {
   const { uid } = requireAllowed(req)
   const { serviceTypeId, planId, itemId, title } = req.data as {

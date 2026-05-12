@@ -488,6 +488,39 @@ export class PcoClient {
     return { arrangementId, keyId: firstKeyId, keyName }
   }
 
+  // PATCH every item in `orderedItemIds` with its new 1-based sequence
+  // number. PCO Services orders plan items by the `sequence` attribute,
+  // and renumbering all of them is the simplest deterministic way to
+  // commit a reorder — gaps and ties get resolved unambiguously.
+  // Bounded concurrency keeps us well under the 100-req/20s rate limit
+  // for typical plan sizes (≤25 items).
+  async reorderPlanItems(
+    serviceTypeId: string,
+    planId: string,
+    orderedItemIds: string[],
+  ): Promise<void> {
+    const tasks = orderedItemIds.map((itemId, idx) => ({ itemId, sequence: idx + 1 }))
+    await import('./concurrency').then(({ pMap }) =>
+      pMap(
+        tasks,
+        async ({ itemId, sequence }) => {
+          const body = JSON.stringify({
+            data: {
+              type: 'Item',
+              id: itemId,
+              attributes: { sequence },
+            },
+          })
+          await this.fetch(
+            `/service_types/${serviceTypeId}/plans/${planId}/items/${itemId}`,
+            { method: 'PATCH', body },
+          )
+        },
+        4,
+      ),
+    )
+  }
+
   // Unset both the song and arrangement relationships so the slot reverts
   // to "empty" in Planning Center. Used when the user wants to retry a
   // pick — clearing the slot lets the AI propose new options for that
