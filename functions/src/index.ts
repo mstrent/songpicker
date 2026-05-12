@@ -10,7 +10,7 @@ import {
   pcoForUser,
   savePcoCredentialsForUser,
 } from './pco/credentials'
-import { countSongs } from './pco/songSlots'
+import { countSongs, isSongSlot } from './pco/songSlots'
 import type { NewItem } from './pco/types'
 import {
   TECHNICAL_REQUIREMENTS,
@@ -458,6 +458,30 @@ export const reorderItems = onCall(async (req) => {
   }
   const client = await pcoForUser(uid)
   await client.reorderPlanItems(serviceTypeId, planId, orderedItemIds)
+
+  // After reorder, the empty "Song N"-style slots have stale titles —
+  // an empty slot that moved from the 2nd song position to the 1st is
+  // still called "Song 2" in PCO. Re-fetch in the new order and renumber
+  // only the empty song slots whose title currently matches the
+  // "Song N" pattern. Filled slots keep their song-name titles, and
+  // any custom-named slots (e.g. "Opening Hymn") are left alone.
+  const items = await client.listPlanItems(serviceTypeId, planId)
+  const songSlotItems = items.filter(isSongSlot)
+  await pMap(
+    songSlotItems.map((item, idx) => ({ item, idx })),
+    async ({ item, idx }) => {
+      if (item.songId) return
+      const expected = `Song ${idx + 1}`
+      if (item.title === expected) return
+      const current = (item.title ?? '').trim()
+      if (!/^song\s+\d+$/i.test(current)) return
+      await client.updatePlanItem(serviceTypeId, planId, item.id, {
+        title: expected,
+      })
+    },
+    4,
+  )
+
   return { ok: true }
 })
 
