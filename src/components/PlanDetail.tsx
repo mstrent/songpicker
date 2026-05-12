@@ -231,6 +231,15 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   // time (which would skip the firing once a slow manual Send is
   // still in flight, etc.).
   const generatingRef = useRef(false)
+  // Candidate ids that were sent to the AI on the most recent
+  // suggestSongs call (manual or auto-refresh). Used to compact the
+  // candidates block — once the AI has seen a candidate's full info
+  // (especially the chorus snippet, the heaviest field), subsequent
+  // turns can omit it. Resets to empty on page load, which means a
+  // session resumed after closing the tab re-introduces all
+  // candidates with full data on the first turn (intentional — the
+  // AI is effectively "rebooting" its understanding of the pool).
+  const lastSentCandidateIdsRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     let cancelled = false
@@ -262,6 +271,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     }
     unservedRejectsRef.current = 0
     unservedReasonSavesRef.current = 0
+    lastSentCandidateIdsRef.current = new Set()
 
     // Load the persisted candidate pool + future chat history for this plan.
     // Survives page refreshes and lets iteration span multiple sittings.
@@ -499,15 +509,22 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         itemIdBySlotIndex.set(idx + 1, it.id)
       })
 
+      // Compact the candidates payload: candidates the AI already saw
+      // on the previous turn drop their chorusSnippet (the only large
+      // stable field). Title + author still go on every turn so the
+      // AI can disambiguate songs that share a title. Mutable fields
+      // (decision, committed, assignedSlot, rejectReason) always sent.
+      const knownCandidateIds = lastSentCandidateIdsRef.current
       const aiCandidates: AiCandidate[] = candidates.map((c) => {
         const slotIndex = c.assignedSlotItemId
           ? slotIndexByItemId.get(c.assignedSlotItemId)
           : undefined
+        const isKnownToAi = knownCandidateIds.has(c.id)
         return {
           id: c.id,
           title: c.suggestion.title,
           author: c.suggestion.author,
-          chorusSnippet: c.suggestion.chorusSnippet,
+          chorusSnippet: isKnownToAi ? undefined : c.suggestion.chorusSnippet,
           slots:
             c.suggestion.slots && c.suggestion.slots.length > 0
               ? c.suggestion.slots
@@ -655,6 +672,13 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           if (minted.length > 0) {
             setCandidates((prev) => [...prev, ...minted])
             minted.forEach(searchAndAttachSong)
+            // Newly-proposed candidates count as "AI has seen these"
+            // for the next turn's payload-compaction check — the AI
+            // just emitted them with full data, no need to send them
+            // back with the chorus snippet attached again next time.
+            for (const c of minted) {
+              lastSentCandidateIdsRef.current.add(c.id)
+            }
             appendSystemMessage(
               `🤖 AI proposed ${minted.length} new song${minted.length === 1 ? '' : 's'}`,
             )
@@ -1086,6 +1110,17 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         autoRefresh,
       })
 
+      // Mark all candidates we just sent as "AI has seen these" so
+      // subsequent turns can compact their payload (drop the chorus
+      // snippet). The stream below will append new candidates via
+      // propose actions; we add their ids to this set as they arrive
+      // so the NEXT turn knows about them too. Update here at send
+      // time rather than after the stream so a mid-stream error
+      // still records what was sent.
+      lastSentCandidateIdsRef.current = new Set(
+        aiCandidates.map((c) => c.id),
+      )
+
       for await (const chunk of stream) {
         if (chunk.kind === 'text') {
           streamedText += chunk.delta
@@ -1219,6 +1254,12 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setCandidates([])
     setMessages([])
     setDebug(null)
+    // Reset the "AI has seen these candidates" tracker so the next
+    // Suggest call re-introduces any remaining candidates with full
+    // info. Clearing the conversation effectively wipes the AI's
+    // memory of what's been said, so we need to give it full intros
+    // again.
+    lastSentCandidateIdsRef.current = new Set()
     if (autoRefineTimer.current) {
       clearTimeout(autoRefineTimer.current)
       autoRefineTimer.current = null
