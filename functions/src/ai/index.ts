@@ -13,6 +13,8 @@ export type {
   AiCandidate,
   AiDebug,
   AiProvider,
+  ClearSlotAction,
+  CommitSongAction,
   ProposeAction,
   ReassignAction,
   RemoveAction,
@@ -20,4 +22,5 @@ export type {
   StreamChunk,
   SuggestRequest,
   SuggestResult,
+  UnrejectAction,
 } from './types'

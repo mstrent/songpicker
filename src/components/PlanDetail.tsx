@@ -564,8 +564,19 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       const titleById = new Map(
         candidates.map((c): [string, string] => [c.id, c.suggestion.title]),
       )
+      // Pre-turn candidate lookup by id (for AI write actions that
+      // need full candidate data: matched PCO song id, etc).
+      const preTurnCandidatesById = new Map(
+        candidates.map((c): [string, CandidateMatch] => [c.id, c]),
+      )
 
       let streamedText = ''
+      // PCO writes (commit/clear) fire fire-and-forget against the
+      // optimistic SPA state. We collect their promises so the
+      // post-stream cleanup can await them and trigger a single
+      // items refresh once everything has landed.
+      const pendingPcoWrites: Promise<void>[] = []
+      let pcoWritesFired = false
 
       const applyAction = (action: AiAction) => {
         const now = Date.now()
@@ -626,6 +637,181 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           appendSystemMessage(
             `🤖 AI moved "${title}" to song slot ${action.slotIndex}`,
           )
+        } else if (action.kind === 'commit') {
+          // Defensive: the system prompt tells the AI not to commit
+          // during auto-refresh, but a guard here prevents a
+          // misbehaving turn from silently writing to PCO anyway.
+          if (autoRefresh) {
+            appendSystemMessage(
+              `⚠ AI tried to commit a song during auto-refresh — skipped (commits require explicit direction)`,
+            )
+            return
+          }
+          const candidate = preTurnCandidatesById.get(action.candidateId)
+          if (!candidate) {
+            appendSystemMessage(
+              `⚠ AI tried to commit an unknown candidate (${action.candidateId}) — skipped`,
+            )
+            return
+          }
+          if (!candidate.song?.id) {
+            appendSystemMessage(
+              `⚠ AI tried to commit "${candidate.suggestion.title}" but it isn't matched to a song in your Planning Center library — skipped`,
+            )
+            return
+          }
+          const targetItemId = itemIdBySlotIndex.get(action.slotIndex)
+          if (!targetItemId) {
+            appendSystemMessage(
+              `⚠ AI tried to commit "${candidate.suggestion.title}" to song slot ${action.slotIndex}, but no such slot exists — skipped`,
+            )
+            return
+          }
+          const songId = candidate.song.id
+          const songTitle = candidate.suggestion.title
+          const slotItem = (items ?? []).find((it) => it.id === targetItemId)
+          const priorSlotTitle = slotItem?.title ?? null
+          // Optimistic flip — UI shows the candidate as committed
+          // immediately; rolls back if the PCO call rejects.
+          setCandidates((prev) =>
+            prev.map((c) =>
+              c.id === action.candidateId
+                ? {
+                    ...c,
+                    committedAt: now,
+                    assignedSlotItemId: targetItemId,
+                    priorSlotTitle,
+                  }
+                : c,
+            ),
+          )
+          appendSystemMessage(
+            `🤖 AI committed "${songTitle}" to song slot ${action.slotIndex}`,
+          )
+          pcoWritesFired = true
+          pendingPcoWrites.push(
+            commitSlot({
+              serviceTypeId,
+              planId,
+              itemId: targetItemId,
+              songId,
+              songTitle,
+            })
+              .then(() => undefined)
+              .catch((e: Error) => {
+                setCandidates((prev) =>
+                  prev.map((c) =>
+                    c.id === action.candidateId
+                      ? {
+                          ...c,
+                          committedAt: null,
+                          assignedSlotItemId: null,
+                          priorSlotTitle: null,
+                        }
+                      : c,
+                  ),
+                )
+                appendSystemMessage(
+                  `⚠ AI commit failed for "${songTitle}" — ${e.message}`,
+                )
+              }),
+          )
+        } else if (action.kind === 'clear_slot') {
+          if (autoRefresh) {
+            appendSystemMessage(
+              `⚠ AI tried to clear a slot during auto-refresh — skipped`,
+            )
+            return
+          }
+          const targetItemId = itemIdBySlotIndex.get(action.slotIndex)
+          if (!targetItemId) {
+            appendSystemMessage(
+              `⚠ AI tried to clear song slot ${action.slotIndex}, but no such slot exists — skipped`,
+            )
+            return
+          }
+          // Find the candidate currently committed to this slot (if
+          // any) so we can restore its prior slot title and capture
+          // a snapshot for rollback.
+          const committedCandidate = candidates.find(
+            (c) => c.assignedSlotItemId === targetItemId && c.committedAt != null,
+          )
+          const restoreTitle =
+            committedCandidate?.priorSlotTitle?.trim() ||
+            fallbackSlotTitle(targetItemId)
+          const songTitle = committedCandidate?.suggestion.title ?? 'song'
+          const rollbackSnapshot = committedCandidate
+            ? {
+                id: committedCandidate.id,
+                committedAt: committedCandidate.committedAt,
+                assignedSlotItemId: committedCandidate.assignedSlotItemId,
+                priorSlotTitle: committedCandidate.priorSlotTitle,
+              }
+            : null
+          setCandidates((prev) =>
+            prev.map((c) =>
+              c.assignedSlotItemId === targetItemId
+                ? {
+                    ...c,
+                    committedAt: null,
+                    assignedSlotItemId: null,
+                    priorSlotTitle: null,
+                  }
+                : c,
+            ),
+          )
+          appendSystemMessage(
+            `🤖 AI cleared "${songTitle}" from song slot ${action.slotIndex}`,
+          )
+          pcoWritesFired = true
+          pendingPcoWrites.push(
+            clearSlot({
+              serviceTypeId,
+              planId,
+              itemId: targetItemId,
+              title: restoreTitle,
+            })
+              .then(() => undefined)
+              .catch((e: Error) => {
+                if (rollbackSnapshot) {
+                  setCandidates((prev) =>
+                    prev.map((c) =>
+                      c.id === rollbackSnapshot.id
+                        ? {
+                            ...c,
+                            committedAt: rollbackSnapshot.committedAt,
+                            assignedSlotItemId:
+                              rollbackSnapshot.assignedSlotItemId,
+                            priorSlotTitle: rollbackSnapshot.priorSlotTitle,
+                          }
+                        : c,
+                    ),
+                  )
+                }
+                appendSystemMessage(
+                  `⚠ AI clear failed for song slot ${action.slotIndex} — ${e.message}`,
+                )
+              }),
+          )
+        } else if (action.kind === 'unreject') {
+          setCandidates((prev) =>
+            prev.map((c) =>
+              action.ids.includes(c.id) && c.decision === 'reject'
+                ? {
+                    ...c,
+                    decision: 'pending',
+                    rejectReason: null,
+                    rejectPickerDismissed: false,
+                  }
+                : c,
+            ),
+          )
+          const titles = action.ids
+            .map((id) => titleById.get(id) ?? `(unknown ${id})`)
+            .join(', ')
+          appendSystemMessage(
+            `🤖 AI restored ${titles} to the candidate pool`,
+          )
         }
       }
 
@@ -668,6 +854,25 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             m.id === assistantMsgId ? { ...m, content: final.message } : m,
           ),
         )
+      }
+      // Await any AI-driven PCO writes before unfreezing the UI so the
+      // post-turn items refresh sees their effects. Catches inside the
+      // promise itself handle rollback; the await here just sequences.
+      if (pendingPcoWrites.length > 0) {
+        await Promise.all(pendingPcoWrites)
+      }
+      // Single items refresh after the turn — picks up commits, clears,
+      // title restorations all in one PCO read.
+      if (pcoWritesFired) {
+        invalidatePlanContext(serviceTypeId, planId)
+        try {
+          const fresh = await loadPlanContext(serviceTypeId, planId)
+          setItems(fresh.items)
+        } catch {
+          // Items refresh is best-effort. The optimistic state still
+          // reflects what we intended; user can hard-refresh to pick
+          // up any drift.
+        }
       }
     } catch (e) {
       setGenerateError((e as Error).message)

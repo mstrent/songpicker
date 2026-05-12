@@ -156,6 +156,48 @@ responsibility — if the user rejects something, they can ask the AI
 for replacements in the next turn, or the AI can preemptively offer
 some in its reply. Same outcome, but visible and conversational.
 
+### Layer 6 — Agentic PCO write tools (shipped)
+
+Three new tools added to the streaming chat turn so the AI can take
+real-world actions in Planning Center, not just rearrange the SPA's
+candidate pool. "Direct with undo" safety model: every AI write
+goes through immediately, emits a `🤖` system message in the chat
+log, and is reversible via the existing service-order UI.
+
+- `commit_song({ candidateId, slotIndex })` — actually fills a
+  Planning Center song slot via the existing `commitSlot`
+  callable. Optimistic state flip (committedAt set immediately),
+  PCO call fires fire-and-forget, rollback on failure with a `⚠`
+  system message. Skipped with a warning if the candidate isn't
+  matched to a PCO library song.
+- `clear_slot({ slotIndex })` — backs out a committed slot via
+  `clearSlot`. Captures a per-turn rollback snapshot so a failed
+  clear restores the candidate's committed state. Restores the
+  prior slot title using `priorSlotTitle` if known, falling back
+  to `fallbackSlotTitle`.
+- `unreject_candidates({ ids })` — symmetric to
+  `remove_candidates`, lets the AI walk back rejections.
+
+Auto-refresh guard: `commit_song` and `clear_slot` are disallowed
+during auto-refresh turns. The system prompt tells the AI so;
+the SPA also drops the action with a `⚠` system message as
+belt-and-suspenders.
+
+Multiple writes in a single turn fire optimistically as they
+arrive in the stream, then the post-stream cleanup
+`await Promise.all(pendingPcoWrites)` and runs ONE
+`loadPlanContext` refresh to pick up all the resulting PCO
+state in a single read.
+
+Cost: three new tool schemas live in the Anthropic tools array,
+which sits inside the cache breakpoint — paid once per session,
+not per turn. Still one Anthropic round trip per turn; no
+tool-result loops.
+
+Scope deliberately excluded for this pass: library search,
+cross-session memory, set-arrangement-and-key, full plan
+reorder. None of those land here.
+
 ### Layer 5 — Streaming + cache breakpoints (shipped)
 
 **Streaming.** `firebase-functions` v7 callables natively support

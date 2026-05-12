@@ -3,6 +3,8 @@ import { buildUserMessage, flattenUserMessage } from './userMessage'
 import type {
   AiAction,
   AiProvider,
+  ClearSlotAction,
+  CommitSongAction,
   ProposeAction,
   ReassignAction,
   RemoveAction,
@@ -10,6 +12,7 @@ import type {
   StreamChunk,
   SuggestRequest,
   SuggestResult,
+  UnrejectAction,
 } from './types'
 
 const MODEL = 'claude-sonnet-4-6'
@@ -84,6 +87,56 @@ const TOOLS: Anthropic.Tool[] = [
         slotIndex: { type: 'integer', minimum: 1 },
       },
       required: ['candidateId', 'slotIndex'],
+    },
+  },
+  {
+    name: 'commit_song',
+    description:
+      "Actually fill a Planning Center song slot with this candidate. Use only when the user has clearly directed you to ('commit X to slot 2', 'fill the closer with the second one', 'go ahead and pick that'). Don't commit during auto-refresh turns and don't commit unprompted. The candidate must be matched to a song in the user's PCO library (committed candidates show up as 'committed' in the candidates block); if the user wants to commit something the AI proposed earlier this turn, wait for the user to confirm.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        candidateId: { type: 'string' },
+        slotIndex: {
+          type: 'integer',
+          minimum: 1,
+          description:
+            'Target song slot, 1-based, matching the [song slot N of M] tags in the service order text.',
+        },
+      },
+      required: ['candidateId', 'slotIndex'],
+    },
+  },
+  {
+    name: 'clear_slot',
+    description:
+      "Back out an already-committed song slot in Planning Center. Use when the user asks you to clear/unpick/undo a slot. Don't clear during auto-refresh turns and don't clear unprompted.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        slotIndex: {
+          type: 'integer',
+          minimum: 1,
+          description: '1-based song slot to clear.',
+        },
+      },
+      required: ['slotIndex'],
+    },
+  },
+  {
+    name: 'unreject_candidates',
+    description:
+      "Reverse a prior remove_candidates: flip the listed candidates back from rejected to pending. Use to course-correct when you removed something you shouldn't have, or when the user asks to bring rejected entries back.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Candidate ids from the Current candidates block.',
+        },
+      },
+      required: ['ids'],
     },
   },
 ]
@@ -243,6 +296,12 @@ function toAction(name: string, input: unknown): AiAction | null {
       return parseRemove(obj)
     case 'reassign':
       return parseReassign(obj)
+    case 'commit_song':
+      return parseCommit(obj)
+    case 'clear_slot':
+      return parseClear(obj)
+    case 'unreject_candidates':
+      return parseUnreject(obj)
     default:
       return null
   }
@@ -289,6 +348,28 @@ function parseReassign(obj: Record<string, unknown>): ReassignAction | null {
   return { kind: 'reassign', candidateId: obj.candidateId, slotIndex: idx }
 }
 
+function parseCommit(obj: Record<string, unknown>): CommitSongAction | null {
+  if (typeof obj.candidateId !== 'string' || !obj.candidateId) return null
+  const idx = typeof obj.slotIndex === 'number' ? Math.floor(obj.slotIndex) : NaN
+  if (!Number.isFinite(idx) || idx < 1) return null
+  return { kind: 'commit', candidateId: obj.candidateId, slotIndex: idx }
+}
+
+function parseClear(obj: Record<string, unknown>): ClearSlotAction | null {
+  const idx = typeof obj.slotIndex === 'number' ? Math.floor(obj.slotIndex) : NaN
+  if (!Number.isFinite(idx) || idx < 1) return null
+  return { kind: 'clear_slot', slotIndex: idx }
+}
+
+function parseUnreject(obj: Record<string, unknown>): UnrejectAction | null {
+  if (!Array.isArray(obj.ids)) return null
+  const ids = obj.ids.filter(
+    (i): i is string => typeof i === 'string' && i.length > 0,
+  )
+  if (ids.length === 0) return null
+  return { kind: 'unreject', ids }
+}
+
 // If the model called tools but emitted no prose text, synthesize a
 // short status line so the chat log doesn't have a blank assistant
 // turn. Keeps the conversation visibly responsive.
@@ -298,11 +379,17 @@ function fallbackMessage(actions: AiAction[]): string {
     proposed: 0,
     removed: 0,
     reassigned: 0,
+    committed: 0,
+    cleared: 0,
+    unrejected: 0,
   }
   for (const a of actions) {
     if (a.kind === 'propose') counts.proposed += a.suggestions.length
     else if (a.kind === 'remove') counts.removed += a.ids.length
     else if (a.kind === 'reassign') counts.reassigned += 1
+    else if (a.kind === 'commit') counts.committed += 1
+    else if (a.kind === 'clear_slot') counts.cleared += 1
+    else if (a.kind === 'unreject') counts.unrejected += a.ids.length
   }
   const parts: string[] = []
   if (counts.proposed)
@@ -311,5 +398,11 @@ function fallbackMessage(actions: AiAction[]): string {
     parts.push(`removed ${counts.removed} candidate${counts.removed === 1 ? '' : 's'}`)
   if (counts.reassigned)
     parts.push(`reassigned ${counts.reassigned} slot${counts.reassigned === 1 ? '' : 's'}`)
+  if (counts.committed)
+    parts.push(`committed ${counts.committed} song${counts.committed === 1 ? '' : 's'}`)
+  if (counts.cleared)
+    parts.push(`cleared ${counts.cleared} slot${counts.cleared === 1 ? '' : 's'}`)
+  if (counts.unrejected)
+    parts.push(`restored ${counts.unrejected} candidate${counts.unrejected === 1 ? '' : 's'}`)
   return `Done — ${parts.join(', ')}.`
 }

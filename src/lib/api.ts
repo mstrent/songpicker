@@ -288,7 +288,26 @@ export interface ReassignAction {
   candidateId: string
   slotIndex: number
 }
-export type AiAction = ProposeAction | RemoveAction | ReassignAction
+export interface CommitSongAction {
+  kind: 'commit'
+  candidateId: string
+  slotIndex: number
+}
+export interface ClearSlotAction {
+  kind: 'clear_slot'
+  slotIndex: number
+}
+export interface UnrejectAction {
+  kind: 'unreject'
+  ids: string[]
+}
+export type AiAction =
+  | ProposeAction
+  | RemoveAction
+  | ReassignAction
+  | CommitSongAction
+  | ClearSlotAction
+  | UnrejectAction
 
 /** One progress chunk streamed as the AI turn unfolds. Text deltas
  *  append to the in-progress assistant message; action chunks are

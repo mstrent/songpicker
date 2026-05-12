@@ -116,7 +116,39 @@ export interface ReassignAction {
   slotIndex: number
 }
 
-export type AiAction = ProposeAction | RemoveAction | ReassignAction
+/** Actually commit a candidate to a Planning Center song slot. SPA
+ *  calls the commitSlot Cloud Function with the candidate's matched
+ *  PCO song id; the optimistic local state flips committedAt
+ *  immediately and rolls back on PCO failure. Skipped silently for
+ *  candidates whose library match hasn't completed. */
+export interface CommitSongAction {
+  kind: 'commit'
+  candidateId: string
+  slotIndex: number
+}
+
+/** Back out a committed song slot — clears the PCO item via clearSlot
+ *  and resets any committed-state on the candidate that owned it. */
+export interface ClearSlotAction {
+  kind: 'clear_slot'
+  slotIndex: number
+}
+
+/** Reverse a prior remove_candidates: flip the listed candidates back
+ *  out of rejected and into pending. Lets the AI walk back a mistake
+ *  in the same conversation. */
+export interface UnrejectAction {
+  kind: 'unreject'
+  ids: string[]
+}
+
+export type AiAction =
+  | ProposeAction
+  | RemoveAction
+  | ReassignAction
+  | CommitSongAction
+  | ClearSlotAction
+  | UnrejectAction
 
 export interface SuggestResult {
   /** Ordered list of actions the AI chose to take this turn. Applied

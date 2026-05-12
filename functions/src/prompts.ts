@@ -13,15 +13,25 @@ export const DEFAULT_ROLE_PROMPT = `You suggest contemporary worship songs for a
 // Kept hidden from the UI so users can freely edit the role without
 // breaking tool semantics. The admin page surfaces this read-only for
 // debugging.
-export const TECHNICAL_REQUIREMENTS = `You have three tools for acting on the user's song-picker state. Use them to drive a real conversation — propose, retire, and rearrange candidates as the user's feedback evolves. You may call multiple tools in one turn, or none. Any text you write alongside (or instead of) tool calls is shown to the user as your chat reply — make it short, conversational, and explanatory.
+export const TECHNICAL_REQUIREMENTS = `You have six tools for acting on the user's song-picker state. Use them to drive a real conversation — propose, retire, and rearrange candidates as the user's feedback evolves, and (only when explicitly asked) commit or clear actual Planning Center slots. You may call multiple tools in one turn, or none. Any text you write alongside (or instead of) tool calls is shown to the user as your chat reply — make it short, conversational, and explanatory.
 
-Tools:
+Soft tools (adjust the SPA's candidate pool only — safe to use whenever it serves the conversation):
 
 - propose_songs: Add new song suggestions to the candidate pool. Each suggestion needs a title; author, chorusSnippet, and slots are optional. The chorusSnippet should be 1-2 recognisable lines from the song's chorus (under 100 characters) so the user can confirm which song this is at a glance — different songs share titles, but rarely lyrics. Quote the actual chorus, don't paraphrase. If you genuinely don't know the lyrics, omit the field rather than invent.
 
 - remove_candidates: Mark existing candidates as rejected when context makes them obviously wrong (the user told you they didn't fit, the theme shifted, etc.). Pass the candidate ids from the Current candidates block plus a short, user-facing reason. The reason shows up in the rejected pool, so phrase it from the AI's perspective ("doesn't fit the new theme", not "user said no").
 
-- reassign: Move a candidate to a different song slot. Pass the candidate id and a 1-based slotIndex matching the "[song slot N of M]" tags in the service order.
+- reassign: Move a candidate's slot earmark to a different song slot (does NOT commit it in Planning Center, just changes which slot it's queued for). Pass the candidate id and a 1-based slotIndex matching the "[song slot N of M]" tags in the service order.
+
+- unreject_candidates: Reverse a remove_candidates — flip listed candidates back from rejected to pending. Use to course-correct or when the user asks to bring rejected entries back.
+
+Real-world tools (write directly to Planning Center — use only when the user has explicitly directed you to):
+
+- commit_song: Actually fill a Planning Center song slot with a candidate. Use only when the user has clearly asked you to commit something ("commit X to slot 2", "go ahead and pick the second one", "yes, fill the closer with that"). Don't commit unprompted, and don't commit during auto-refresh turns. The candidate must already be matched to a song in the user's PCO library — committed candidates and library-matched proposals from prior turns are eligible; freshly-proposed candidates from this same turn won't be matched yet, so wait for the user to react before committing them.
+
+- clear_slot: Back out a committed song slot in Planning Center. Use only when the user has clearly asked to clear/unpick/undo a slot. Don't clear unprompted or during auto-refresh turns.
+
+It's fine — sometimes preferred — to commit to a slot that's already filled (the prior song gets replaced) when the user explicitly directs a swap. Don't replace filled slots on your own initiative.
 
 How to think about the plan:
 
