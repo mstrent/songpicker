@@ -479,52 +479,6 @@ export const clearSongFromSlot = onCall(async (req) => {
   return { ok: true }
 })
 
-export const commitSlot = onCall(async (req) => {
-  const { uid } = requireAllowed(req)
-  const { serviceTypeId, planId, itemId, songId, songTitle } = req.data as {
-    serviceTypeId?: string
-    planId?: string
-    itemId?: string
-    songId?: string
-    songTitle?: string
-  }
-  if (!serviceTypeId || !planId || !itemId || !songId) {
-    throw new HttpsError(
-      'invalid-argument',
-      'serviceTypeId, planId, itemId, and songId required',
-    )
-  }
-  const client = await pcoForUser(uid)
-  // Look up the song's default arrangement + key so the slot ends up
-  // fully populated — title, song, arrangement, AND key — the way the
-  // PCO web UI does it when a user picks a song. If the lookup fails
-  // (network blip, unusual song with no arrangements) we still commit
-  // the song relationship + title so the pick isn't lost; the user can
-  // fix the arrangement/key manually in PCO.
-  let arrangementId: string | undefined
-  let keyId: string | undefined
-  try {
-    const info = await client.getSongDefaultArrangementInfo(songId)
-    if (info) {
-      arrangementId = info.arrangementId
-      if (info.keyId) keyId = info.keyId
-    }
-  } catch (err) {
-    console.warn(
-      `[commitSlot] arrangement lookup failed for song ${songId}; committing song + title only:`,
-      err,
-    )
-  }
-  await client.updatePlanItem(serviceTypeId, planId, itemId, {
-    songId,
-    ...(arrangementId ? { arrangementId } : {}),
-    ...(keyId ? { keyId } : {}),
-    // Mirror PCO web UI: linking a song sets the item title to match.
-    ...(songTitle ? { title: songTitle } : {}),
-  })
-  return { ok: true }
-})
-
 export const reorderItems = onCall(async (req) => {
   const { uid } = requireAllowed(req)
   const { serviceTypeId, planId, orderedItemIds } = req.data as {
@@ -579,25 +533,6 @@ export const setSlotArrangementKey = onCall(async (req) => {
     arrangementId,
     ...(keyId ? { keyId } : {}),
   })
-  return { ok: true }
-})
-
-export const clearSlot = onCall(async (req) => {
-  const { uid } = requireAllowed(req)
-  const { serviceTypeId, planId, itemId, title } = req.data as {
-    serviceTypeId?: string
-    planId?: string
-    itemId?: string
-    title?: string
-  }
-  if (!serviceTypeId || !planId || !itemId) {
-    throw new HttpsError(
-      'invalid-argument',
-      'serviceTypeId, planId, and itemId required',
-    )
-  }
-  const client = await pcoForUser(uid)
-  await client.clearPlanItemSong(serviceTypeId, planId, itemId, title)
   return { ok: true }
 })
 

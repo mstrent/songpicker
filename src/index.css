@@ -1423,10 +1423,6 @@ textarea {
 .candidate.match-error { border-left: 3px solid var(--error); }
 
 /* Decision states layered on top of the match colour. */
-.candidate.decision-shortlist {
-  background: linear-gradient(90deg, var(--success-soft) 0%, var(--surface) 60%);
-  border-left-width: 5px;
-}
 .candidate.decision-reject {
   opacity: 0.55;
 }
@@ -1453,12 +1449,6 @@ textarea {
 .candidate .decision-btn:hover {
   filter: none;
 }
-.candidate .decision-shortlist:hover,
-.candidate .decision-shortlist.on {
-  background: var(--success-soft);
-  color: var(--success);
-  border-color: var(--success);
-}
 .candidate .decision-reject:hover,
 .candidate .decision-reject.on {
   background: var(--error-soft);
@@ -1470,8 +1460,8 @@ textarea {
   cursor: not-allowed;
 }
 
-/* Slot assignment + commit controls (visible on shortlisted, matched
-   candidates). All sit inline with the shortlist/reject pills. */
+/* Slot picker: select dropdown that commits a matched, uncommitted
+   candidate directly on selection. Sits inline with the Reject pill. */
 .candidate .slot-picker {
   background: var(--bg);
   color: var(--fg);
@@ -1491,41 +1481,6 @@ textarea {
 .candidate .slot-picker:disabled {
   opacity: 0.55;
   cursor: not-allowed;
-}
-.candidate .assigned-arrow {
-  font-size: 0.85rem;
-  color: var(--accent);
-  font-weight: 600;
-  padding: 0 0.2rem;
-}
-.candidate .commit-btn {
-  background: var(--ai-gradient);
-  color: white;
-  border: 0;
-  font-size: 0.78rem;
-  font-weight: 700;
-  padding: 0.25rem 0.75rem;
-  border-radius: 999px;
-  cursor: pointer;
-  box-shadow: 0 2px 6px -2px rgba(147, 51, 234, 0.35);
-}
-.candidate .commit-btn:hover {
-  filter: brightness(1.08);
-}
-.candidate .unassign-btn {
-  background: transparent;
-  color: var(--muted);
-  border: 1px solid var(--border-strong);
-  font-size: 0.78rem;
-  font-weight: 600;
-  padding: 0.2rem 0.5rem;
-  border-radius: 999px;
-  cursor: pointer;
-}
-.candidate .unassign-btn:hover {
-  color: var(--error);
-  border-color: var(--error);
-  background: var(--error-soft);
 }
 .candidate .committed-badge {
   background: var(--success-soft);
