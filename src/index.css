@@ -1081,7 +1081,11 @@ textarea {
 .arr-key-panel {
   position: absolute;
   top: calc(100% + 0.35rem);
-  left: 0;
+  /* Anchor to the right edge of the chip so the panel opens leftward —
+     the chip lives over near the Spotify link on the right side of
+     each item row, so opening rightward would risk clipping the
+     viewport. */
+  right: 0;
   z-index: 30;
   min-width: 240px;
   background: var(--surface);

@@ -1128,22 +1128,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     )}
                     {showMeta && (
                       <div className="item-meta">
+                        {(it.leaders.length > 0 || (!filled && it.keyName)) && (
                         <div className="meta-chips">
-                          {filled && it.songId && (
-                            <ArrangementKeyEditor
-                              serviceTypeId={serviceTypeId}
-                              planId={planId}
-                              item={it}
-                              onSaved={async () => {
-                                invalidatePlanContext(serviceTypeId, planId)
-                                const fresh = await loadPlanContext(
-                                  serviceTypeId,
-                                  planId,
-                                )
-                                setItems(fresh.items)
-                              }}
-                            />
-                          )}
                           {!filled && it.keyName && (
                             <span className="meta-chip">
                               Key <strong>{it.keyName}</strong>
@@ -1158,6 +1144,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                             </span>
                           ))}
                         </div>
+                        )}
                         {(it.songAuthor || it.songCcli) && (
                           <div className="meta-credits">
                             {it.songAuthor && (
@@ -1179,6 +1166,18 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       </div>
                     )}
                   </div>
+                  {filled && it.songId && (
+                    <ArrangementKeyEditor
+                      serviceTypeId={serviceTypeId}
+                      planId={planId}
+                      item={it}
+                      onSaved={async () => {
+                        invalidatePlanContext(serviceTypeId, planId)
+                        const fresh = await loadPlanContext(serviceTypeId, planId)
+                        setItems(fresh.items)
+                      }}
+                    />
+                  )}
                   {filled && displayTitle && (
                     <a
                       className="spotify-link"
