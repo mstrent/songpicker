@@ -172,6 +172,12 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   // replacements rather than N independent calls.
   const replacementTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingReplacements = useRef(0)
+  // Mirror candidates + maxCount in refs so the debounced replacement
+  // timer reads the latest values when it fires 600ms later (the
+  // closure captured at scheduleReplacement time would otherwise be
+  // stale).
+  const candidatesRef = useRef<CandidateMatch[]>([])
+  const maxCountRef = useRef(maxCount)
 
   useEffect(() => {
     let cancelled = false
@@ -254,6 +260,17 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     }, 700)
     return () => clearTimeout(id)
   }, [candidates, messages, sessionLoaded, planId])
+
+  // Keep the latest candidates / maxCount available to the debounced
+  // auto-replacement timer (which fires 600ms after the last reject —
+  // the candidates closure it would otherwise capture is stale by
+  // then).
+  useEffect(() => {
+    candidatesRef.current = candidates
+  }, [candidates])
+  useEffect(() => {
+    maxCountRef.current = maxCount
+  }, [maxCount])
 
   // Reconcile committed candidates with the current PCO service order.
   // If a slot was cleared (or had a different song committed to it) via
@@ -470,13 +487,30 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       pendingReplacements.current = 0
       replacementTimer.current = null
       if (n <= 0) return
+      // After refinement turns the list can grow past the user's
+      // requested max. In that case rejecting shouldn't keep refilling
+      // the list — they're trying to trim down. Skip replacement
+      // whenever the post-rejection active count is already at or
+      // above maxCount, and only ask for enough to bring us back up to
+      // max when there IS room.
+      const activeCount = candidatesRef.current.filter(
+        (c) => c.decision !== 'reject',
+      ).length
+      const maxC = maxCountRef.current
+      if (activeCount >= maxC) {
+        appendSystemMessage(
+          `↻ Skipped auto-replacement — ${activeCount} song${activeCount === 1 ? '' : 's'} still on the list, at or above the requested max of ${maxC}`,
+        )
+        return
+      }
+      const fillCount = Math.min(n, maxC - activeCount)
       void fetchSuggestions({
-        // Auto-replacement is strictly 1:1 with the rejections that
-        // accumulated in the debounce window — pin the range so the
-        // model returns exactly that many replacement songs.
-        minCount: n,
-        maxCount: n,
-        userMessage: `(auto-replacement for ${n} rejected song${n === 1 ? '' : 's'})`,
+        // Auto-replacement pins min=max so the model returns exactly
+        // the number of replacement songs we asked for — capped at
+        // the room remaining under maxCount.
+        minCount: fillCount,
+        maxCount: fillCount,
+        userMessage: `(auto-replacement for ${fillCount} rejected song${fillCount === 1 ? '' : 's'})`,
         addToChat: false,
       })
     }, 600)
