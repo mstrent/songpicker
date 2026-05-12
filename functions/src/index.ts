@@ -285,7 +285,6 @@ export const suggestSongs = onCall<
       return {
         actions: result.actions,
         message: result.message,
-        debug: result.debug,
         structureSource: structure.effective.source,
         roleSource: role.effective.source,
       }

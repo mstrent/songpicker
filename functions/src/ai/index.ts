@@ -11,7 +11,6 @@ export function getAiProvider(apiKey: string): AiProvider {
 export type {
   AiAction,
   AiCandidate,
-  AiDebug,
   AiProvider,
   ProposeAction,
   RemoveAction,

@@ -86,16 +86,6 @@ export interface SuggestRequest {
   autoRefresh?: boolean
 }
 
-export interface AiDebug {
-  model: string
-  systemPrompt: string
-  userMessage: string
-  /** Raw tool-use blocks the model returned, surfaced as JSON in the
-   *  SPA's debug panel so we can see exactly what the AI chose to do
-   *  on each turn. */
-  rawActions?: unknown
-}
-
 /** Add new candidates to the pool. The SPA appends these the same way
  *  user-driven Suggest used to: each suggestion becomes a pending
  *  CandidateMatch and goes through library-match lookup. */
@@ -156,7 +146,6 @@ export interface SuggestResult {
    *  block of its tool-use response. Empty/whitespace falls back to a
    *  generic synthesized message so the chat log never goes silent. */
   message: string
-  debug: AiDebug
 }
 
 /** A single piece of progress streamed back to the client as the AI

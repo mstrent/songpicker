@@ -55,12 +55,6 @@ export function buildUserMessage(req: SuggestRequest): BuiltUserMessage {
   }
 }
 
-/** Flat-string form for the SPA debug panel and any caller that
- *  doesn't care about the cache boundary. */
-export function flattenUserMessage(b: BuiltUserMessage): string {
-  return [b.stable, b.volatile].filter((s) => s).join('\n')
-}
-
 // One line per candidate, dense enough for the AI to scan and address
 // any entry by id. Mirrors the SPA's mental model (decision + optional
 // slot earmark + chorus snippet for disambiguation) without leaking

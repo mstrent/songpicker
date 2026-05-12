@@ -69,14 +69,6 @@ export interface SongSuggestion {
   slots?: string[]
 }
 
-export interface AiDebug {
-  model: string
-  systemPrompt: string
-  userMessage: string
-  /** Raw tool_use blocks the model returned this turn, surfaced for
-   *  the SPA's debug panel so we can see exactly what was called. */
-  rawActions?: unknown
-}
 
 export interface CommitItem {
   title: string
@@ -333,7 +325,6 @@ export interface SuggestRequest {
 export interface SuggestResponse {
   actions: AiAction[]
   message: string
-  debug: AiDebug
   structureSource: PromptSource
   roleSource: PromptSource
 }

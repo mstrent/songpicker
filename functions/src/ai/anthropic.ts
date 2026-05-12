@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { buildUserMessage, flattenUserMessage } from './userMessage'
+import { buildUserMessage } from './userMessage'
 import type {
   AiAction,
   AiProvider,
@@ -216,16 +216,10 @@ export class AnthropicProvider implements AiProvider {
         }
       }
       const finalMessage = await stream.finalMessage()
-      const { actions, message, rawActions } = parseResponse(finalMessage.content)
+      const { actions, message } = parseResponse(finalMessage.content)
       return {
         actions,
         message: message || fallbackMessage(actions),
-        debug: {
-          model: MODEL,
-          systemPrompt,
-          userMessage: flattenUserMessage(built),
-          rawActions,
-        },
       }
     }
 
@@ -284,7 +278,6 @@ function isContentFilterError(e: unknown): boolean {
 interface ParseOutput {
   actions: AiAction[]
   message: string
-  rawActions: unknown[]
 }
 
 // Final-message parsing. Same code path the non-streaming version used
@@ -294,7 +287,6 @@ interface ParseOutput {
 function parseResponse(content: Anthropic.ContentBlock[]): ParseOutput {
   const textChunks: string[] = []
   const actions: AiAction[] = []
-  const rawActions: unknown[] = []
 
   for (const block of content) {
     if (block.type === 'text') {
@@ -302,7 +294,6 @@ function parseResponse(content: Anthropic.ContentBlock[]): ParseOutput {
       continue
     }
     if (block.type !== 'tool_use') continue
-    rawActions.push({ name: block.name, input: block.input })
     const action = toAction(block.name, block.input)
     if (action) actions.push(action)
   }
@@ -310,7 +301,6 @@ function parseResponse(content: Anthropic.ContentBlock[]): ParseOutput {
   return {
     actions,
     message: textChunks.join('\n\n'),
-    rawActions,
   }
 }
 
