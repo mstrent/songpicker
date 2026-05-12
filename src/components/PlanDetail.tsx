@@ -773,6 +773,14 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         songId,
         songTitle,
       })
+      // Refresh items FIRST so the reconciliation effect sees the
+      // target slot already holding the song before the candidate
+      // points at it — otherwise the effect runs once on
+      // new-candidate-vs-old-items and resets committedAt because the
+      // stale target still shows songId: null.
+      invalidatePlanContext(serviceTypeId, planId)
+      const fresh = await loadPlanContext(serviceTypeId, planId)
+      setItems(fresh.items)
       // Migrate the committed candidate to the destination, refreshing
       // its priorSlotTitle so a future Clear restores the destination
       // slot's identity rather than the source's.
@@ -792,9 +800,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       appendSystemMessage(
         `↕ Moved "${songTitle}" into the ${destPriorTitle} slot`,
       )
-      invalidatePlanContext(serviceTypeId, planId)
-      const fresh = await loadPlanContext(serviceTypeId, planId)
-      setItems(fresh.items)
     } catch (e) {
       setGenerateError((e as Error).message)
     }
@@ -818,6 +823,13 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         planId,
         orderedItemIds: newOrder,
       })
+      // Refresh items first (same race-avoidance pattern as
+      // commitCandidate / moveSongToEmptySlot): the reconciliation
+      // effect's stillCommitted check needs fresh items state when
+      // candidates change.
+      invalidatePlanContext(serviceTypeId, planId)
+      const fresh = await loadPlanContext(serviceTypeId, planId)
+      setItems(fresh.items)
       const affected = new Set([a.id, b.id])
       setCandidates((prev) =>
         prev.map((c) =>
@@ -829,9 +841,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       const aLabel = a.songTitle ?? a.title ?? 'slot'
       const bLabel = b.songTitle ?? b.title ?? 'slot'
       appendSystemMessage(`↔ Swapped "${aLabel}" with "${bLabel}"`)
-      invalidatePlanContext(serviceTypeId, planId)
-      const fresh = await loadPlanContext(serviceTypeId, planId)
-      setItems(fresh.items)
     } catch (e) {
       setGenerateError((e as Error).message)
     }
