@@ -2365,18 +2365,13 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       ✗ Reject
                     </button>
 
-                    {matched && c.committedAt && (() => {
-                      // The candidate is committed in PCO. Show which
-                      // slot, with the committed-badge styling.
-                      const slot = (items ?? []).find(
-                        (it) => it.id === c.assignedSlotItemId,
-                      )
-                      return (
-                        <span className="committed-badge">
-                          ✓ Committed{slot ? ` to ${slot.title}` : ''}
-                        </span>
-                      )
-                    })()}
+                    {matched && c.committedAt && (
+                      // Service order on the left is the source of
+                      // truth for WHICH slot. Showing a slot label
+                      // here was nonsensical anyway — PCO overwrites
+                      // the slot's title with the song name on commit.
+                      <span className="committed-badge">✓ Committed</span>
+                    )}
 
                     {matched && !c.committedAt && (() => {
                       // Empty slot picker commits directly on selection
