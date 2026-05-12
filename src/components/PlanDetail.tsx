@@ -1551,9 +1551,14 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                 ? 'Suggest songs'
                 : 'Send'}
           </button>
-          {candidates.length > 0 && (
-            <button className="ghost" onClick={clearCandidates} disabled={generating}>
-              Clear
+          {(candidates.length > 0 || messages.length > 0) && (
+            <button
+              className="ghost"
+              onClick={clearCandidates}
+              disabled={generating}
+              title="Wipe all AI suggestions and the chat history for this plan. Committed songs in Planning Center are not affected — the AI will start the next turn fresh, using only what's in PCO."
+            >
+              Clear conversation
             </button>
           )}
         </div>
