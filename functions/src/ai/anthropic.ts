@@ -406,33 +406,17 @@ function parseUnreject(obj: Record<string, unknown>): UnrejectAction | null {
 
 // If the model called tools but emitted no prose text, synthesize a
 // short status line so the chat log doesn't have a blank assistant
-// turn. Keeps the conversation visibly responsive.
+// turn. Verb-neutral on purpose: the server can't tell a fresh
+// commit from a move (the SPA decides at apply time), so we count
+// total changes instead of naming each kind. The per-action 🤖
+// system messages carry the accurate detail.
 function fallbackMessage(actions: AiAction[]): string {
   if (actions.length === 0) return 'No changes this turn.'
-  const counts = {
-    proposed: 0,
-    removed: 0,
-    committed: 0,
-    cleared: 0,
-    unrejected: 0,
-  }
-  for (const a of actions) {
-    if (a.kind === 'propose') counts.proposed += a.suggestions.length
-    else if (a.kind === 'remove') counts.removed += a.ids.length
-    else if (a.kind === 'commit') counts.committed += 1
-    else if (a.kind === 'clear_slot') counts.cleared += 1
-    else if (a.kind === 'unreject') counts.unrejected += a.ids.length
-  }
-  const parts: string[] = []
-  if (counts.proposed)
-    parts.push(`proposed ${counts.proposed} song${counts.proposed === 1 ? '' : 's'}`)
-  if (counts.removed)
-    parts.push(`removed ${counts.removed} candidate${counts.removed === 1 ? '' : 's'}`)
-  if (counts.committed)
-    parts.push(`committed ${counts.committed} song${counts.committed === 1 ? '' : 's'}`)
-  if (counts.cleared)
-    parts.push(`cleared ${counts.cleared} slot${counts.cleared === 1 ? '' : 's'}`)
-  if (counts.unrejected)
-    parts.push(`restored ${counts.unrejected} candidate${counts.unrejected === 1 ? '' : 's'}`)
-  return `Done — ${parts.join(', ')}.`
+  const total = actions.reduce((sum, a) => {
+    if (a.kind === 'propose') return sum + a.suggestions.length
+    if (a.kind === 'remove') return sum + a.ids.length
+    if (a.kind === 'unreject') return sum + a.ids.length
+    return sum + 1
+  }, 0)
+  return `Done — ${total} change${total === 1 ? '' : 's'}.`
 }
