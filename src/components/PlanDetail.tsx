@@ -76,6 +76,13 @@ interface CandidateMatch {
    *  the card lives in the "needs reason" stack or the collapsed
    *  done pool. Resets on un-reject. */
   rejectPickerDismissed: boolean
+  /** Transient SPA-only flag set true the moment we optimistically
+   *  flip committedAt during an AI commit, and cleared once the
+   *  post-PCO items refresh lands. The reconciliation effect skips
+   *  pending candidates so it doesn't see "new committedAt vs.
+   *  pre-refresh items" and wrongly reset the commit. Never
+   *  persisted — defaults to false on session load. */
+  commitPending: boolean
 }
 
 function newCandidateId(): string {
@@ -144,6 +151,7 @@ function fromPersisted(p: PersistedCandidate): CandidateMatch {
     priorSlotTitle: p.priorSlotTitle ?? null,
     rejectReason: p.rejectReason ?? null,
     rejectPickerDismissed: p.rejectPickerDismissed ?? false,
+    commitPending: false,
   }
 }
 
@@ -361,6 +369,13 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     const staleIds: string[] = []
     for (const c of candidates) {
       if (c.committedAt == null) continue
+      // Skip candidates whose commit is still in-flight — items
+      // probably hasn't refreshed yet, so the slot.songId check
+      // below would flag them stale and wipe a successful commit.
+      // commitPending clears in the same render as setItems(fresh)
+      // after the PCO write completes, so this gate naturally
+      // releases on the next reconciliation pass.
+      if (c.commitPending) continue
       const slot = items.find((it) => it.id === c.assignedSlotItemId)
       const stillCommitted =
         !!slot && !!slot.songId && c.song?.id === slot.songId
@@ -597,6 +612,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
               priorSlotTitle: null,
               rejectReason: null,
               rejectPickerDismissed: false,
+              commitPending: false,
             }
             minted.push(c)
             titleById.set(c.id, c.suggestion.title)
@@ -673,6 +689,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           const priorSlotTitle = slotItem?.title ?? null
           // Optimistic flip — UI shows the candidate as committed
           // immediately; rolls back if the PCO call rejects.
+          // commitPending shields this candidate from the
+          // reconciliation effect until items refreshes after the
+          // PCO call settles (otherwise the effect would see "new
+          // committedAt vs. stale items" and wipe the commit).
           setCandidates((prev) =>
             prev.map((c) =>
               c.id === action.candidateId
@@ -681,6 +701,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     committedAt: now,
                     assignedSlotItemId: targetItemId,
                     priorSlotTitle,
+                    commitPending: true,
                   }
                 : c,
             ),
@@ -707,6 +728,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                           committedAt: null,
                           assignedSlotItemId: null,
                           priorSlotTitle: null,
+                          commitPending: false,
                         }
                       : c,
                   ),
@@ -862,16 +884,26 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         await Promise.all(pendingPcoWrites)
       }
       // Single items refresh after the turn — picks up commits, clears,
-      // title restorations all in one PCO read.
+      // title restorations all in one PCO read. Clear commitPending in
+      // the same React render as setItems(fresh) so the reconciliation
+      // effect sees both updates together (per CLAUDE.md: setItems
+      // before setCandidates batches them into a single render with
+      // consistent state).
       if (pcoWritesFired) {
         invalidatePlanContext(serviceTypeId, planId)
         try {
           const fresh = await loadPlanContext(serviceTypeId, planId)
           setItems(fresh.items)
+          setCandidates((prev) =>
+            prev.map((c) =>
+              c.commitPending ? { ...c, commitPending: false } : c,
+            ),
+          )
         } catch {
-          // Items refresh is best-effort. The optimistic state still
-          // reflects what we intended; user can hard-refresh to pick
-          // up any drift.
+          // Items refresh is best-effort. Leave commitPending set —
+          // if items didn't refresh, the reconciliation effect
+          // would still see stale items and wipe the commit. Better
+          // to keep the optimistic state visible than to flicker.
         }
       }
     } catch (e) {
