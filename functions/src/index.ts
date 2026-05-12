@@ -238,6 +238,7 @@ export const suggestSongs = onCall<
       history,
       candidates,
       alreadyInPlan,
+      autoRefresh,
     } = req.data as {
       theme?: string
       userMessage?: string
@@ -247,6 +248,7 @@ export const suggestSongs = onCall<
       history?: Array<{ role: 'user' | 'assistant'; content: string }>
       candidates?: AiCandidate[]
       alreadyInPlan?: string[]
+      autoRefresh?: boolean
     }
     if (!theme) throw new HttpsError('invalid-argument', 'theme required')
 
@@ -275,6 +277,7 @@ export const suggestSongs = onCall<
         candidates,
         alreadyInPlan,
         history,
+        autoRefresh,
       },
       onChunk,
     )

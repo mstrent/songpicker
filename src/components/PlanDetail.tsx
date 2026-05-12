@@ -196,13 +196,21 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   // message (or any new message lands), keep the log pinned to the
   // bottom so new content stays visible without manual scrolling.
   const chatLogRef = useRef<HTMLDivElement | null>(null)
-  // Debounced auto-AI-turn after a reject or reject-reason save.
-  // Fires ~1s after the user stops rejecting things, so the AI can
-  // react to fresh feedback without the user having to click Send.
-  // Unlike the old silent scheduleReplacement (Layer 4), this routes
-  // through the normal streaming chat-turn pipeline — visible in the
-  // log with a prose reply and per-action system messages.
+  // Debounced auto-AI-turn after the user adjusts state without
+  // typing. Gated by a pair of unserved-signal counters so a single
+  // click-and-move-on reject doesn't trigger a heavyweight chat
+  // turn — fires only when the cumulative changes since the last AI
+  // turn cross a threshold worth the model's attention. Routes
+  // through the normal streaming pipeline with autoRefresh: true so
+  // the model's reply stays terse.
   const autoRefineTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Tally of fresh rejects since the last AI turn fired. Cluster
+  // threshold is 2 — a single reject alone does nothing.
+  const unservedRejectsRef = useRef(0)
+  // Tally of reject-reason saves (chip click OR freeform text)
+  // since the last AI turn. ANY reason save fires the refresh,
+  // because reasons are higher-signal context the model can act on.
+  const unservedReasonSavesRef = useRef(0)
   // generating mirrored as a ref so the debounced timer reads the
   // current value when it fires, not the value captured at schedule
   // time (which would skip the firing once a slow manual Send is
@@ -237,6 +245,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       clearTimeout(autoRefineTimer.current)
       autoRefineTimer.current = null
     }
+    unservedRejectsRef.current = 0
+    unservedReasonSavesRef.current = 0
 
     // Load the persisted candidate pool + future chat history for this plan.
     // Survives page refreshes and lets iteration span multiple sittings.
@@ -620,6 +630,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         history,
         candidates: aiCandidates,
         alreadyInPlan,
+        autoRefresh,
       })
 
       for await (const chunk of stream) {
@@ -654,6 +665,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       setGenerateError((e as Error).message)
     } finally {
       setGenerating(false)
+      // This turn served whatever signals had accumulated — reset
+      // the unserved-counters so the next auto-refresh threshold
+      // starts counting from zero again.
+      unservedRejectsRef.current = 0
+      unservedReasonSavesRef.current = 0
     }
   }
 
@@ -665,20 +681,43 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       clearTimeout(autoRefineTimer.current)
       autoRefineTimer.current = null
     }
+    unservedRejectsRef.current = 0
+    unservedReasonSavesRef.current = 0
   }
 
-  // Debounce window: every reject or reason-save resets the timer, so
-  // rapid rejections coalesce into a single AI turn instead of firing
-  // one per click. The timer's callback re-checks generating + reject
-  // count at fire time (closure-captured state at schedule time would
-  // be stale).
+  // 5-second debounce. Each new signal resets the timer so rapid
+  // rejections coalesce into a single auto-fire rather than each
+  // resetting a tight window. At fire time the timer re-checks the
+  // gating thresholds (counters are captured by ref so the check
+  // sees latest values, not the values at schedule time).
+  //
+  // Gating:
+  //   - 2+ fresh rejects since the last AI turn (a cluster), OR
+  //   - 1+ reject-reason saves since the last AI turn (high signal —
+  //     the user gave the AI new information about what to avoid)
+  //
+  // A single click-only reject doesn't fire anything. The user can
+  // always click Send manually if they want the AI to engage.
   function scheduleAutoRefine() {
     if (autoRefineTimer.current) clearTimeout(autoRefineTimer.current)
     autoRefineTimer.current = setTimeout(() => {
       autoRefineTimer.current = null
       if (generatingRef.current) return
+      const enoughRejects = unservedRejectsRef.current >= 2
+      const anyReasonSaves = unservedReasonSavesRef.current >= 1
+      if (!enoughRejects && !anyReasonSaves) return
       void handleSuggest({ autoRefresh: true })
-    }, 1000)
+    }, 5000)
+  }
+
+  function bumpRejectSignal() {
+    unservedRejectsRef.current += 1
+    scheduleAutoRefine()
+  }
+
+  function bumpReasonSignal() {
+    unservedReasonSavesRef.current += 1
+    scheduleAutoRefine()
   }
 
   function appendSystemMessage(content: string) {
@@ -727,10 +766,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       // without a second click.
       setRationaleFocusId(id)
       setRejectedPoolOpen(true)
-      // Kick the debounced auto-refresh so the AI reacts to the
-      // rejection without requiring a manual Send. Rapid follow-up
-      // rejects reset the timer and coalesce into one turn.
-      scheduleAutoRefine()
+      // Count this toward the reject-cluster threshold. A single
+      // click-only reject doesn't auto-fire the AI on its own; we
+      // only trigger once the user's adjustments cross a threshold
+      // (see scheduleAutoRefine).
+      bumpRejectSignal()
     } else if (oldDecision === 'reject' && newDecision !== 'reject') {
       appendSystemMessage(`↩ Unrejected: ${target.suggestion.title}`)
     }
@@ -767,9 +807,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       return
     }
     setCandidateReason(candidateId, trimmed)
-    // The reason adds context the AI hasn't seen yet — schedule a
-    // refresh so it can react with the new information.
-    scheduleAutoRefine()
+    // High-signal context the AI hasn't seen yet. Counts as a
+    // reason-save in the auto-refine gating.
+    bumpReasonSignal()
     try {
       const res = await recordRejectReason({ reason: trimmed })
       setReasonChips(res.data.common)
@@ -1676,7 +1716,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                         <button
                           type="button"
                           className="rationale-chip-text"
-                          onClick={() => setCandidateReason(focused.id, chip.text)}
+                          onClick={() => {
+                            setCandidateReason(focused.id, chip.text)
+                            bumpReasonSignal()
+                          }}
                           title="Use this reason"
                         >
                           {chip.text}

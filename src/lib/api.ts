@@ -303,6 +303,9 @@ export interface SuggestRequest {
   history?: ConversationTurn[]
   candidates?: AiCandidate[]
   alreadyInPlan?: string[]
+  /** Set when the SPA fired this call after a state change rather
+   *  than user-typed input. Switches the AI into a terse mode. */
+  autoRefresh?: boolean
 }
 
 export interface SuggestResponse {

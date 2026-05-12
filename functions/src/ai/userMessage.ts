@@ -38,6 +38,16 @@ export function buildUserMessage(req: SuggestRequest): BuiltUserMessage {
     )
   }
   volatileParts.push(`User request: ${req.userMessage || '(none)'}`)
+  if (req.autoRefresh) {
+    // Override the system prompt's "make it short, conversational,
+    // and explanatory" guidance for this specific turn. The user
+    // adjusted state but didn't ask anything — chat output should
+    // be minimal so they aren't interrupted by a paragraph after
+    // every reject.
+    volatileParts.push(
+      "[auto-refresh] This turn was fired automatically after the user adjusted state without asking anything. Be terse: at most ONE short sentence in your text reply, or none at all — let the action markers speak. Don't summarise what you did. Only call propose_songs if a still-unfilled role's options have actually dropped below 2; otherwise prefer doing nothing.",
+    )
+  }
 
   return {
     stable: stableParts.join('\n'),

@@ -71,6 +71,12 @@ export interface SuggestRequest {
    *  summaries). The current turn's user message is built fresh on the
    *  server and appended to this history. */
   history?: ConversationTurn[]
+  /** True when this call was fired automatically by the SPA after the
+   *  user adjusted state (rejected songs, saved reasons) without
+   *  typing anything. Switches the user-message builder into a terse
+   *  mode that nudges the model toward silent tool calls and a
+   *  one-sentence-max reply, since the user didn't ask for a chat. */
+  autoRefresh?: boolean
 }
 
 export interface AiDebug {
