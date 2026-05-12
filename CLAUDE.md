@@ -41,6 +41,33 @@ These are non-obvious things we've burned time on; don't relearn them.
 - **Don't include `listServiceTypes` inside `getPlan`.** The detail
   view doesn't render `serviceTypeName` and callers already have it
   from `listPlans`. A burned PCO call per plan-open is real.
+- **`Item.sequence` is read-only via PATCH.** PCO returns "Forbidden
+  Attribute" if you try to PATCH `attributes.sequence`. To reorder,
+  use the dedicated action endpoint instead:
+  `POST /service_types/{stid}/plans/{pid}/item_reorder` with
+  `{ data: { type: "PlanItemReorder", attributes: { sequence: [id1, id2, ...] } } }`.
+  One request reorders the entire plan. See
+  `PcoClient.reorderPlanItems` in `functions/src/pco/client.ts`.
+- **Linking a song does not auto-set the item title via the API.** The
+  PCO web UI rewrites the slot's title to match the song's name when
+  you pick one, but the API leaves `attributes.title` alone. PATCH the
+  title alongside the song relationship in the same request. See
+  `commitSlot` in `functions/src/index.ts` and the `title` option on
+  `PcoClient.updatePlanItem`.
+- **Item key is set via `relationships.key`, not `attributes.key_name`.**
+  Reads expose `key_name` as a string attribute, but writes need a Key
+  resource id (Key is a child of Arrangement). Fetch a song's
+  arrangements + keys via
+  `/songs/{id}/arrangements?include=keys&per_page=25`. See
+  `PcoClient.listSongArrangements` and `setSlotArrangementKey`.
+- **Slot title round-trip.** Because committing a song renames the
+  slot to the song's title (above), clearing it needs to restore
+  whatever the slot was called before. We capture that title on the
+  candidate as `priorSlotTitle` at commit time, and use it on clear
+  (falling back to a position-based "Song N" computed by
+  `fallbackSlotTitle` when no prior is stored). Reorder/move/swap all
+  null out the affected candidates' `priorSlotTitle` since the slot's
+  identity may no longer match its old name.
 
 ## Per-user data model (Firestore, all admin-SDK-only)
 
@@ -108,11 +135,45 @@ visible read-only on the Admin page.
   after the last keystroke (`userTouchedTheme` / `userTouchedNotes`
   refs guard the initial seed). Reset buttons clear the override
   immediately. Saving an empty string is the "no override" sentinel.
-- Every UI element whose content goes to the AI carries a `✨`
-  `ai-context-marker` icon (gradient-clipped sparkle) with an
-  explanatory tooltip. The AI moments (Suggest button, AI candidates
-  heading, prompt editors) use the shared `--ai-gradient` and the
-  twinkling `.sparkle` animation. Keep this consistent.
+- Sparkle / AI-gradient styling is reserved for the explicit AI
+  moments now: the Suggest button, the AI Candidates heading, the
+  "AI" role tag in the chat log, and the persona / service-flow
+  prompt pills. Don't re-add `ai-context-marker` decorations onto
+  every input that feeds the AI — Matt asked us to strip those
+  because the whole flow is so obviously AI-driven that the icons
+  just added noise.
+- **setItems(fresh) before setCandidates(…) after PCO mutations.**
+  PlanDetail has a reconciliation `useEffect` watching `[items,
+  candidates]` that strips `committedAt` off any candidate whose
+  slot looks empty in items. If you call `setCandidates(committed)`
+  before the `setItems(fresh)` that reflects the new PCO state,
+  React renders once with new-candidates-vs-stale-items, the
+  effect resets `committedAt`, and the candidate flickers back to
+  un-committed. Put the `setItems(fresh)` first so both setStates
+  batch into a single render with consistent state. See
+  `commitCandidate`, `moveSongToEmptySlot`, `swapTwoFilledSlots`
+  in `PlanDetail.tsx` for the pattern.
+- **Per-plan DnD uses HTML5 drag-and-drop with our own ghost.**
+  Quirks worth remembering:
+  - Anchor (`<a>`) children of draggable rows must set
+    `draggable={false}` — anchors are URL drag sources by default
+    and hijack the row's dragstart otherwise.
+  - `dataTransfer.getData` for custom mime types is unreliable
+    cross-browser (Firefox restricts custom types in drop events).
+    We thread the source identity through React state
+    (`dragKind` + `dragSourceId`) instead, and only set
+    `text/plain` on dataTransfer to keep Firefox accepting the drag
+    at all.
+  - The browser's drag-image rendering is unreliable too. We
+    suppress it with a 1×1 transparent canvas via `setDragImage`
+    and render our own labeled chip from a document-level
+    `dragover` listener that tracks the cursor.
+- **Auto-replacement skips when the list is at/over `maxCount`.**
+  Refining adds candidates without removing old ones, so the list
+  can grow past the requested max. `scheduleReplacement` reads
+  `candidatesRef.current` and `maxCountRef.current` (mirrored via
+  effects to avoid stale-closure inside the 600ms-delayed timer)
+  and bails when active count is already at the cap.
 
 ## Feedback rules picked up so far
 
