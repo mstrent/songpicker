@@ -835,12 +835,14 @@ textarea {
 .service-order .item.is-draggable:active {
   cursor: grabbing;
 }
-/* Source element fades while it's being dragged — the floating drag
-   ghost (a styled clone) carries the visual weight; the dimmed source
-   tells the user where the card came from without removing it. */
+/* Source element fades slightly while it's being dragged so the user
+   can see where the card came from. Avoid going below ~0.6 — Chromium
+   captures the drag image AFTER the dragstart event handler returns,
+   and any react-state-driven opacity change can bleed into the ghost
+   image, making it look invisible. 0.6 keeps the ghost crisp. */
 .service-order .item.is-dragging,
 .candidate.is-dragging {
-  opacity: 0.4;
+  opacity: 0.6;
 }
 /* When a candidate drag is active, empty song slots become drop
    targets — a clear accent outline announces the affordance. The over
@@ -866,15 +868,19 @@ textarea {
   cursor: grabbing;
 }
 
-/* Floating "drop to clear" zone — appears at the top of the plan
-   detail view ONLY while a filled slot is being dragged. Uses the
-   --error palette to read as a destructive action. */
+/* Floating "drop to clear" zone — appears ONLY while a filled slot is
+   being dragged. position: fixed pins it to the viewport (sticky
+   pinned it to the plan-detail container, which scrolled out of view
+   if the user had scrolled down). --error palette signals destructive
+   intent. */
 .slot-trash {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  margin: 0 0 0.6rem;
-  padding: 0.7rem 1rem;
+  position: fixed;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  min-width: min(360px, 90vw);
+  padding: 0.8rem 1.2rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -882,9 +888,10 @@ textarea {
   font-weight: 600;
   font-size: 0.95rem;
   color: var(--error);
-  background: var(--error-soft);
+  background: var(--bg);
   border: 2px dashed var(--error);
   border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
   pointer-events: auto;
 }
 .slot-trash.drag-over {
