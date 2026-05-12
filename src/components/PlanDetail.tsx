@@ -627,6 +627,42 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setDragOverTrash(false)
   }
 
+  // Build a styled clone of the source element and hand it to
+  // setDragImage. The browser's default drag image is unreliable
+  // (renders blank for some users on Chromium/Retina combinations), so
+  // we generate our own. Key: the clone must be RENDERED in the DOM
+  // when setDragImage snapshots it — offscreen via top:-9999px works
+  // on most browsers but is brittle. Position it just outside the
+  // viewport horizontally, where the browser still lays it out, then
+  // remove on the next frame.
+  function attachDragImage(e: React.DragEvent<HTMLLIElement>) {
+    const src = e.currentTarget
+    const clone = src.cloneNode(true) as HTMLElement
+    const w = src.offsetWidth
+    clone.style.position = 'absolute'
+    clone.style.top = '0'
+    clone.style.left = '-10000px'
+    clone.style.width = `${w}px`
+    clone.style.background = getComputedStyle(src).backgroundColor || '#fff'
+    clone.style.opacity = '0.95'
+    clone.style.pointerEvents = 'none'
+    clone.style.boxShadow = '0 14px 30px rgba(0, 0, 0, 0.25)'
+    clone.style.transform = 'rotate(-1.5deg)'
+    clone.style.borderRadius =
+      getComputedStyle(src).borderRadius || '10px'
+    document.body.appendChild(clone)
+    try {
+      e.dataTransfer.setDragImage(clone, Math.min(w / 2, 200), 24)
+    } catch {
+      // Some sandboxed contexts disallow setDragImage; fall back to
+      // the browser default silently.
+    }
+    // Wait one frame so the browser has actually snapshotted the
+    // element before we yank it from the DOM. setTimeout(…, 0)
+    // sometimes fires too eagerly on slower devices.
+    requestAnimationFrame(() => clone.remove())
+  }
+
 
   // Drop handler for "candidate dragged onto empty slot". Reuses the
   // commit path, but synthesises a candidate with the new
@@ -812,6 +848,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     if (!draggable) return
                     e.dataTransfer.setData('text/plain', it.id)
                     e.dataTransfer.effectAllowed = 'move'
+                    attachDragImage(e)
                     setDragKind('slot')
                     setDragSourceId(it.id)
                   }}
@@ -1266,6 +1303,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     // lives in dragKind + dragSourceId.
                     e.dataTransfer.setData('text/plain', c.id)
                     e.dataTransfer.effectAllowed = 'move'
+                    attachDragImage(e)
                     setDragKind('candidate')
                     setDragSourceId(c.id)
                   }}
