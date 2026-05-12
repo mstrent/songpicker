@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
 import {
   getAdminPromptConfig,
+  getRejectionReasons,
+  removeCommonReason,
   saveAdminPromptConfig,
   type AdminPromptConfig,
+  type CommonReason,
   type PromptType,
 } from '../lib/api'
 
@@ -37,8 +40,6 @@ export function AdminPage() {
 
   if (error) return <div className="error">Error: {error}</div>
   if (!config) return <div>Loading…</div>
-
-  const composedSample = `${(config.role.admin || config.role.hardcoded).trim()}\n\n${config.technical}`
 
   return (
     <div className="admin-page">
@@ -83,17 +84,109 @@ export function AdminPage() {
         <pre>{config.technical}</pre>
       </section>
 
-      <section className="admin-section read-only">
-        <h3>Composed system prompt (preview)</h3>
-        <p className="help">
-          What the model actually receives as the system message when a
-          user is on the persona default and structure-flow text is
-          excluded.
-        </p>
-        <pre>{composedSample}</pre>
-      </section>
+      <RejectionReasonsSection />
     </div>
   )
+}
+
+function RejectionReasonsSection() {
+  const [reasons, setReasons] = useState<CommonReason[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [removingText, setRemovingText] = useState<string | null>(null)
+
+  async function refresh() {
+    setError(null)
+    try {
+      const res = await getRejectionReasons()
+      setReasons(res.data.common)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  useEffect(() => {
+    void refresh()
+  }, [])
+
+  async function handleRemove(text: string) {
+    setRemovingText(text)
+    setError(null)
+    try {
+      const res = await removeCommonReason({ text })
+      setReasons(res.data.common)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setRemovingText(null)
+    }
+  }
+
+  return (
+    <section className="admin-section">
+      <h3>Reject-reason chips (system-wide pool)</h3>
+      <p className="help">
+        The clickable chips that show up on the reject-rationale picker.
+        Seeded with a handful of defaults; grows automatically as users
+        type freeform reasons (Claude distills the freeform log into new
+        chip-worthy categories after every few entries). Removing a chip
+        here pulls it from every user's picker immediately.
+      </p>
+      {error && <div className="error">{error}</div>}
+      {reasons === null ? (
+        <p className="muted">Loading…</p>
+      ) : reasons.length === 0 ? (
+        <p className="muted">No chips yet — the pool will fill in as users reject songs and add reasons.</p>
+      ) : (
+        <ul className="admin-reason-list">
+          {reasons.map((r) => (
+            <li key={r.text} className="admin-reason-item">
+              <span className="admin-reason-text">{r.text}</span>
+              <span className={`admin-reason-source source-${r.source}`}>
+                {sourceLabel(r.source)}
+              </span>
+              <span className="admin-reason-date">
+                {formatAddedAt(r.addedAt)}
+              </span>
+              <button
+                type="button"
+                className="admin-reason-remove"
+                onClick={() => void handleRemove(r.text)}
+                disabled={removingText !== null}
+                title="Remove this chip from the global pool"
+                aria-label={`Remove "${r.text}"`}
+              >
+                {removingText === r.text ? '…' : '×'}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+function sourceLabel(source: CommonReason['source']): string {
+  switch (source) {
+    case 'seed':
+      return 'seed'
+    case 'ai':
+      return 'AI-distilled'
+    case 'manual':
+      return 'manual'
+    default:
+      return source
+  }
+}
+
+function formatAddedAt(ts: number): string {
+  if (!ts) return ''
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
 }
 
 function AdminPromptSection({

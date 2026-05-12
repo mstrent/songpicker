@@ -1770,6 +1770,75 @@ textarea {
   color: var(--fg);
 }
 
+/* Reject-reason chip management list on the Admin page. */
+.admin-reason-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+.admin-reason-item {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.7rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.88rem;
+}
+.admin-reason-text {
+  font-weight: 500;
+  color: var(--fg);
+}
+.admin-reason-source {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+.admin-reason-source.source-ai {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.admin-reason-source.source-seed {
+  color: var(--muted);
+}
+.admin-reason-source.source-manual {
+  color: var(--fg);
+}
+.admin-reason-date {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.admin-reason-remove {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0.15rem 0.55rem;
+  cursor: pointer;
+}
+.admin-reason-remove:hover:not(:disabled) {
+  color: var(--surface);
+  background: var(--error);
+  border-color: var(--error);
+}
+.admin-reason-remove:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* AI persona / service-flow prompt pills. Always live in the
    .suggest-header row alongside the heading. The open pill switches to
    a filled-accent style as a clear "I'm expanded" indicator; the body
