@@ -660,20 +660,38 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             )
           }
         } else if (action.kind === 'remove') {
+          // Filter to candidates we'll actually reject: not committed
+          // (committed songs can't be rejected without first clearing
+          // the slot, and rejecting a song the AI is about to displace
+          // is almost always a "replace" misinterpretation anyway) and
+          // not already rejected.
+          const actuallyRejectedIds: string[] = []
           setCandidates((prev) =>
-            prev.map((c) =>
-              action.ids.includes(c.id) && !c.committedAt
-                ? { ...c, decision: 'reject', rejectReason: action.reason }
-                : c,
-            ),
+            prev.map((c) => {
+              if (
+                action.ids.includes(c.id) &&
+                !c.committedAt &&
+                c.decision !== 'reject'
+              ) {
+                actuallyRejectedIds.push(c.id)
+                return { ...c, decision: 'reject', rejectReason: action.reason }
+              }
+              return c
+            }),
           )
-          const titles = action.ids
-            .map((id) => titleById.get(id) ?? `(unknown ${id})`)
-            .join(', ')
-          appendSystemMessage(
-            `🤖 AI rejected ${titles} — reason: "${action.reason}"`,
-          )
-          setRejectedPoolOpen(true)
+          if (actuallyRejectedIds.length > 0) {
+            const titles = actuallyRejectedIds
+              .map((id) => titleById.get(id) ?? `(unknown ${id})`)
+              .join(', ')
+            appendSystemMessage(
+              `🤖 AI rejected ${titles} — reason: "${action.reason}"`,
+            )
+            setRejectedPoolOpen(true)
+          }
+          // If none of the targets were eligible, stay silent — don't
+          // emit a "rejected" message that didn't actually happen.
+          // This is typically the AI misreading "remove X, replace
+          // with Y" as a rejection + commit (it's just displacement).
         } else if (action.kind === 'set_slot_contents') {
           if (autoRefresh) {
             appendSystemMessage(
