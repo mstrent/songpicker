@@ -461,6 +461,40 @@ export const reorderItems = onCall(async (req) => {
   return { ok: true }
 })
 
+export const listSongArrangements = onCall(async (req) => {
+  const { uid } = requireAllowed(req)
+  const { songId } = req.data as { songId?: string }
+  if (!songId) {
+    throw new HttpsError('invalid-argument', 'songId required')
+  }
+  const client = await pcoForUser(uid)
+  const arrangements = await client.listSongArrangements(songId)
+  return { arrangements }
+})
+
+export const setSlotArrangementKey = onCall(async (req) => {
+  const { uid } = requireAllowed(req)
+  const { serviceTypeId, planId, itemId, arrangementId, keyId } = req.data as {
+    serviceTypeId?: string
+    planId?: string
+    itemId?: string
+    arrangementId?: string
+    keyId?: string | null
+  }
+  if (!serviceTypeId || !planId || !itemId || !arrangementId) {
+    throw new HttpsError(
+      'invalid-argument',
+      'serviceTypeId, planId, itemId, and arrangementId required',
+    )
+  }
+  const client = await pcoForUser(uid)
+  await client.updatePlanItem(serviceTypeId, planId, itemId, {
+    arrangementId,
+    ...(keyId ? { keyId } : {}),
+  })
+  return { ok: true }
+})
+
 export const clearSlot = onCall(async (req) => {
   const { uid } = requireAllowed(req)
   const { serviceTypeId, planId, itemId, title } = req.data as {

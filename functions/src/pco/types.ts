@@ -48,10 +48,19 @@ export interface PlanItem {
   songTitle: string | null
   songAuthor: string | null
   songCcli: string | null
+  arrangementId: string | null
+  keyId: string | null
   keyName: string | null
   description: string | null
   notes: ItemNote[]
   leaders: string[]
+}
+
+export interface SongArrangement {
+  id: string
+  name: string
+  chordChartKey: string | null
+  keys: { id: string; name: string }[]
 }
 
 export interface PlanNote {

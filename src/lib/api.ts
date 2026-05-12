@@ -43,6 +43,8 @@ export interface PlanItem {
   songTitle: string | null
   songAuthor: string | null
   songCcli: string | null
+  arrangementId: string | null
+  keyId: string | null
   keyName: string | null
   description: string | null
   notes: ItemNote[]
@@ -204,6 +206,29 @@ export const reorderItems = httpsCallable<
   },
   { ok: boolean }
 >(functions, 'reorderItems')
+
+export interface SongArrangement {
+  id: string
+  name: string
+  chordChartKey: string | null
+  keys: { id: string; name: string }[]
+}
+
+export const listSongArrangements = httpsCallable<
+  { songId: string },
+  { arrangements: SongArrangement[] }
+>(functions, 'listSongArrangements')
+
+export const setSlotArrangementKey = httpsCallable<
+  {
+    serviceTypeId: string
+    planId: string
+    itemId: string
+    arrangementId: string
+    keyId?: string | null
+  },
+  { ok: boolean }
+>(functions, 'setSlotArrangementKey')
 
 export const searchSongs = httpsCallable<{ query: string }, { songs: Song[] }>(
   functions,

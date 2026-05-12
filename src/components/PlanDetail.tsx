@@ -30,6 +30,7 @@ import {
 import { isSongSlot } from '../lib/songSlots'
 import { praiseChartsSearchUrl, spotifySearchUrl } from '../lib/searchLinks'
 import { usePromptConfig } from '../lib/usePromptConfig'
+import { ArrangementKeyEditor } from './ArrangementKeyEditor'
 import { PromptBody } from './PromptBody'
 import { PromptPill } from './PromptPill'
 
@@ -1128,7 +1129,22 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     {showMeta && (
                       <div className="item-meta">
                         <div className="meta-chips">
-                          {it.keyName && (
+                          {filled && it.songId && (
+                            <ArrangementKeyEditor
+                              serviceTypeId={serviceTypeId}
+                              planId={planId}
+                              item={it}
+                              onSaved={async () => {
+                                invalidatePlanContext(serviceTypeId, planId)
+                                const fresh = await loadPlanContext(
+                                  serviceTypeId,
+                                  planId,
+                                )
+                                setItems(fresh.items)
+                              }}
+                            />
+                          )}
+                          {!filled && it.keyName && (
                             <span className="meta-chip">
                               Key <strong>{it.keyName}</strong>
                             </span>

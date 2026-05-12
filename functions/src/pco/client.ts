@@ -6,6 +6,7 @@ import type {
   PlanPerson,
   ServiceType,
   Song,
+  SongArrangement,
 } from './types'
 
 const BASE_URL = 'https://api.planningcenteronline.com/services/v2'
@@ -295,6 +296,8 @@ export class PcoClient {
     const data = Array.isArray(json.data) ? json.data : [json.data]
     return data.map((d) => {
       const songId = firstRefId(d.relationships?.song)
+      const arrangementId = firstRefId(d.relationships?.arrangement)
+      const keyId = firstRefId(d.relationships?.key)
       const noteRel = d.relationships?.item_notes?.data
       const noteRefs = Array.isArray(noteRel) ? noteRel : noteRel ? [noteRel] : []
       const notes = noteRefs
@@ -332,10 +335,47 @@ export class PcoClient {
         songTitle: songRef?.title ?? null,
         songAuthor: songRef?.author ?? null,
         songCcli: songRef?.ccli ?? null,
+        arrangementId,
+        keyId,
         keyName: d.attributes.key_name ?? null,
         description: description && description.trim() ? description.trim() : null,
         notes,
         leaders,
+      }
+    })
+  }
+
+  // List ALL arrangements for a song with their keys included. Used by
+  // the arrangement/key picker on filled service-order slots so the
+  // user can switch between arrangements and choose a key without
+  // leaving the app.
+  async listSongArrangements(songId: string): Promise<SongArrangement[]> {
+    const json = await this.fetch<
+      JsonApiResponse<{ name: string | null; chord_chart_key: string | null }>
+    >(`/songs/${songId}/arrangements?include=keys&per_page=25`)
+    const data = Array.isArray(json.data) ? json.data : [json.data]
+    const keysById = new Map<string, string>()
+    for (const inc of json.included ?? []) {
+      if (inc.type === 'Key') {
+        const a = inc.attributes as {
+          name?: string | null
+          starting_key?: string | null
+        }
+        const name = a.name ?? a.starting_key ?? '?'
+        keysById.set(inc.id, name)
+      }
+    }
+    return data.map((arr) => {
+      const keyRels = arr.relationships?.keys?.data
+      const keyRefs = Array.isArray(keyRels) ? keyRels : keyRels ? [keyRels] : []
+      return {
+        id: arr.id,
+        name: arr.attributes.name ?? 'Arrangement',
+        chordChartKey: arr.attributes.chord_chart_key ?? null,
+        keys: keyRefs.map((r) => ({
+          id: r.id,
+          name: keysById.get(r.id) ?? '?',
+        })),
       }
     })
   }
