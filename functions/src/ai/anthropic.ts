@@ -92,7 +92,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'commit_song',
     description:
-      "Actually fill a Planning Center song slot with this candidate. Use only when the user has clearly directed you to ('commit X to slot 2', 'fill the closer with the second one', 'go ahead and pick that'). Don't commit during auto-refresh turns and don't commit unprompted. The candidate must be matched to a song in the user's PCO library (committed candidates show up as 'committed' in the candidates block); if the user wants to commit something the AI proposed earlier this turn, wait for the user to confirm.",
+      "Fill a Planning Center song slot with this candidate. Use only when the user has clearly directed you to ('commit X to slot 2', 'fill the closer with the second one', 'go ahead and pick that'). Don't commit during auto-refresh turns and don't commit unprompted. The candidate must be matched to a song in the user's PCO library (committed candidates show up as 'committed' in the candidates block); if the user wants to commit something the AI proposed earlier this turn, wait for the user to confirm. Move semantics: if the candidate is already committed to a different slot, the SPA clears that slot automatically as part of the move — just call commit_song with the new slot. Don't issue a separate clear_slot for moves.",
     input_schema: {
       type: 'object',
       properties: {

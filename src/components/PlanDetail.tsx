@@ -701,9 +701,34 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           const songId = candidate.song.id
           const songTitle = candidate.suggestion.title
           const slotItem = (items ?? []).find((it) => it.id === targetItemId)
-          const priorSlotTitle = slotItem?.title ?? null
+          const newPriorSlotTitle = slotItem?.title ?? null
+          // Move semantics: if the candidate is currently committed
+          // to a different slot, we have to clear that slot first
+          // (PCO doesn't auto-move). Doing this atomically inside
+          // commit_song avoids the failure mode where the AI calls
+          // clear_slot but forgets the follow-up commit_song.
+          const isMove =
+            candidate.committedAt != null &&
+            candidate.assignedSlotItemId != null &&
+            candidate.assignedSlotItemId !== targetItemId
+          const oldItemId = isMove ? candidate.assignedSlotItemId : null
+          const fromSlotIndex = oldItemId
+            ? slotIndexByItemId.get(oldItemId) ?? null
+            : null
+          const restoreOldTitle = oldItemId
+            ? candidate.priorSlotTitle?.trim() || fallbackSlotTitle(oldItemId)
+            : null
+          // Pre-action snapshot for rollback — captures the candidate's
+          // state before we optimistically applied the move so a
+          // failure mid-chain can restore the old commit.
+          const rollbackSnapshot = {
+            decision: candidate.decision,
+            committedAt: candidate.committedAt,
+            assignedSlotItemId: candidate.assignedSlotItemId,
+            priorSlotTitle: candidate.priorSlotTitle,
+          }
           // Optimistic flip — UI shows the candidate as committed
-          // immediately; rolls back if the PCO call rejects.
+          // immediately; rolls back if the PCO chain rejects.
           // commitPending shields this candidate from the
           // reconciliation effect until items refreshes after the
           // PCO call settles (otherwise the effect would see "new
@@ -720,24 +745,43 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     decision: 'shortlist',
                     committedAt: now,
                     assignedSlotItemId: targetItemId,
-                    priorSlotTitle,
+                    priorSlotTitle: newPriorSlotTitle,
                     commitPending: true,
                   }
                 : c,
             ),
           )
           appendSystemMessage(
-            `🤖 AI committed "${songTitle}" to song slot ${action.slotIndex}`,
+            isMove
+              ? `🤖 AI moved "${songTitle}" from song slot ${fromSlotIndex ?? '?'} to song slot ${action.slotIndex}`
+              : `🤖 AI committed "${songTitle}" to song slot ${action.slotIndex}`,
           )
           pcoWritesFired = true
+          const pcoChain =
+            oldItemId && restoreOldTitle
+              ? clearSlot({
+                  serviceTypeId,
+                  planId,
+                  itemId: oldItemId,
+                  title: restoreOldTitle,
+                }).then(() =>
+                  commitSlot({
+                    serviceTypeId,
+                    planId,
+                    itemId: targetItemId,
+                    songId,
+                    songTitle,
+                  }),
+                )
+              : commitSlot({
+                  serviceTypeId,
+                  planId,
+                  itemId: targetItemId,
+                  songId,
+                  songTitle,
+                })
           pendingPcoWrites.push(
-            commitSlot({
-              serviceTypeId,
-              planId,
-              itemId: targetItemId,
-              songId,
-              songTitle,
-            })
+            pcoChain
               .then(() => undefined)
               .catch((e: Error) => {
                 setCandidates((prev) =>
@@ -745,16 +789,19 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     c.id === action.candidateId
                       ? {
                           ...c,
-                          committedAt: null,
-                          assignedSlotItemId: null,
-                          priorSlotTitle: null,
+                          decision: rollbackSnapshot.decision,
+                          committedAt: rollbackSnapshot.committedAt,
+                          assignedSlotItemId: rollbackSnapshot.assignedSlotItemId,
+                          priorSlotTitle: rollbackSnapshot.priorSlotTitle,
                           commitPending: false,
                         }
                       : c,
                   ),
                 )
                 appendSystemMessage(
-                  `⚠ AI commit failed for "${songTitle}" — ${e.message}`,
+                  isMove
+                    ? `⚠ AI move failed for "${songTitle}" — ${e.message}`
+                    : `⚠ AI commit failed for "${songTitle}" — ${e.message}`,
                 )
               }),
           )
