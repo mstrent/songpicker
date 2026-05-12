@@ -663,7 +663,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   // with our floating ghost (and so users on Chromium/Retina don't see
   // it render as a blank rectangle either). A 1×1 transparent canvas
   // is the standard "invisible drag image" trick.
-  function useEmptyDragImage(e: React.DragEvent): void {
+  function suppressNativeDragImage(e: React.DragEvent): void {
     const canvas = document.createElement('canvas')
     canvas.width = 1
     canvas.height = 1
@@ -874,7 +874,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     if (!draggable) return
                     e.dataTransfer.setData('text/plain', it.id)
                     e.dataTransfer.effectAllowed = 'move'
-                    useEmptyDragImage(e)
+                    suppressNativeDragImage(e)
                     setDragKind('slot')
                     setDragSourceId(it.id)
                     setDragGhost({
@@ -1335,7 +1335,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     // lives in dragKind + dragSourceId.
                     e.dataTransfer.setData('text/plain', c.id)
                     e.dataTransfer.effectAllowed = 'move'
-                    useEmptyDragImage(e)
+                    suppressNativeDragImage(e)
                     setDragKind('candidate')
                     setDragSourceId(c.id)
                     setDragGhost({
