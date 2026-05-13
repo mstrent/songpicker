@@ -394,6 +394,19 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     return () => clearTimeout(id)
   }, [notesText, notesSource, serviceTypeId, planId])
 
+  // Invalidate the per-session cache, fetch fresh plan state from
+  // PCO, and sync the items + slotPlaceholders React state in one
+  // call. Used by every action layer function after a PCO write
+  // succeeds. Forgetting to update slotPlaceholders alongside items
+  // is the bug class this exists to prevent — the fields move
+  // together by definition.
+  async function refreshPlanState(): Promise<void> {
+    invalidatePlanContext(serviceTypeId, planId)
+    const fresh = await loadPlanContext(serviceTypeId, planId)
+    setItems(fresh.items)
+    setSlotPlaceholders(fresh.slotPlaceholders)
+  }
+
   // Library-match lookup for a freshly-proposed candidate. Same pattern
   // we used inline before, hoisted now that propose-songs can fire from
   // multiple call sites (a single AI turn can emit multiple proposals).
@@ -1125,11 +1138,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       // before setCandidates batches them into a single render with
       // consistent state).
       if (pcoWritesFired) {
-        invalidatePlanContext(serviceTypeId, planId)
         try {
-          const fresh = await loadPlanContext(serviceTypeId, planId)
-          setItems(fresh.items)
-          setSlotPlaceholders(fresh.slotPlaceholders)
+          await refreshPlanState()
           setCandidates((prev) =>
             prev.map((c) =>
               c.commitPending ? { ...c, commitPending: false } : c,
@@ -1383,10 +1393,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         ...(fromSlotRestoreTitle ? { fromSlotRestoreTitle } : {}),
       })
       if (!deferRefresh) {
-        invalidatePlanContext(serviceTypeId, planId)
-        const fresh = await loadPlanContext(serviceTypeId, planId)
-        setItems(fresh.items)
-        setSlotPlaceholders(fresh.slotPlaceholders)
+        await refreshPlanState()
         setCandidates((prev) =>
           prev.map((c) =>
             c.id === candidate.id ? { ...c, commitPending: false } : c,
@@ -1492,10 +1499,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         restoreTitle,
       })
       if (!deferRefresh) {
-        invalidatePlanContext(serviceTypeId, planId)
-        const fresh = await loadPlanContext(serviceTypeId, planId)
-        setItems(fresh.items)
-        setSlotPlaceholders(fresh.slotPlaceholders)
+        await refreshPlanState()
       }
     } catch (e) {
       const err = e as Error
@@ -1772,10 +1776,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         fromSlotItemId: movingSlot.id,
         fromSlotRestoreTitle: sourceRestoreTitle,
       })
-      invalidatePlanContext(serviceTypeId, planId)
-      const fresh = await loadPlanContext(serviceTypeId, planId)
-      setItems(fresh.items)
-      setSlotPlaceholders(fresh.slotPlaceholders)
+      await refreshPlanState()
       appendSystemMessage(`↕ Moved "${songTitle}" → ${destLabel}`)
     } catch (e) {
       setGenerateError((e as Error).message)
@@ -2059,12 +2060,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                           serviceTypeId={serviceTypeId}
                           planId={planId}
                           item={it}
-                          onSaved={async () => {
-                            invalidatePlanContext(serviceTypeId, planId)
-                            const fresh = await loadPlanContext(serviceTypeId, planId)
-                            setItems(fresh.items)
-                            setSlotPlaceholders(fresh.slotPlaceholders)
-                          }}
+                          onSaved={refreshPlanState}
                         />
                       )}
                       {displayTitle && (
