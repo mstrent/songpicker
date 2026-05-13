@@ -257,8 +257,8 @@ npm test                             # vitest, in-process, fast
 ```
 
 Pure helpers, the slot-state resolver, the executor (with mocked
-callables), and the `usePlanState` hook are the unit-tested
-surface. We don't render-test PlanDetail for state correctness —
-that conflates render bugs with logic bugs and slows the loop. See
-`CLAUDE.md` and `docs/unification-plan.md` for the architecture +
-testing philosophy.
+callables), and the `usePlanData` + `useCandidatePool` hooks are
+the unit-tested surface. We don't render-test PlanDetail for state
+correctness — that conflates render bugs with logic bugs and slows
+the loop. See `CLAUDE.md` and `docs/unification-plan.md` for the
+architecture + testing philosophy.
