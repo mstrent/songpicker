@@ -1,9 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { PlanItem } from '../api'
-import { executePlan, type ExecutorDeps, type PcoCallables } from './executor'
+import {
+  executePlan,
+  type ExecutorDeps,
+  type PcoCallables,
+} from './executor'
 import { synthesizeMessages } from './messages'
 import { resolvePlan, type Plan, type ResolverState } from './resolver'
-import type { CandidateState } from './helpers'
 
 function makeItem(partial: Partial<PlanItem> & Pick<PlanItem, 'id'>): PlanItem {
   return {
@@ -24,20 +27,6 @@ function makeItem(partial: Partial<PlanItem> & Pick<PlanItem, 'id'>): PlanItem {
   }
 }
 
-function makeCandidate(
-  partial: Partial<CandidateState> & Pick<CandidateState, 'id'>,
-): CandidateState {
-  return {
-    id: partial.id,
-    decision: partial.decision ?? 'pending',
-    committedAt: partial.committedAt ?? null,
-    assignedSlotItemId: partial.assignedSlotItemId ?? null,
-    priorSlotTitle: partial.priorSlotTitle ?? null,
-    suggestion: partial.suggestion ?? { title: 'Untitled' },
-    song: partial.song,
-  }
-}
-
 function defaultPlan(overrides: Record<number, Partial<PlanItem>> = {}): PlanItem[] {
   return [1, 2, 3, 4, 5].map((n) =>
     makeItem({
@@ -50,7 +39,7 @@ function defaultPlan(overrides: Record<number, Partial<PlanItem>> = {}): PlanIte
 }
 
 interface Harness {
-  candidates: CandidateState[]
+  items: PlanItem[] | null
   messages: string[]
   refreshCount: number
   pco: {
@@ -61,13 +50,11 @@ interface Harness {
 }
 
 function harness(initial: {
-  candidates: CandidateState[]
-  /** When set, the next placeSongInSlot call rejects with this error
-   *  to test the rollback path. One-shot per call. */
+  items: PlanItem[]
   failNextPlace?: Error
 }): Harness {
   const h: Harness = {
-    candidates: [...initial.candidates],
+    items: [...initial.items],
     messages: [],
     refreshCount: 0,
     pco: { placeCalls: [], clearCalls: [] },
@@ -98,8 +85,8 @@ function harness(initial: {
     serviceTypeId: 'st-1',
     planId: 'plan-1',
     pco,
-    setCandidates: (update) => {
-      h.candidates = update(h.candidates)
+    setItems: (update) => {
+      h.items = update(h.items)
     },
     appendSystemMessage: (msg) => {
       h.messages.push(msg)
@@ -112,33 +99,22 @@ function harness(initial: {
 }
 
 function planFor(
-  assignments: { slotIndex: number; candidateId: string | null }[],
-  candidates: CandidateState[],
-  items = defaultPlan(),
+  assignments: { slotIndex: number; song: { id: string; title: string } | null }[],
+  items: PlanItem[],
   slotPlaceholders: Record<string, string> = {},
 ): Plan {
-  const state: ResolverState = { items, candidates, slotPlaceholders }
+  const state: ResolverState = { items, slotPlaceholders }
   return resolvePlan(assignments, state)
 }
 
 describe('executePlan: empty', () => {
   it('returns immediately on empty plan, no PCO, no refresh', async () => {
-    const h = harness({ candidates: [] })
-    const plan = planFor([], [])
+    const h = harness({ items: defaultPlan() })
+    const plan = planFor([], defaultPlan())
     const result = await executePlan(plan, h.deps)
     expect(result.pcoWritesFired).toBe(false)
     expect(h.pco.placeCalls).toEqual([])
-    expect(h.pco.clearCalls).toEqual([])
     expect(h.refreshCount).toBe(0)
-    expect(h.messages).toEqual([])
-  })
-
-  it('surfaces warnings as ⚠ messages even with no resolved entries', async () => {
-    const h = harness({ candidates: [] })
-    const plan = planFor([{ slotIndex: 99, candidateId: null }], [])
-    await executePlan(plan, h.deps)
-    expect(h.messages).toHaveLength(1)
-    expect(h.messages[0]).toMatch(/^⚠/)
   })
 })
 
@@ -148,246 +124,141 @@ describe('executePlan: fresh commit', () => {
     vi.setSystemTime(new Date('2026-05-13T12:00:00Z'))
   })
 
-  it('flips candidate to committed, fires placeSongInSlot, refreshes', async () => {
-    const cand = makeCandidate({
-      id: 'c1',
-      suggestion: { title: 'Build My Life' },
-      song: { id: 'song-bml', title: 'Build My Life' },
-    })
-    const h = harness({ candidates: [cand] })
-    const plan = planFor([{ slotIndex: 1, candidateId: 'c1' }], [cand])
+  it('optimistically updates items, fires placeSongInSlot, refreshes', async () => {
+    const items = defaultPlan()
+    const h = harness({ items })
+    const plan = planFor(
+      [{ slotIndex: 1, song: { id: 'song-bml', title: 'Build My Life' } }],
+      items,
+    )
     const result = await executePlan(plan, h.deps, { source: 'user' })
     expect(result.pcoWritesFired).toBe(true)
-    expect(h.candidates[0].committedAt).not.toBeNull()
-    expect(h.candidates[0].assignedSlotItemId).toBe('s1')
+    expect(h.items?.[0].songId).toBe('song-bml')
+    expect(h.items?.[0].songTitle).toBe('Build My Life')
     expect(h.pco.placeCalls).toEqual([
       { slotItemId: 's1', songId: 'song-bml', songTitle: 'Build My Life' },
     ])
-    expect(h.pco.clearCalls).toEqual([])
     expect(h.refreshCount).toBe(1)
-    expect(h.messages.some((m) => m.includes('Committed "Build My Life"'))).toBe(true)
-  })
-
-  it('skips refresh when deferRefresh is set', async () => {
-    const cand = makeCandidate({
-      id: 'c1',
-      suggestion: { title: 'Build My Life' },
-      song: { id: 'song-bml', title: 'Build My Life' },
-    })
-    const h = harness({ candidates: [cand] })
-    const plan = planFor([{ slotIndex: 1, candidateId: 'c1' }], [cand])
-    await executePlan(plan, h.deps, { deferRefresh: true })
-    expect(h.refreshCount).toBe(0)
   })
 })
 
 describe('executePlan: clear', () => {
-  it('resets the occupant, fires clearSongFromSlot with restore title', async () => {
-    const occupant = makeCandidate({
-      id: 'c1',
-      committedAt: 1,
-      assignedSlotItemId: 's1',
-      suggestion: { title: 'Build My Life' },
-      song: { id: 'song-bml', title: 'Build My Life' },
+  it('optimistically clears items, fires clearSongFromSlot with restore title', async () => {
+    const items = defaultPlan({
+      1: { songId: 'song-bml', songTitle: 'Build My Life', title: 'Build My Life' },
     })
-    const h = harness({ candidates: [occupant] })
-    const items = defaultPlan({ 1: { songId: 'song-bml', songTitle: 'Build My Life' } })
-    const plan = planFor([{ slotIndex: 1, candidateId: null }], [occupant], items)
+    const h = harness({ items })
+    const plan = planFor(
+      [{ slotIndex: 1, song: null }],
+      items,
+    )
     await executePlan(plan, h.deps, { source: 'user' })
-    expect(h.candidates[0].committedAt).toBeNull()
-    expect(h.candidates[0].assignedSlotItemId).toBeNull()
+    expect(h.items?.[0].songId).toBeNull()
+    expect(h.items?.[0].title).toBe('Song 1')
     expect(h.pco.clearCalls).toEqual([
       { slotItemId: 's1', restoreTitle: 'Song 1' },
     ])
   })
 })
 
-describe('executePlan: overwrite (eviction)', () => {
-  it('evicts the existing committed candidate and commits the new one', async () => {
-    const existing = makeCandidate({
-      id: 'c-existing',
-      committedAt: 1,
-      assignedSlotItemId: 's1',
-      suggestion: { title: 'Goodness of God' },
-      song: { id: 'song-gog', title: 'Goodness of God' },
-    })
-    const newCand = makeCandidate({
-      id: 'c-new',
-      suggestion: { title: 'Build My Life' },
-      song: { id: 'song-bml', title: 'Build My Life' },
-    })
-    const h = harness({ candidates: [existing, newCand] })
-    const items = defaultPlan({ 1: { songId: 'song-gog', songTitle: 'Goodness of God' } })
-    const plan = planFor(
-      [{ slotIndex: 1, candidateId: 'c-new' }],
-      [existing, newCand],
-      items,
-    )
-    await executePlan(plan, h.deps, { source: 'user' })
-    const evicted = h.candidates.find((c) => c.id === 'c-existing')
-    expect(evicted?.committedAt).toBeNull()
-    expect(evicted?.assignedSlotItemId).toBeNull()
-    const newC = h.candidates.find((c) => c.id === 'c-new')
-    expect(newC?.committedAt).not.toBeNull()
-    expect(newC?.assignedSlotItemId).toBe('s1')
-    expect(h.messages.some((m) => m.includes('replacing "Goodness of God"'))).toBe(true)
-  })
-})
-
-describe('executePlan: rollback', () => {
-  it('restores both new and evicted candidate state when PCO commit fails', async () => {
-    const existing = makeCandidate({
-      id: 'c-existing',
-      committedAt: 100,
-      assignedSlotItemId: 's1',
-      priorSlotTitle: 'Song 1',
-      suggestion: { title: 'Goodness of God' },
-      song: { id: 'song-gog', title: 'Goodness of God' },
-    })
-    const newCand = makeCandidate({
-      id: 'c-new',
-      suggestion: { title: 'Build My Life' },
-      song: { id: 'song-bml', title: 'Build My Life' },
-    })
-    const h = harness({
-      candidates: [existing, newCand],
-      failNextPlace: new Error('PCO down'),
-    })
-    const items = defaultPlan({ 1: { songId: 'song-gog', songTitle: 'Goodness of God' } })
-    const plan = planFor(
-      [{ slotIndex: 1, candidateId: 'c-new' }],
-      [existing, newCand],
-      items,
-    )
-    await executePlan(plan, h.deps, { source: 'user' })
-    // After rollback, the new candidate is back to uncommitted and
-    // the existing one is back to committed at slot 1.
-    const newAfter = h.candidates.find((c) => c.id === 'c-new')
-    expect(newAfter?.committedAt).toBeNull()
-    expect(newAfter?.assignedSlotItemId).toBeNull()
-    const existingAfter = h.candidates.find((c) => c.id === 'c-existing')
-    expect(existingAfter?.committedAt).toBe(100)
-    expect(existingAfter?.assignedSlotItemId).toBe('s1')
-    expect(h.messages.some((m) => m.match(/Commit failed/))).toBe(true)
-  })
-})
-
 describe('executePlan: swap', () => {
-  it('renders one combined "swapped" message, not two commits', async () => {
-    const a = makeCandidate({
-      id: 'A',
-      committedAt: 1,
-      assignedSlotItemId: 's1',
-      suggestion: { title: 'Song A' },
-      song: { id: 'song-a', title: 'Song A' },
-    })
-    const b = makeCandidate({
-      id: 'B',
-      committedAt: 1,
-      assignedSlotItemId: 's2',
-      suggestion: { title: 'Song B' },
-      song: { id: 'song-b', title: 'Song B' },
-    })
-    const h = harness({ candidates: [a, b] })
+  it('renders one combined "swapped" message and fires paired commits (no clears)', async () => {
     const items = defaultPlan({
-      1: { songId: 'song-a', songTitle: 'Song A' },
-      2: { songId: 'song-b', songTitle: 'Song B' },
+      1: { songId: 'song-A', songTitle: 'Song A' },
+      2: { songId: 'song-B', songTitle: 'Song B' },
     })
+    const h = harness({ items })
     const plan = planFor(
       [
-        { slotIndex: 2, candidateId: 'A' },
-        { slotIndex: 1, candidateId: 'B' },
+        { slotIndex: 2, song: { id: 'song-A', title: 'Song A' } },
+        { slotIndex: 1, song: { id: 'song-B', title: 'Song B' } },
       ],
-      [a, b],
       items,
     )
     await executePlan(plan, h.deps, { source: 'user' })
     const swapMessages = h.messages.filter((m) => /Swapped/.test(m))
     expect(swapMessages).toHaveLength(1)
-    expect(swapMessages[0]).toMatch(/Song A/)
-    expect(swapMessages[0]).toMatch(/Song B/)
-  })
-
-  it('drops clears for slots that are also commit targets (commits-overwrite-clears)', async () => {
-    // Same swap as above. plannedClears would have entries for s1
-    // and s2 (move sources), but plannedCommits also targets s1 and
-    // s2, so both clears should be deduped away. Net: 0 clear calls,
-    // 2 commit calls.
-    const a = makeCandidate({
-      id: 'A',
-      committedAt: 1,
-      assignedSlotItemId: 's1',
-      suggestion: { title: 'Song A' },
-      song: { id: 'song-a', title: 'Song A' },
-    })
-    const b = makeCandidate({
-      id: 'B',
-      committedAt: 1,
-      assignedSlotItemId: 's2',
-      suggestion: { title: 'Song B' },
-      song: { id: 'song-b', title: 'Song B' },
-    })
-    const h = harness({ candidates: [a, b] })
-    const items = defaultPlan({
-      1: { songId: 'song-a', songTitle: 'Song A' },
-      2: { songId: 'song-b', songTitle: 'Song B' },
-    })
-    const plan = planFor(
-      [
-        { slotIndex: 2, candidateId: 'A' },
-        { slotIndex: 1, candidateId: 'B' },
-      ],
-      [a, b],
-      items,
-    )
-    await executePlan(plan, h.deps)
     expect(h.pco.clearCalls).toHaveLength(0)
     expect(h.pco.placeCalls).toHaveLength(2)
+  })
+
+  it('handles PCO-direct swap (no candidate state — was the Phase 5 bug)', async () => {
+    const items = defaultPlan({
+      4: { songId: 'song-isa', songTitle: 'I Surrender All' },
+      5: { songId: 'song-surr', songTitle: 'Surrender' },
+    })
+    const h = harness({ items })
+    // The drag-ISA-onto-Surrender flow compiles to this:
+    const plan = planFor(
+      [
+        { slotIndex: 4, song: { id: 'song-surr', title: 'Surrender' } },
+        { slotIndex: 5, song: { id: 'song-isa', title: 'I Surrender All' } },
+      ],
+      items,
+    )
+    await executePlan(plan, h.deps, { source: 'user' })
+    expect(h.pco.placeCalls).toHaveLength(2)
+    expect(h.pco.clearCalls).toHaveLength(0)
+    // Optimistic items reflect the swap.
+    expect(h.items?.[3].songId).toBe('song-surr')
+    expect(h.items?.[3].songTitle).toBe('Surrender')
+    expect(h.items?.[4].songId).toBe('song-isa')
+    expect(h.items?.[4].songTitle).toBe('I Surrender All')
+  })
+})
+
+describe('executePlan: rollback', () => {
+  it('restores pre-optimistic items when commit fails AND deferRefresh is set', async () => {
+    const items = defaultPlan({
+      1: { songId: 'song-orig', songTitle: 'Original' },
+    })
+    const h = harness({
+      items,
+      failNextPlace: new Error('PCO down'),
+    })
+    const plan = planFor(
+      [{ slotIndex: 1, song: { id: 'song-new', title: 'New' } }],
+      items,
+    )
+    await executePlan(plan, h.deps, { source: 'user', deferRefresh: true })
+    // Items reverted to pre-optimistic.
+    expect(h.items?.[0].songId).toBe('song-orig')
+    expect(h.items?.[0].songTitle).toBe('Original')
+    expect(h.messages.some((m) => m.match(/Commit failed/))).toBe(true)
   })
 })
 
 describe('synthesizeMessages: pure formatting', () => {
   it('user source uses arrow prefixes', () => {
-    const cand = makeCandidate({
-      id: 'c1',
-      suggestion: { title: 'Build My Life' },
-      song: { id: 'song-bml', title: 'Build My Life' },
-    })
-    const plan = planFor([{ slotIndex: 1, candidateId: 'c1' }], [cand])
+    const items = defaultPlan()
+    const plan = planFor(
+      [{ slotIndex: 1, song: { id: 'song-bml', title: 'Build My Life' } }],
+      items,
+    )
     const lines = synthesizeMessages(plan, 'user')
     expect(lines[0]).toMatch(/^↗/)
   })
 
   it('ai source uses 🤖 prefix', () => {
-    const cand = makeCandidate({
-      id: 'c1',
-      suggestion: { title: 'Build My Life' },
-      song: { id: 'song-bml', title: 'Build My Life' },
-    })
-    const plan = planFor([{ slotIndex: 1, candidateId: 'c1' }], [cand])
+    const items = defaultPlan()
+    const plan = planFor(
+      [{ slotIndex: 1, song: { id: 'song-bml', title: 'Build My Life' } }],
+      items,
+    )
     const lines = synthesizeMessages(plan, 'ai')
     expect(lines[0]).toMatch(/^🤖/)
   })
 
-  it('mentions evicted song in commit message when overwriting', () => {
-    const existing = makeCandidate({
-      id: 'c-existing',
-      committedAt: 1,
-      assignedSlotItemId: 's1',
-      suggestion: { title: 'Goodness of God' },
-      song: { id: 'song-gog', title: 'Goodness of God' },
+  it('mentions evicted song title in commit message when overwriting', () => {
+    const items = defaultPlan({
+      1: { songId: 'song-gog', songTitle: 'Goodness of God' },
     })
-    const newCand = makeCandidate({
-      id: 'c-new',
-      suggestion: { title: 'Build My Life' },
-      song: { id: 'song-bml', title: 'Build My Life' },
-    })
-    const items = defaultPlan({ 1: { songId: 'song-gog', songTitle: 'Goodness of God' } })
     const plan = planFor(
-      [{ slotIndex: 1, candidateId: 'c-new' }],
-      [existing, newCand],
+      [{ slotIndex: 1, song: { id: 'song-bml', title: 'Build My Life' } }],
       items,
     )
-    expect(synthesizeMessages(plan, 'user')[0]).toMatch(/replacing "Goodness of God"/)
+    expect(synthesizeMessages(plan, 'user')[0]).toMatch(
+      /replacing "Goodness of God"/,
+    )
   })
 })

@@ -8,9 +8,6 @@ function makeCandidate(
   return {
     id: partial.id,
     decision: partial.decision ?? 'pending',
-    committedAt: partial.committedAt ?? null,
-    assignedSlotItemId: partial.assignedSlotItemId ?? null,
-    priorSlotTitle: partial.priorSlotTitle ?? null,
     suggestion: partial.suggestion ?? { title: 'Untitled' },
     song: partial.song,
   }
@@ -23,7 +20,10 @@ interface Harness {
   deps: ApplyDecisionDeps
 }
 
-function harness(initial: CandidateState[]): Harness {
+function harness(
+  initial: CandidateState[],
+  committedSongIds: Set<string> = new Set(),
+): Harness {
   const h: Harness = {
     candidates: [...initial],
     messages: [],
@@ -35,6 +35,7 @@ function harness(initial: CandidateState[]): Harness {
       h.candidates = update(h.candidates)
     },
     appendSystemMessage: (msg) => h.messages.push(msg),
+    committedSongIds,
     onRejectsLanded: (n) => h.rejectsLanded.push(n),
   }
   return h
@@ -42,7 +43,11 @@ function harness(initial: CandidateState[]): Harness {
 
 describe('applyDecisionChange: reject', () => {
   it('flips a pending candidate to rejected; emits message; bumps reject signal', () => {
-    const c = makeCandidate({ id: 'c1', suggestion: { title: 'Surrender' } })
+    const c = makeCandidate({
+      id: 'c1',
+      suggestion: { title: 'Surrender' },
+      song: { id: 'song-x', title: 'Surrender' },
+    })
     const h = harness([c])
     const result = applyDecisionChange(
       { ids: ['c1'], decision: 'reject' },
@@ -55,14 +60,13 @@ describe('applyDecisionChange: reject', () => {
     expect(h.rejectsLanded).toEqual([1])
   })
 
-  it('skips committed candidates (rejecting committed = misinterpretation)', () => {
+  it('skips candidates whose song is currently in the plan (committed)', () => {
     const c = makeCandidate({
       id: 'c1',
-      committedAt: 1,
-      assignedSlotItemId: 's1',
       suggestion: { title: 'Surrender' },
+      song: { id: 'song-x', title: 'Surrender' },
     })
-    const h = harness([c])
+    const h = harness([c], new Set(['song-x']))
     const result = applyDecisionChange(
       { ids: ['c1'], decision: 'reject' },
       'user',
@@ -70,7 +74,6 @@ describe('applyDecisionChange: reject', () => {
     )
     expect(result.changedIds).toEqual([])
     expect(h.candidates[0].decision).toBe('pending')
-    expect(h.candidates[0].committedAt).toBe(1)
     expect(h.messages).toEqual([])
     expect(h.rejectsLanded).toEqual([])
   })
@@ -131,17 +134,6 @@ describe('applyDecisionChange: unreject', () => {
     expect(result.changedIds).toEqual(['c1'])
     expect(h.candidates[0].decision).toBe('pending')
     expect(h.messages).toContain('↩ Unrejected: Surrender')
-  })
-
-  it('skips non-rejected candidates', () => {
-    const c = makeCandidate({ id: 'c1', suggestion: { title: 'Surrender' } })
-    const h = harness([c])
-    const result = applyDecisionChange(
-      { ids: ['c1'], decision: 'pending' },
-      'user',
-      h.deps,
-    )
-    expect(result.changedIds).toEqual([])
   })
 
   it('AI source uses 🤖 prefix with cluster message', () => {

@@ -6,7 +6,6 @@ import {
   compileDropCandidateOnSlot,
   compileSlotToSlot,
 } from './compile'
-import type { CandidateState } from './helpers'
 
 function makeItem(partial: Partial<PlanItem> & Pick<PlanItem, 'id'>): PlanItem {
   return {
@@ -27,136 +26,146 @@ function makeItem(partial: Partial<PlanItem> & Pick<PlanItem, 'id'>): PlanItem {
   }
 }
 
-function makeCandidate(
-  partial: Partial<CandidateState> & Pick<CandidateState, 'id'>,
-): CandidateState {
-  return {
-    id: partial.id,
-    decision: partial.decision ?? 'pending',
-    committedAt: partial.committedAt ?? null,
-    assignedSlotItemId: partial.assignedSlotItemId ?? null,
-    priorSlotTitle: partial.priorSlotTitle ?? null,
-    suggestion: partial.suggestion ?? { title: 'Untitled' },
-    song: partial.song,
-  }
-}
-
 const items = [1, 2, 3, 4, 5].map((n) =>
   makeItem({ id: `s${n}`, sequence: n, title: `Song ${n}` }),
 )
 
 describe('compileDropCandidateOnSlot', () => {
   it('returns one assignment for any drop on a song slot', () => {
-    expect(compileDropCandidateOnSlot('c1', items[2], items)).toEqual([
-      { slotIndex: 3, candidateId: 'c1' },
+    expect(
+      compileDropCandidateOnSlot(
+        {
+          song: { id: 'song-bml', title: 'Build My Life' },
+          suggestion: { title: 'Build My Life' },
+        },
+        items[2],
+        items,
+      ),
+    ).toEqual([
+      {
+        slotIndex: 3,
+        song: { id: 'song-bml', title: 'Build My Life' },
+      },
     ])
   })
 
-  it('returns empty when item is not a song slot', () => {
+  it('returns [] when candidate has no matched library song', () => {
+    expect(
+      compileDropCandidateOnSlot(
+        { song: undefined, suggestion: { title: 'Untitled' } },
+        items[0],
+        items,
+      ),
+    ).toEqual([])
+  })
+
+  it('returns [] when item is not a song slot', () => {
     const rogue = makeItem({ id: 'header-1', itemType: 'header', title: 'Welcome' })
-    expect(compileDropCandidateOnSlot('c1', rogue, [...items, rogue])).toEqual([])
+    expect(
+      compileDropCandidateOnSlot(
+        {
+          song: { id: 'song-bml', title: 'Build My Life' },
+          suggestion: { title: 'Build My Life' },
+        },
+        rogue,
+        [...items, rogue],
+      ),
+    ).toEqual([])
   })
 })
 
 describe('compileClearSlot', () => {
-  it('returns one null assignment', () => {
+  it('returns one null-song assignment', () => {
     expect(compileClearSlot(items[3], items)).toEqual([
-      { slotIndex: 4, candidateId: null },
+      { slotIndex: 4, song: null },
     ])
   })
 })
 
 describe('compileCommitToSlot (popover)', () => {
   it('produces the same shape as a DnD drop', () => {
-    expect(compileCommitToSlot('c1', items[1], items)).toEqual([
-      { slotIndex: 2, candidateId: 'c1' },
-    ])
+    expect(
+      compileCommitToSlot(
+        {
+          song: { id: 'song-x', title: 'X' },
+          suggestion: { title: 'X' },
+        },
+        items[1],
+        items,
+      ),
+    ).toEqual([{ slotIndex: 2, song: { id: 'song-x', title: 'X' } }])
   })
 })
 
 describe('compileSlotToSlot', () => {
   it('source filled, target empty → move source song to target', () => {
     const slotsWithFilled = items.map((it, i) =>
-      i === 0
-        ? { ...it, songId: 'song-a', songTitle: 'Song A' }
-        : it,
+      i === 0 ? { ...it, songId: 'song-a', songTitle: 'Song A' } : it,
     )
-    const cand = makeCandidate({
-      id: 'A',
-      committedAt: 1,
-      assignedSlotItemId: 's1',
-    })
     const result = compileSlotToSlot(
-      slotsWithFilled[0], // source filled
-      slotsWithFilled[2], // target empty
-      [cand],
+      slotsWithFilled[0],
+      slotsWithFilled[2],
       slotsWithFilled,
     )
-    expect(result).toEqual([{ slotIndex: 3, candidateId: 'A' }])
+    expect(result).toEqual([
+      { slotIndex: 3, song: { id: 'song-a', title: 'Song A' } },
+    ])
   })
 
   it('source empty, target filled → move target song to source', () => {
     const slotsWithFilled = items.map((it, i) =>
-      i === 2
-        ? { ...it, songId: 'song-a', songTitle: 'Song A' }
-        : it,
+      i === 2 ? { ...it, songId: 'song-a', songTitle: 'Song A' } : it,
     )
-    const cand = makeCandidate({
-      id: 'A',
-      committedAt: 1,
-      assignedSlotItemId: 's3',
-    })
     const result = compileSlotToSlot(
-      slotsWithFilled[0], // source empty
-      slotsWithFilled[2], // target filled
-      [cand],
+      slotsWithFilled[0],
+      slotsWithFilled[2],
       slotsWithFilled,
     )
-    expect(result).toEqual([{ slotIndex: 1, candidateId: 'A' }])
+    expect(result).toEqual([
+      { slotIndex: 1, song: { id: 'song-a', title: 'Song A' } },
+    ])
   })
 
-  it('both filled → swap (two assignments)', () => {
+  it('both filled (with candidate-tracked songs) → swap', () => {
     const slotsWithFilled = items.map((it, i) => {
       if (i === 0) return { ...it, songId: 'song-a', songTitle: 'Song A' }
       if (i === 1) return { ...it, songId: 'song-b', songTitle: 'Song B' }
       return it
     })
-    const a = makeCandidate({
-      id: 'A',
-      committedAt: 1,
-      assignedSlotItemId: 's1',
-    })
-    const b = makeCandidate({
-      id: 'B',
-      committedAt: 1,
-      assignedSlotItemId: 's2',
+    const result = compileSlotToSlot(
+      slotsWithFilled[0],
+      slotsWithFilled[1],
+      slotsWithFilled,
+    )
+    expect(result).toEqual([
+      { slotIndex: 1, song: { id: 'song-b', title: 'Song B' } },
+      { slotIndex: 2, song: { id: 'song-a', title: 'Song A' } },
+    ])
+  })
+
+  it('both filled (PCO-direct songs, no candidates needed) → swap', () => {
+    // The pre-Phase-6 fallback case: now handled uniformly.
+    const slotsWithFilled = items.map((it, i) => {
+      if (i === 0) return { ...it, songId: 'pco-only-a', songTitle: 'PCO Only A' }
+      if (i === 1) return { ...it, songId: 'pco-only-b', songTitle: 'PCO Only B' }
+      return it
     })
     const result = compileSlotToSlot(
       slotsWithFilled[0],
       slotsWithFilled[1],
-      [a, b],
       slotsWithFilled,
     )
     expect(result).toEqual([
-      { slotIndex: 1, candidateId: 'B' },
-      { slotIndex: 2, candidateId: 'A' },
+      { slotIndex: 1, song: { id: 'pco-only-b', title: 'PCO Only B' } },
+      { slotIndex: 2, song: { id: 'pco-only-a', title: 'PCO Only A' } },
     ])
   })
 
   it('both empty → no-op', () => {
-    expect(compileSlotToSlot(items[0], items[1], [], items)).toEqual([])
-  })
-
-  it('returns [] when source slot has a PCO-direct song with no candidate (caller falls back)', () => {
-    const slotsWithFilled = items.map((it, i) =>
-      i === 0 ? { ...it, songId: 'pco-only', songTitle: 'PCO Only' } : it,
-    )
-    expect(
-      compileSlotToSlot(slotsWithFilled[0], slotsWithFilled[2], [], slotsWithFilled),
-    ).toEqual([])
+    expect(compileSlotToSlot(items[0], items[1], items)).toEqual([])
   })
 
   it('returns [] when dropping onto same slot', () => {
-    expect(compileSlotToSlot(items[0], items[0], [], items)).toEqual([])
+    expect(compileSlotToSlot(items[0], items[0], items)).toEqual([])
   })
 })
