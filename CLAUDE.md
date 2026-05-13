@@ -145,25 +145,18 @@ These are non-obvious things we've burned time on; don't relearn them.
   arrangements + keys via
   `/songs/{id}/arrangements?include=keys&per_page=25`. See
   `PcoClient.listSongArrangements` and `setSlotArrangementKey`.
-- **Slot title round-trip.** Because committing a song renames the
-  slot to the song's title (above), clearing it needs to restore
-  whatever the slot was called before. We capture that title on the
-  candidate as `priorSlotTitle` at commit time, and use it on clear
-  (falling back to a position-based "Song N" computed by
-  `fallbackSlotTitle` when no prior is stored). Reorder/move/swap all
-  null out the affected candidates' `priorSlotTitle` since the slot's
-  identity may no longer match its old name.
-- **priorSlotTitle taint.** Repeated commits to the same slot through
-  swaps/overwrites can leave `priorSlotTitle` pointing at a previous
-  song's name instead of the slot's actual placeholder. Restoring
-  that on clear would label the slot with the just-removed song. The
-  clear paths (`set_slot_contents` clear branch + `clearSlotAction`)
-  build a set of all known song titles from candidates and items and
-  treat any `priorSlotTitle` matching that set as tainted, falling
-  back to `fallbackSlotTitle`. The commit path snapshots
-  `preTurnSlotPlaceholders` at the start of each `set_slot_contents`
-  action so incoming candidates inherit the slot's original
-  placeholder even in mid-turn swap scenarios.
+- **Slot title round-trip.** Committing a song renames the slot to
+  the song's title (above), so clearing it needs to restore the
+  original placeholder. The source of truth is
+  `slotPlaceholders/{uid}/plans/{planId}` (server-persisted, see
+  the data-model section below). The Phase 6 resolver
+  (`src/lib/planActions/helpers.ts:resolveRestoreTitle`) reads from
+  there on every clear; falls back to position-based "Song N"
+  (`fallbackSlotTitle`) when the slot was filled before songpicker
+  ever observed it empty. Pre-Phase-6 we ALSO carried a
+  `priorSlotTitle` per-candidate as a backup tier — that's gone now
+  along with the taint-detection it required. Items are PCO's; the
+  candidate pool is separate.
 - **`PcoClient.fetch` tolerates empty response bodies.** PCO's action
   endpoints (`/item_reorder`) return 204 No Content on success.
   Calling `res.json()` on that throws "Unexpected end of JSON input"
@@ -172,10 +165,11 @@ These are non-obvious things we've burned time on; don't relearn them.
   non-empty → JSON.parse with a better error message on failure.
 - **PCO read-after-write isn't always strongly consistent.** After
   POSTing to `/item_reorder`, an immediate `listPlanItems` can
-  return the pre-swap ordering for a beat. `swapSlotsAction` applies
-  the reorder locally (it knows exactly what the swap should produce)
-  rather than refetching, and only invalidates the per-session cache
-  so a future navigate-away-and-back picks up fresh data.
+  return the pre-swap ordering for a beat. We don't use
+  `/item_reorder` from the slot-state path anymore — the unified
+  swap is paired PATCHes on songId (items stay at their positions,
+  songs swap). The reorder endpoint is only wired through
+  `PcoClient.reorderPlanItems` for any future explicit reorder UI.
 
 ## Per-user data model (Firestore, all admin-SDK-only)
 
@@ -198,17 +192,14 @@ These are non-obvious things we've burned time on; don't relearn them.
   it empty (`!songId`). Server reconciles inside `getPlanContext`
   via `syncSlotPlaceholders` — only writes when an empty slot's
   title diverged from the captured value (or is brand new), so most
-  loads are no-ops. Used by clear/move restore paths in PlanDetail
-  as the highest-priority source for "what should the slot title
-  go back to?", beating the candidate's `priorSlotTitle` and the
-  position-based "Song N" fallback. The reconcile-on-load flow is
-  the cache-invalidation: every commit/clear invalidates the SPA's
-  per-session plan cache, every reload triggers a fresh
-  `getPlanContext`, every fresh load re-syncs the map. So renaming
-  an empty slot in PCO between songpicker visits is picked up on
-  the next load. Slots that were already filled the first time
-  songpicker observed them have no captured placeholder — those
-  fall back to "Song N" on clear (the original is unrecoverable).
+  loads are no-ops. Phase 6's sole source of truth for restore
+  titles (the prior candidate-side `priorSlotTitle` is gone). Every
+  commit/clear refreshes via `refreshSlotState` which calls
+  `syncSlotPlaceholders`, so renaming an empty slot in PCO between
+  songpicker visits is picked up on the next load. Slots that were
+  already filled the first time songpicker observed them have no
+  captured placeholder — those fall back to "Song N" on clear (the
+  original is unrecoverable).
 
 ## Access lists (allowed users / admins)
 
@@ -344,18 +335,6 @@ page.
   every input that feeds the AI — Matt asked us to strip those
   because the whole flow is so obviously AI-driven that the icons
   just added noise.
-- **setItems(fresh) before setCandidates(…) after PCO mutations.**
-  PlanDetail has a reconciliation `useEffect` watching `[items,
-  candidates]` that strips `committedAt` off any candidate whose
-  slot looks empty in items. If you call `setCandidates(committed)`
-  before the `setItems(fresh)` that reflects the new PCO state,
-  React renders once with new-candidates-vs-stale-items, the
-  effect resets `committedAt`, and the candidate flickers back to
-  un-committed. Put the `setItems(fresh)` first so both setStates
-  batch into a single render with consistent state. The transient
-  `commitPending` flag on `CandidateMatch` shields a candidate
-  from this effect while a PCO write is mid-flight; cleared in the
-  same render as `setItems(fresh)` after the response lands.
 - **Per-plan DnD uses HTML5 drag-and-drop with our own ghost.**
   Quirks worth remembering:
   - Anchor (`<a>`) children of draggable rows must set
@@ -381,29 +360,28 @@ page.
   and passes `autoRefresh: true` to the AI so the prompt switches
   into terse mode (commits/clears are disallowed during auto-refresh;
   the SPA also drops them as belt-and-suspenders).
-- **Action layer for PCO writes.** `placeSongAction`,
-  `clearSlotAction`, `swapSlotsAction` in `PlanDetail.tsx` are the
-  single source of truth for slot-state changes. Both manual flows
-  (DnD, candidate slot picker) and AI tool calls go through them.
-  Each handles: optimistic state, the Cloud Function call,
-  rollback on failure, items refresh (or `deferRefresh` for AI
-  batched turns), and the chat-log system message. `source: 'user'
-  | 'ai'` switches message formatting.
-- **AI turns batch PCO writes in two phases.** A `set_slot_contents`
-  action can include any mix of commits and clears (including swaps
-  expressed as two-slot assignments). Each assignment's optimistic
-  state update applies as it arrives in the stream, but the actual
-  PCO calls land in `plannedClears` / `plannedCommits` Maps and only
-  fire after the stream ends, in strict order: Phase 1 all clears,
-  Phase 2 all commits. This makes swaps land cleanly (no
-  clear-of-A-overwrites-B race), and the `liveCommittedSlot` tracker
-  re-evaluates each action's source slot against the latest in-turn
-  state instead of the pre-turn snapshot.
+- **Slot-state ops flow through one path: `compile* → resolvePlan
+  → executePlan`.** Both UI events (DnD drops, button clicks,
+  popover picks) and AI tool calls (`set_slot_contents`) compile to
+  the same `Assignment[]` shape (`{slotIndex, song: {id, title} |
+  null}`), feed the same pure resolver
+  (`src/lib/planActions/resolver.ts`), and apply through the same
+  executor (`src/lib/planActions/executor.ts`). The executor handles:
+  optimistic items state, two-phase PCO writes (clears before
+  commits — Phase 1 clears all sources, Phase 2 commits all targets,
+  deduped when a slot is both), rollback on failure, chat-message
+  synthesis (`messages.ts`), and the post-turn refresh. AI passes
+  `deferRefresh: true` so a single refresh fires after the whole
+  stream rather than per-action. The AI tool surface still uses
+  `{slotIndex, candidateId}`; `translateAiAssignments` (in
+  `aiTranslate.ts`) bridges to the resolver's song-ref shape.
 - **Decision: `'pending' | 'reject'` only.** The shortlist
-  intermediate state was removed; candidates are either active
-  (`'pending'`, possibly committed via `committedAt`) or rejected.
-  Sessions persisted before this change collapse old `'shortlist'`
-  values to `'pending'` via the sanitizer in `functions/src/sessions.ts`.
+  intermediate state was removed; candidates are either active or
+  rejected. "Is this candidate currently committed?" is *derived*
+  from `items.songId === candidate.song?.id` — never stored on the
+  candidate. (See the architecture philosophy section.) Sessions
+  persisted before this change collapse old `'shortlist'` values to
+  `'pending'` via the sanitizer in `functions/src/sessions.ts`.
 - **Reject is boolean — no per-candidate metadata.** Rejecting a song
   flips `decision` to `'reject'` and that's it. There's no reason
   field, no chip pool, no rationale picker. Course-correction belongs
@@ -453,9 +431,10 @@ page.
   reject (remove, swap, replace, switch out, trade, exchange) and
   reserves rejection for unambiguous dislike phrases.
 - **Position-based fallbacks beat stored state in long sessions.**
-  `priorSlotTitle` is useful when fresh, but accumulates taint
-  across repeated overwrites. Detect taint (compare against all
-  known song titles) and fall back to `fallbackSlotTitle` ("Song
-  N" by song-slot index) rather than restoring a possibly-wrong
-  cached value. Losing a custom slot name is better than restoring
-  the just-cleared song's title.
+  Phase 6 made this concrete: per-candidate `priorSlotTitle` was
+  removed entirely (it was the worst-case stored state — accumulated
+  taint across overwrites). The only restore-title sources now are
+  the server-persisted `slotPlaceholders` map (refreshed on every
+  load) and the position-based `fallbackSlotTitle` ("Song N").
+  Losing a custom slot name to "Song N" is better than restoring
+  a stale song name.
