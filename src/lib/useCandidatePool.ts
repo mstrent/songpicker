@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   loadSession,
   saveSession,
-  searchSongs,
+  searchSongsBatch,
   suggestSongs,
   type AiAction,
   type AiCandidate,
@@ -402,27 +402,50 @@ export function useCandidatePool(
     unservedRejectsRef.current = 0
   }
 
-  function searchAndAttachSong(c: CandidateMatch): void {
-    searchSongs({
+  /** Library-match lookup for a batch of freshly-proposed
+   *  candidates. One Cloud Function round-trip; the server fans out
+   *  PCO calls under bounded concurrency. Pairs results back to
+   *  candidates by index. On error, every candidate in the batch
+   *  gets matchStatus='error'. */
+  function attachLibraryMatchesBatch(
+    minted: readonly CandidateMatch[],
+  ): void {
+    if (minted.length === 0) return
+    const queries = minted.map((c) => ({
       query: c.suggestion.title,
       ...(c.suggestion.author ? { author: c.suggestion.author } : {}),
-    })
+    }))
+    searchSongsBatch({ queries })
       .then((sr) => {
-        const match = sr.data.songs[0]
+        const results = sr.data.results
+        const updates = new Map<string, Partial<CandidateMatch>>()
+        for (let i = 0; i < minted.length; i++) {
+          const c = minted[i]
+          const songs = results[i]
+          if (songs === null) {
+            updates.set(c.id, { matchStatus: 'unmatched' as MatchStatus })
+            continue
+          }
+          const match = songs[0]
+          updates.set(
+            c.id,
+            match
+              ? { matchStatus: 'matched' as MatchStatus, song: match }
+              : { matchStatus: 'unmatched' as MatchStatus },
+          )
+        }
         setCandidates((prev) =>
-          prev.map((cur) =>
-            cur.id === c.id
-              ? match
-                ? { ...cur, matchStatus: 'matched' as MatchStatus, song: match }
-                : { ...cur, matchStatus: 'unmatched' as MatchStatus }
-              : cur,
-          ),
+          prev.map((cur) => {
+            const u = updates.get(cur.id)
+            return u ? { ...cur, ...u } : cur
+          }),
         )
       })
       .catch((e: Error) => {
+        const ids = new Set(minted.map((c) => c.id))
         setCandidates((prev) =>
           prev.map((cur) =>
-            cur.id === c.id
+            ids.has(cur.id)
               ? { ...cur, matchStatus: 'error' as MatchStatus, error: e.message }
               : cur,
           ),
@@ -550,7 +573,7 @@ export function useCandidatePool(
           }
           if (minted.length > 0) {
             setCandidates((prev) => [...prev, ...minted])
-            minted.forEach(searchAndAttachSong)
+            attachLibraryMatchesBatch(minted)
             for (const c of minted) {
               lastSentCandidateIdsRef.current.add(c.id)
             }

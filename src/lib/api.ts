@@ -240,6 +240,14 @@ export const searchSongs = httpsCallable<
   { songs: Song[] }
 >(functions, 'searchSongs')
 
+/** Bulk variant for the AI propose flow. Each input query maps to
+ *  a `Song[]` (or `null` when the query was blank) at the same
+ *  index in `results`. */
+export const searchSongsBatch = httpsCallable<
+  { queries: Array<{ query: string; author?: string }> },
+  { results: Array<Song[] | null> }
+>(functions, 'searchSongsBatch')
+
 export type PromptType = 'structure' | 'role'
 export type PromptSource = 'plan' | 'user' | 'system'
 
