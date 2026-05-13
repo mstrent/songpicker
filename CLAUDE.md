@@ -124,11 +124,18 @@ page.
 
 ## AI provider
 
-- Anthropic Claude Sonnet 4.6, via `@anthropic-ai/sdk`. Single
-  provider — we used to abstract over Gemini and OpenAI too, but
-  trimmed those out. The `AiProvider` interface in
-  `functions/src/ai/types.ts` is kept so a future provider can slot
-  in, but `getAiProvider()` just returns `AnthropicProvider`.
+- Anthropic Claude Sonnet 4.6 for the main `suggestSongs` flow, via
+  `@anthropic-ai/sdk`. Single provider — we used to abstract over
+  Gemini and OpenAI too, but trimmed those out. The `AiProvider`
+  interface in `functions/src/ai/types.ts` is kept so a future
+  provider can slot in, but `getAiProvider()` just returns
+  `AnthropicProvider`.
+- **Ancillary calls run on Haiku 4.5.** The chip-pipeline helpers in
+  `functions/src/ai/distill.ts` (`matchFreeformToChip`,
+  `distillSingleReason`) are short classifier/short-label tasks, not
+  generative — Haiku is several-times cheaper and faster. When adding
+  another small AI utility, default to Haiku; keep Sonnet for the
+  main suggestion engine.
 - `suggestSongs` returns a `debug` payload via `buildUserMessage` so
   the SPA's debug panel always reflects what was actually sent.
 - **Streaming via `messages.stream`** — the callable in
@@ -263,11 +270,31 @@ page.
   values to `'pending'` via the sanitizer in `functions/src/sessions.ts`.
 - **Reject rationale + chip pool.** Each rejected candidate can carry
   a `rejectReason` (typed freeform or picked from the global chip
-  list at `appConfig/rejectionReasons`). Chips are app-wide and
-  AI-distilled: freeform reasons feed a Claude call in
-  `functions/src/ai/distill.ts` once the log crosses a threshold,
-  proposing new chip-worthy categories. Reasons go into the AI
+  list at `appConfig/rejectionReasons`). Chips are app-wide. Reasons
+  resolve through three tiers in `recordRejectReason`:
+  1. `norm()` exact match against existing chips — bumps `useCount`,
+     no AI call (covers the chip-tap case).
+  2. Haiku semantic match (`matchFreeformToChip`) — bumps `useCount`,
+     returns the canonical text. The SPA overwrites the local
+     `rejectReason` with that text so future AI turns see consistent
+     per-candidate metadata.
+  3. Genuinely novel reasons get distilled into a short 2–4 word chip
+     by `distillSingleReason` (also Haiku) and added to the pool with
+     `useCount: 1`, `source: 'ai'`. The user-facing picker shows
+     `MAX_USER_AI_CHIPS` (3) by `useCount` desc / `addedAt` desc —
+     the rest are "proto" chips visible only in the admin UI.
+     `enforceAiPoolCap` keeps total AI chips at ≤ `MAX_AI_CHIPS` (23)
+     by evicting the least-used / oldest. Seed and manual chips are
+     admin-curated and never auto-evicted.
+  No batched distillation or freeform log — each Tier-3 reason
+  produces its chip immediately. Reasons go into the AI suggestion
   payload as part of each candidate's metadata.
+- **Admin chip management.** `renameCommonReason` (admin-gated)
+  preserves `useCount/addedAt/source`; collision detection returns
+  `collisionWith` rather than throwing so the SPA can surface an
+  inline error. The admin reject-chip manager shows useCount as a
+  badge, supports inline rename (click chip text), and flags
+  proto chips with a dimmed treatment.
 - **Per-turn context compaction.** Two patterns reduce per-turn
   token count regardless of cache state: (1) candidates the AI saw
   on a prior turn drop their `chorusSnippet` from subsequent payloads

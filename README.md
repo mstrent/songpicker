@@ -53,9 +53,11 @@ title, arrangement, and key all set in one go.
 - **Auth**: Firebase Auth — Google sign-in with single-email allowlist
   enforced both client-side (Firestore rules) and server-side
   (`ALLOWED_EMAIL` param in Cloud Functions).
-- **AI**: Anthropic Claude Sonnet 4.6. The `AiProvider` interface
-  in `functions/src/ai/types.ts` is kept so another provider can
-  slot in later, but only Anthropic is wired up today.
+- **AI**: Anthropic Claude Sonnet 4.6 for the main suggestion engine,
+  Haiku 4.5 for ancillary classifier/short-label calls (chip matching
+  and distillation). The `AiProvider` interface in
+  `functions/src/ai/types.ts` is kept so another provider can slot in
+  later, but only Anthropic is wired up today.
 - **Planning Center**: Services API v2 with a per-user Personal
   Access Token.
 
@@ -117,7 +119,7 @@ All hosted on Firebase free tier.
 | `clearSongFromSlot` | Clear a slot (restores a prior title) |
 | `listSongArrangements`, `setSlotArrangementKey` | Arrangement + key picker |
 | `reorderItems` | Whole-plan item reorder via the dedicated PCO action endpoint |
-| `getRejectionReasons`, `recordRejectReason`, `removeCommonReason` | Global reject-rationale chip pool (Claude-distilled) |
+| `getRejectionReasons`, `recordRejectReason`, `removeCommonReason`, `renameCommonReason` | Global reject-rationale chip pool: three-tier resolution (norm match → Haiku semantic match → Haiku per-reason distill into a new chip) |
 | `commitPlanItems` | Bulk insert (used by the older candidate-list flow) |
 
 ## Planning Center API touchpoints
