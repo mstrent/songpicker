@@ -2,6 +2,31 @@
 
 ## Architecture philosophy
 
+- **PCO is the source of truth for plan state. Songpicker owns the
+  candidate pool.** These are separate concepts that touch only at
+  the boundary where a candidate gets committed to a slot. The plan
+  (slots + their linked songs + their titles) lives in PCO; we
+  mirror it in the SPA's `items` + `slotPlaceholders` state. The
+  candidate pool (AI suggestions, decisions, chat) is songpicker-
+  internal — it doesn't exist in PCO. The candidate pool's job is
+  upstream of slot-filling: candidates exist to help the user/AI
+  decide what should fill the plan's slots. Once a slot is filled,
+  PCO owns that fact.
+
+  Implication: **"Is candidate X currently committed to a slot?" is
+  *derived* state, not stored.** The answer is `items.find(it =>
+  it.songId === candidate.song?.id)`. We don't track committed
+  status on candidates; we read it off PCO's items. This avoids
+  whole categories of drift bugs (the reconciliation effect that
+  used to compensate for divergence is gone).
+
+  Implication: **Slot operations work on song refs, not candidate
+  refs.** Commit / clear / move / swap take `{songId, songTitle}`
+  pulled from a candidate's matched library song OR straight from
+  PCO's items. This means the same operations work for songs that
+  were placed via PCO web UI (no candidate record) and songs the
+  AI suggested. No special PCO-direct fallback needed.
+
 - **Prefer breaking both paths with the same bug.** When the AI flow
   and the UI flow do the same thing (commit a song, clear a slot,
   swap two slots, reject a candidate), they should share the same
@@ -28,12 +53,15 @@
   mutates SPA state, or appends chat messages. Pure-function tests
   cover the resolver exhaustively; the executor is tested with
   mocked callables.
-- **Stateful orchestration lives in `usePlanState`**, not
-  `PlanDetail.tsx`. The component is presentational; the hook owns
-  state + actions. Hook tests drive realistic flows (load → commit
-  → clear → swap → reject → suggest) by feeding mock callable
-  responses and asserting on returned state. **Don't put
-  state-transition logic inline in the component** — extract to the
+- **Stateful orchestration lives in two hooks reflecting the
+  PCO/candidate split**: `usePlanData` owns the plan-side
+  (PCO-mirrored items + slotPlaceholders + slot operations);
+  `useCandidatePool` owns the songpicker-side (candidates +
+  messages + AI driver + decisions + session persistence). The
+  candidate-pool hook reads items from `usePlanData` to render
+  derived state ("is this candidate currently in the plan?") but
+  doesn't store it. PlanDetail composes both. **Don't put
+  state-transition logic inline in the component** — extract to a
   hook or a helper.
 - **Test the seam, not the rendering.** Pure helpers, the resolver,
   the executor with mocked deps, and the hook are the testable
