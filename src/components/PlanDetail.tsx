@@ -9,6 +9,7 @@ import {
   savePlanTheme,
   searchSongs,
   suggestSongs,
+  swapSlotPlaceholders as swapSlotPlaceholdersCall,
   type AiAction,
   type AiCandidate,
   type ConversationTurn,
@@ -1561,6 +1562,34 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         next[bi] = { ...a, sequence: b.sequence }
         return next
       })
+      // Trade the placeholders too — without this, the item that
+      // moves to position N still carries the placeholder for its
+      // OLD position, and a later clear restores the wrong title.
+      // Optimistic local swap first; the callable persists it so
+      // a fresh load from a different session sees the right map.
+      setSlotPlaceholders((prev) => {
+        const valA = prev[slotA.id]
+        const valB = prev[slotB.id]
+        if (valA === undefined && valB === undefined) return prev
+        const next = { ...prev }
+        if (valB !== undefined) next[slotA.id] = valB
+        else delete next[slotA.id]
+        if (valA !== undefined) next[slotB.id] = valA
+        else delete next[slotB.id]
+        return next
+      })
+      try {
+        await swapSlotPlaceholdersCall({
+          planId,
+          itemIdA: slotA.id,
+          itemIdB: slotB.id,
+        })
+      } catch (e) {
+        // Persist failure isn't fatal — local state still reflects
+        // the swap. Worst case, a fresh session load picks up the
+        // pre-swap map and restores the "wrong" placeholder once.
+        console.warn('[songpicker] swapSlotPlaceholders persist failed:', e)
+      }
       invalidatePlanContext(serviceTypeId, planId)
       const affected = new Set([slotA.id, slotB.id])
       setCandidates((prev) =>
@@ -1697,78 +1726,86 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
 
 
   // Drop handler for a filled song slot dragged onto another song slot.
-  // Branches on the target's state per the user's mental model — slots
-  // are fixed positions, songs move between them:
-  //
-  //   - target empty  → MOVE the song. Source vacates (title reverts
-  //     to its stored priorSlotTitle, song relationship cleared),
-  //     destination receives the song with full commit semantics.
-  //   - target filled → SWAP positions via item_reorder. Both slots
-  //     move positions; their attached songs follow. priorSlotTitle is
-  //     wiped on both candidates so a future Clear falls back to
-  //     "Song N" at the slot's new position.
+  // Branches on source/target fill state per the user's mental model
+  // — placeholders are tied to slot positions, songs move between
+  // them. The asymmetric (one filled, one empty) cases route through
+  // placeSongAction as a MOVE — placeholders never travel via
+  // reorder, only the song does. The both-filled case is the only
+  // genuine reorder; swapSlotsAction handles the placeholder swap so
+  // a later clear restores the right placeholder for the new
+  // position. Both-empty is a no-op (nothing to move).
   async function reorderSlotItem(draggedId: string, targetId: string) {
     if (draggedId === targetId) return
     const draggedSlot = (items ?? []).find((it) => it.id === draggedId)
     const targetSlot = (items ?? []).find((it) => it.id === targetId)
     if (!draggedSlot || !targetSlot) return
 
-    if (!targetSlot.songId) {
-      // Empty target → move the dragged slot's song into it. If the
-      // SPA has a candidate record for the source's commit, route
-      // through placeSongAction so the candidate's committedAt /
-      // assignedSlotItemId / priorSlotTitle migrate cleanly. If not
-      // (e.g. the song was picked directly in PCO), call the
-      // intent-shaped endpoint with raw song info and rely on the
-      // post-call items refresh to sync state.
-      const committedCand = candidates.find(
-        (c) =>
-          c.assignedSlotItemId === draggedSlot.id &&
-          c.committedAt != null &&
-          c.song,
-      )
-      if (committedCand) {
-        await placeSongAction({ candidate: committedCand, slotItem: targetSlot })
-      } else {
-        if (!draggedSlot.songId || !draggedSlot.songTitle) {
-          setGenerateError(
-            `Can't move "${draggedSlot.songTitle ?? draggedSlot.title}" — missing song info on the source slot.`,
-          )
-          return
-        }
-        // The dragged slot has no committed candidate in our state
-        // (e.g., the song was linked via PCO directly before
-        // songpicker started). Its current title is the song name —
-        // not a placeholder — so prefer the server-persisted
-        // placeholder over `.title` here, falling back to "Song N"
-        // if we've never seen this slot empty.
-        const sourceRestoreTitle =
-          slotPlaceholders[draggedSlot.id]?.trim() ||
-          fallbackSlotTitle(draggedSlot.id)
-        const songTitle = draggedSlot.songTitle
-        const destLabel =
-          targetSlot.title?.trim() || fallbackSlotTitle(targetSlot.id)
-        try {
-          await placeSongInSlot({
-            serviceTypeId,
-            planId,
-            slotItemId: targetSlot.id,
-            songId: draggedSlot.songId,
-            songTitle,
-            fromSlotItemId: draggedSlot.id,
-            fromSlotRestoreTitle: sourceRestoreTitle,
-          })
-          invalidatePlanContext(serviceTypeId, planId)
-          const fresh = await loadPlanContext(serviceTypeId, planId)
-          setItems(fresh.items)
-          setSlotPlaceholders(fresh.slotPlaceholders)
-          appendSystemMessage(`↕ Moved "${songTitle}" → ${destLabel}`)
-        } catch (e) {
-          setGenerateError((e as Error).message)
-        }
-      }
-    } else {
+    const sourceFilled = !!draggedSlot.songId
+    const targetFilled = !!targetSlot.songId
+
+    if (sourceFilled && targetFilled) {
+      // Both filled → real swap. Sequences trade; songs travel with
+      // their items; placeholders ALSO trade (handled inside
+      // swapSlotsAction) so the position binding survives.
       await swapSlotsAction({ slotA: draggedSlot, slotB: targetSlot })
+      return
+    }
+    if (!sourceFilled && !targetFilled) {
+      // Both empty → nothing to move. Reordering two empty
+      // placeholders has no visible effect anyway.
+      return
+    }
+    // Exactly one is filled. Move that song into the other slot,
+    // letting the empty slot's placeholder stay where it is. The
+    // "moving slot" is whichever currently has the song; the
+    // "destination" is the other.
+    const movingSlot = sourceFilled ? draggedSlot : targetSlot
+    const destSlot = sourceFilled ? targetSlot : draggedSlot
+    const committedCand = candidates.find(
+      (c) =>
+        c.assignedSlotItemId === movingSlot.id &&
+        c.committedAt != null &&
+        c.song,
+    )
+    if (committedCand) {
+      await placeSongAction({ candidate: committedCand, slotItem: destSlot })
+      return
+    }
+    if (!movingSlot.songId || !movingSlot.songTitle) {
+      setGenerateError(
+        `Can't move "${movingSlot.songTitle ?? movingSlot.title}" — missing song info on the source slot.`,
+      )
+      return
+    }
+    // The moving slot has no committed candidate in our state
+    // (e.g., the song was linked via PCO directly before songpicker
+    // started). Its current title is the song name — not a
+    // placeholder — so prefer the server-persisted placeholder over
+    // `.title` here, falling back to "Song N" if we've never seen
+    // this slot empty.
+    const sourceRestoreTitle =
+      slotPlaceholders[movingSlot.id]?.trim() ||
+      fallbackSlotTitle(movingSlot.id)
+    const songTitle = movingSlot.songTitle
+    const destLabel =
+      destSlot.title?.trim() || fallbackSlotTitle(destSlot.id)
+    try {
+      await placeSongInSlot({
+        serviceTypeId,
+        planId,
+        slotItemId: destSlot.id,
+        songId: movingSlot.songId,
+        songTitle,
+        fromSlotItemId: movingSlot.id,
+        fromSlotRestoreTitle: sourceRestoreTitle,
+      })
+      invalidatePlanContext(serviceTypeId, planId)
+      const fresh = await loadPlanContext(serviceTypeId, planId)
+      setItems(fresh.items)
+      setSlotPlaceholders(fresh.slotPlaceholders)
+      appendSystemMessage(`↕ Moved "${songTitle}" → ${destLabel}`)
+    } catch (e) {
+      setGenerateError((e as Error).message)
     }
   }
 

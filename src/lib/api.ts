@@ -212,6 +212,14 @@ export const reorderItems = httpsCallable<
   { ok: boolean }
 >(functions, 'reorderItems')
 
+/** Trade two items' captured slot placeholders so the
+ *  placeholder→position binding survives a both-filled DnD swap.
+ *  Returns the post-swap map. */
+export const swapSlotPlaceholders = httpsCallable<
+  { planId: string; itemIdA: string; itemIdB: string },
+  { slotPlaceholders: Record<string, string> }
+>(functions, 'swapSlotPlaceholders')
+
 export interface SongArrangement {
   id: string
   name: string
