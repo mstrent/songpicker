@@ -16,6 +16,15 @@ import type {
 
 const MODEL = 'claude-sonnet-4-6'
 
+// 1-hour cache TTL on the system + stable user prefixes. Worship-leader
+// sessions routinely span 30-90 minutes of bursty work — the default
+// 5-minute cache expires between turns and we pay full price on the
+// cached prefix repeatedly. 1h writes cost ~2x per token but reads are
+// the same, so any session with ≥2 turns in the hour wins. The SDK's
+// CacheControlEphemeral type doesn't yet include `ttl`; the API does.
+const CACHE_1H = { type: 'ephemeral' as const, ttl: '1h' } as unknown as
+  Anthropic.CacheControlEphemeral
+
 // Three tools the model can invoke per turn (any combination, in any
 // order, or none). Schemas are intentionally permissive on optional
 // fields so the model isn't forced to fabricate values it doesn't have.
@@ -130,7 +139,14 @@ export class AnthropicProvider implements AiProvider {
   private client: Anthropic
 
   constructor(apiKey: string) {
-    this.client = new Anthropic({ apiKey })
+    // Opt in to the extended cache-TTL beta so the `ttl: '1h'` on our
+    // cache_control breakpoints is honoured. Harmless if the feature
+    // has GA'd by the time you read this — Anthropic ignores beta flags
+    // for features that are already generally available.
+    this.client = new Anthropic({
+      apiKey,
+      defaultHeaders: { 'anthropic-beta': 'extended-cache-ttl-2025-04-11' },
+    })
   }
 
   async suggestSongs(
@@ -144,17 +160,16 @@ export class AnthropicProvider implements AiProvider {
     // Cache_control breakpoints: one on the system prompt (constant per
     // session), one on the stable half of the current user turn (theme
     // + notes + structure + service order — these change rarely
-    // mid-session). Anthropic caches up through each breakpoint and
-    // serves the matching prefix on subsequent turns. Below the 1024-
-    // token cache minimum the markers are no-ops; above it, savings
-    // compound across a conversation.
+    // mid-session). Both use a 1-hour TTL (see CACHE_1H above) so the
+    // prefix survives across the bursty pauses typical of a planning
+    // session.
     const params: Anthropic.MessageCreateParams = {
       model: MODEL,
       max_tokens: 4000,
       tools: TOOLS,
       tool_choice: { type: 'auto' },
       system: [
-        { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: systemPrompt, cache_control: CACHE_1H },
       ],
       messages: [
         ...history.map((t) => ({ role: t.role, content: t.content })),
@@ -164,7 +179,7 @@ export class AnthropicProvider implements AiProvider {
             {
               type: 'text' as const,
               text: built.stable,
-              cache_control: { type: 'ephemeral' as const },
+              cache_control: CACHE_1H,
             },
             { type: 'text' as const, text: built.volatile },
           ],

@@ -194,8 +194,14 @@ page.
 - **Cache breakpoints** on the system prompt and on the stable half
   of the user message (theme + plan notes + structure +
   serviceOrder). Volatile half (candidates + alreadyInPlan + user
-  request) is fresh every turn. Default 5-min TTL — sessions can
-  span hours, so the cache is opportunistic, not load-bearing.
+  request) is fresh every turn. **1-hour TTL** via
+  `cache_control.ttl: '1h'` (the `extended-cache-ttl-2025-04-11`
+  beta header is set on the Anthropic client constructor so older
+  SDKs still pass it through; harmless once the feature GAs).
+  Worship-leader planning sessions span 30-90 minutes of bursty
+  work, so the default 5-min cache used to expire between turns
+  and we paid full prefix cost repeatedly. 1h writes cost ~2x per
+  token; reads same as 5-min — net win at ≥2 hits per hour.
 - **Content-filter retry.** Anthropic's output safety filter
   occasionally trips on innocuous worship prompts. `AnthropicProvider`
   retries once on that specific error AND only if no chunks have
@@ -326,15 +332,22 @@ page.
   inline error. The admin reject-chip manager shows useCount as a
   badge, supports inline rename (click chip text), and flags
   proto chips with a dimmed treatment.
-- **Per-turn context compaction.** Two patterns reduce per-turn
+- **Per-turn context compaction.** Three patterns reduce per-turn
   token count regardless of cache state: (1) candidates the AI saw
   on a prior turn drop their `chorusSnippet` from subsequent payloads
-  via `lastSentCandidateIdsRef` (title + author always stay so
-  same-named songs disambiguate); (2) chat history beyond
-  `HISTORY_PROSE_CAP` (8 prose messages) drops old prose entirely
-  and collapses old `[event]` system messages into one `[summary]`
-  line of category counts at the top of history. See
-  `buildAiHistory` and `summarizeOldEvents`.
+  via `lastSentCandidateIdsRef`; (2) `renderCandidates` in
+  `functions/src/ai/userMessage.ts` stratifies output by decision —
+  committed candidates render as just `id, title, author, →slot N`
+  (the service order already shows everything else about them);
+  rejected as `id, title, author, rejected, reason`; only pending
+  candidates get the full render (inLibrary flag, slot tags, chorus,
+  earmark); (3) chat history beyond `HISTORY_PROSE_CAP` (8 prose
+  messages) drops old prose entirely and collapses old `[event]`
+  system messages into one `[summary]` line of category counts at
+  the top of history. See `buildAiHistory` and `summarizeOldEvents`.
+  **`author` always goes through on every candidate** regardless of
+  decision or known-to-AI status — worship song titles are often
+  ambiguous and the disambiguator is load-bearing.
 
 ## Feedback rules picked up so far
 

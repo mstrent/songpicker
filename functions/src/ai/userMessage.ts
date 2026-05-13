@@ -55,45 +55,52 @@ export function buildUserMessage(req: SuggestRequest): BuiltUserMessage {
   }
 }
 
-// One line per candidate, dense enough for the AI to scan and address
-// any entry by id. Mirrors the SPA's mental model (decision + optional
-// slot earmark + chorus snippet for disambiguation) without leaking
-// purely internal fields like matchStatus or addedAt.
+// One line per candidate. Stratified by decision to keep the volatile
+// block small in long sessions:
+//   committed → id, title, author, "— committed→slot N" (service order
+//     already shows everything else about this song)
+//   rejected  → id, title, author, "— rejected", reason if any
+//   pending   → full content (the AI is actively reasoning here)
+// `author` always goes through regardless of decision — worship song
+// titles are often ambiguous ("Way Maker", "How Great Is Our God") and
+// the AI needs the disambiguator. Same for the user reading the chat.
 function renderCandidates(candidates: AiCandidate[]): string {
-  return candidates
-    .map((c) => {
-      const parts: string[] = [`  ${c.id} — "${c.title}"`]
-      if (c.author) parts.push(`(${c.author})`)
-      parts.push(`— ${decisionLabel(c)}`)
-      if (c.inLibrary === false) {
-        parts.push(`— NOT IN LIBRARY (can't be committed via set_slot_contents)`)
-      }
-      if (c.assignedSlot) {
-        parts.push(
-          `— earmarked for song slot ${c.assignedSlot.index} of ${c.assignedSlot.total}`,
-        )
-      }
-      if (c.slots && c.slots.length > 0) {
-        parts.push(`— tagged: ${c.slots.join(', ')}`)
-      }
-      if (c.chorusSnippet) {
-        parts.push(`— chorus: "${c.chorusSnippet}"`)
-      }
-      if (c.rejectReason) {
-        parts.push(`— reason: "${c.rejectReason}"`)
-      }
-      return parts.join(' ')
-    })
-    .join('\n')
+  return candidates.map(renderCandidate).join('\n')
 }
 
-function decisionLabel(c: AiCandidate): string {
-  if (c.committed) return 'committed'
-  switch (c.decision) {
-    case 'reject':
-      return 'rejected'
-    case 'pending':
-    default:
-      return 'pending'
+function renderCandidate(c: AiCandidate): string {
+  const parts: string[] = [`  ${c.id} — "${c.title}"`]
+  if (c.author) parts.push(`(${c.author})`)
+
+  if (c.committed) {
+    if (c.assignedSlot) {
+      parts.push(`— committed → slot ${c.assignedSlot.index} of ${c.assignedSlot.total}`)
+    } else {
+      parts.push('— committed')
+    }
+    return parts.join(' ')
   }
+
+  if (c.decision === 'reject') {
+    parts.push('— rejected')
+    if (c.rejectReason) parts.push(`— reason: "${c.rejectReason}"`)
+    return parts.join(' ')
+  }
+
+  parts.push('— pending')
+  if (c.inLibrary === false) {
+    parts.push(`— NOT IN LIBRARY (can't be committed via set_slot_contents)`)
+  }
+  if (c.assignedSlot) {
+    parts.push(
+      `— earmarked for song slot ${c.assignedSlot.index} of ${c.assignedSlot.total}`,
+    )
+  }
+  if (c.slots && c.slots.length > 0) {
+    parts.push(`— tagged: ${c.slots.join(', ')}`)
+  }
+  if (c.chorusSnippet) {
+    parts.push(`— chorus: "${c.chorusSnippet}"`)
+  }
+  return parts.join(' ')
 }
