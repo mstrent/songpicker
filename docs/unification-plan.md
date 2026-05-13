@@ -184,6 +184,58 @@ manual smoke test pass.
 ~2900); hook + helpers + resolver + executor are the testable
 surface; manual smoke test of every flow passes.
 
+### Phase 6 — PCO/candidate split (data-model unification)
+
+Surfaced during Phase 5 testing: dragging a filled slot whose song
+was placed via PCO directly (and therefore has no songpicker
+candidate record) onto another filled slot ran a one-way move that
+clobbered the target. Root cause: `compileSlotToSlot` keys "is this
+slot filled?" off `candidates` instead of `items.songId`, so songs
+without candidate records read as empty. The bandaid fix (separate
+fallback path doing paired PATCHes) works but is symptom treatment.
+
+The real architectural insight, articulated by Matt: **PCO is the
+source of truth for plan state; candidates are songpicker's own
+concept that exists to help fill slots.** They're separate domains
+that touch only at commit-time. So:
+
+- `committedAt` and `assignedSlotItemId` on candidates are derived
+  state, not source. `items.find(it => it.songId === candidate.song?.id)`
+  is the answer; storing it on the candidate creates drift.
+- The reconciliation effect (which compensates for that drift) goes
+  away.
+- Slot operations work on song refs — `{songId, songTitle}` —
+  pulled from a candidate's matched library song OR straight from
+  PCO's items. No special-casing for PCO-direct songs.
+- `Assignment` becomes `{slotIndex, song: {id, title} | null}`. The
+  resolver derives isMove / eviction by inspecting `items`, not
+  `candidates`.
+- The compiler stops needing `candidates` entirely.
+
+This makes the PCO/candidate split visible at every layer and
+eliminates the bug class.
+
+**Phase 6a** — Switch `Assignment` shape from `candidateId` to song
+ref. Update resolver, executor, compile, decisions, tests. The
+unified path now works for PCO-direct songs (no fallback needed).
+
+**Phase 6b** — Drop `committedAt`, `assignedSlotItemId`,
+`priorSlotTitle` from `CandidateMatch` / `CandidateState` /
+`PersistedCandidate`. Delete the reconciliation effect. Session
+persistence shrinks. UI derives "committed" status from items
+on every render.
+
+**Phase 6c** — Split `usePlanState` into `usePlanData` (PCO mirror
++ slot ops) and `useCandidatePool` (suggestions + AI + decisions +
+chat + session). The hook split reflects the data-model split. The
+DnD compiler doesn't need a candidate ref to call into slot ops —
+it just needs the song ref the candidate is matched to.
+
+**Acceptance:** the immediate swap-with-PCO-direct-song bug is
+fixed at the architecture level (no fallback path needed). All UI
+and AI flows continue to work. Tests cover the new resolver +
+compile shape. PlanDetail composes the two hooks instead of one.
+
 ### Phase 5 — Optimizations
 
 - **Bulk searchSongs**: Cloud Function accepts a batch, runs PCO calls
