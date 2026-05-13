@@ -243,33 +243,73 @@ textarea {
 .app header .who .email {
   font-variant-numeric: tabular-nums;
 }
-.app header .who .admin-link {
-  font-size: 0.78rem;
-  color: var(--muted);
-  border: 1px solid var(--border-strong);
-  padding: 0.2rem 0.55rem;
-  border-radius: 999px;
-  text-decoration: none;
+.app header .who .user-menu {
+  position: relative;
 }
-.app header .who .admin-link:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  text-decoration: none;
-}
-.app header .who button {
+.app header .who .user-menu-trigger {
   background: transparent;
+  border: none;
+  padding: 0.2rem 0.4rem;
   color: var(--muted);
-  border: 1px solid var(--border-strong);
-  padding: 0.25rem 0.65rem;
-  font-size: 0.8rem;
-  font-weight: 500;
+  font-size: 0.85rem;
+  font-weight: inherit;
+  cursor: pointer;
+  border-radius: 6px;
 }
-.app header .who button:hover {
+.app header .who .user-menu-trigger:hover,
+.app header .who .user-menu-trigger[aria-expanded='true'] {
   background: var(--accent-soft);
   color: var(--fg);
-  border-color: var(--accent);
   filter: none;
+}
+.app header .who .user-menu-caret {
+  opacity: 0.7;
+  transition: transform 0.12s ease;
+}
+.app header .who .user-menu-caret.is-open {
+  transform: rotate(180deg);
+  opacity: 1;
+}
+.app header .who .user-menu-items {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 9rem;
+  padding: 0.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+}
+.app header .who .user-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.4rem 0.7rem;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.app header .who .user-menu-item:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  filter: none;
+}
+.app header .who .user-menu-item .icon {
+  margin-left: auto;
+  opacity: 0.7;
+}
+.app header .who .user-menu-item:hover .icon {
+  opacity: 1;
 }
 .app header .who .leader-name-row {
   display: inline-flex;
@@ -402,23 +442,8 @@ textarea {
 .plans .pco-quick {
   position: absolute;
   top: 0.65rem;
-  right: 0.85rem;
+  right: 0.65rem;
   z-index: 1;
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--muted);
-  padding: 0.12rem 0.55rem;
-  border-radius: 999px;
-  border: 1px solid var(--border-strong);
-  background: var(--surface);
-  text-decoration: none;
-}
-.plans .pco-quick:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  text-decoration: none;
 }
 
 .plans .plan-link {
@@ -439,59 +464,6 @@ textarea {
   transform: translateY(-1px);
   box-shadow: var(--shadow-md);
   border-color: var(--border-strong);
-}
-
-.plans .plan-link.past {
-  opacity: 0.85;
-  box-shadow: none;
-}
-.plans .plan-link.past:hover {
-  opacity: 1;
-}
-.plans .plan-link.past .title {
-  font-weight: 500;
-}
-
-.past-plans-group {
-  margin-bottom: 1rem;
-}
-.past-plans-group summary {
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 0.88rem;
-  padding: 0.45rem 0.75rem;
-  border-radius: 8px;
-  user-select: none;
-  list-style: none;
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  border: 1px dashed var(--border);
-}
-.past-plans-group summary::-webkit-details-marker {
-  display: none;
-}
-.past-plans-group summary:hover {
-  color: var(--fg);
-  border-color: var(--border-strong);
-  background: var(--surface);
-}
-.past-plans-group summary .chevron {
-  display: inline-block;
-  transition: transform 0.15s ease;
-  font-size: 0.85em;
-  color: var(--muted);
-}
-.past-plans-group[open] summary .chevron {
-  transform: rotate(90deg);
-}
-.past-plans-group summary .past-served-count {
-  color: var(--warm-strong);
-  font-weight: 500;
-}
-.past-plans-list {
-  margin-top: 0.6rem;
-  margin-bottom: 1rem;
 }
 
 .plans .plan-link.led-by-me {
@@ -546,6 +518,12 @@ textarea {
   font-size: 1.05rem;
   letter-spacing: -0.005em;
 }
+/* When no me-flag pushes the title down a row, the Planning Center icon
+   in the card's top-right corner sits in the title's line — reserve
+   horizontal room so long titles wrap before colliding with it. */
+.plans .plan-link .title:first-child {
+  padding-right: 2.75rem;
+}
 .plans .series {
   color: var(--muted);
   font-size: 0.9rem;
@@ -559,12 +537,6 @@ textarea {
   color: var(--muted);
   font-size: 0.8rem;
   flex-wrap: wrap;
-}
-.plans .service-type {
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  padding: 0.05rem 0.55rem;
-  background: var(--bg);
 }
 .plans .leaders {
   font-style: italic;
@@ -592,6 +564,15 @@ textarea {
   background: var(--accent-soft);
   color: var(--accent);
   border-color: transparent;
+}
+.plans .day-relative {
+  font-weight: 600;
+  padding: 0.05rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 0.75rem;
 }
 
 /* plan detail */
@@ -754,21 +735,13 @@ textarea {
   margin: 0;
   font-size: 1.7rem;
   letter-spacing: -0.015em;
-  line-height: 1;
+  line-height: 1.1;
 }
-.plan-detail .pco-link {
-  font-size: 0.85rem;
-  color: var(--muted);
-  border: 1px solid var(--border-strong);
-  padding: 0.2rem 0.6rem;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-.plan-detail .pco-link:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-  text-decoration: none;
-  background: var(--accent-soft);
+.plan-detail h2 .pco-link {
+  margin-left: 0.5rem;
+  vertical-align: middle;
+  position: relative;
+  top: -0.15em;
 }
 
 .plan-detail .meta {
@@ -779,48 +752,9 @@ textarea {
      natural ascender/descender padding around their glyphs, and this
      reclaims that wasted space so the title and subtitle read as a
      tight pair. */
-  margin: -0.55rem 0 0;
+  margin: -0.35rem 0 0;
   line-height: 1.2;
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.75rem;
-  flex-wrap: wrap;
 }
-.plan-detail .meta .meta-text {
-  min-width: 0;
-}
-
-/* At-a-glance chip row beneath the title — progress, day-relative
-   countdown, theme. Wraps cleanly on narrow widths. */
-.plan-detail .status-strip {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.4rem;
-  margin: 0.4rem 0 0;
-}
-.plan-detail .status-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.18rem 0.6rem;
-  border-radius: 999px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  background: var(--surface);
-  color: var(--muted);
-  border: 1px solid var(--border);
-}
-.plan-detail .status-chip-progress { color: var(--accent); border-color: transparent; background: var(--accent-soft); }
-.plan-detail .status-chip-progress-done { color: var(--success); background: var(--success-soft); }
-.plan-detail .status-chip-progress-empty { color: var(--warm-strong); background: var(--warm-soft); }
-.plan-detail .status-chip-day {
-  color: var(--fg);
-  background: var(--bg);
-  border-color: var(--border-strong);
-}
-
 .plan-detail section {
   /* The plan-left / plan-right flex containers control inter-section
      spacing via `gap`; section margins would stack on top of that and
@@ -1676,14 +1610,11 @@ textarea {
   color: transparent;
 }
 .ai-heading .candidates-summary {
-  /* Right-aligns on the same row as the heading — gives the row a
-     proper title/stats split without a second line. Resets the
-     uppercase/letter-spacing from .ai-heading h3 so the numbers read
-     normally. */
-  margin-left: auto;
   text-transform: none;
   letter-spacing: 0;
   font-weight: 500;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .candidate .reasoning {
@@ -2512,12 +2443,6 @@ textarea {
   padding: 0 0.15rem;
 }
 
-.candidate .slot-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  margin: 0.3rem 0 0.25rem;
-}
 .candidate .slot-tag {
   font-size: 0.7rem;
   padding: 0.1rem 0.55rem;
@@ -2543,28 +2468,6 @@ textarea {
 .badge.error { background: var(--error-soft); color: var(--error); }
 
 /* ─── Candidate redesign ─── */
-
-/* Counts inlined at the right edge of the AI candidates heading row.
-   Rendered as a <span> so it sits on the heading's baseline. */
-.candidates-summary {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.35rem;
-  font-size: 0.82rem;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-.candidates-summary .cs-num {
-  font-weight: 700;
-  color: var(--fg);
-}
-.candidates-summary .cs-num-matched { color: var(--success); }
-.candidates-summary .cs-num-rejected { color: var(--muted); }
-.candidates-summary .cs-sep {
-  color: var(--border-strong);
-  margin: 0 0.05rem;
-}
 
 /* Uniform chip primitive used in the candidate metadata row.
    Smaller and more text-friendly than .badge — chips can hold an icon
@@ -2653,6 +2556,15 @@ textarea {
   color: var(--warm-strong);
   border-color: var(--warm);
   background: var(--warm-soft);
+}
+.iconbtn-pco:hover {
+  border-color: var(--border-strong);
+  background: var(--surface);
+}
+.iconbtn-img {
+  display: block;
+  width: 18px;
+  height: 18px;
 }
 @media (prefers-color-scheme: dark) {
   .iconbtn-spotify:hover { color: #1ed760; border-color: #1ed760; }

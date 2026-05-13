@@ -2001,7 +2001,19 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           ← All plans
         </a>
 
-        <h2>{plan.title || plan.seriesTitle || '(no title)'}</h2>
+        <h2>
+          {plan.title || plan.seriesTitle || '(no title)'}
+          <a
+            className="pco-link iconbtn iconbtn-sm iconbtn-pco"
+            href={`https://services.planningcenteronline.com/plans/${plan.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open in Planning Center"
+            aria-label="Open in Planning Center"
+          >
+            <img src="/planning-center-icon.png" alt="" className="iconbtn-img" />
+          </a>
+        </h2>
         <div className="meta">
           <span className="meta-text">
             {subtitle && <span>{subtitle} · </span>}
@@ -2020,46 +2032,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
               ) : null
             })()}
           </span>
-          <a
-            className="pco-link icon-text"
-            href={`https://services.planningcenteronline.com/plans/${plan.id}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Open in Planning Center"
-          >
-            Open in Planning Center
-            <Icon name="external-link" size={13} />
-          </a>
         </div>
-        {(() => {
-          // Status strip: at-a-glance progress + countdown. Theme used
-          // to live here too but was redundant with the plan title —
-          // dropped. Only renders when at least one chip has data.
-          const songSlots = (items ?? []).filter(isSongSlot)
-          const songsFilled = songSlots.filter((it) => it.songId != null).length
-          const songsTotal = songSlots.length
-          const dayLabel = relativeDayLabel(plan.sortDate)
-          if (songsTotal === 0 && !dayLabel) return null
-          let progressClass = 'status-chip-progress'
-          if (songsTotal > 0 && songsFilled === songsTotal) {
-            progressClass += ' status-chip-progress-done'
-          } else if (songsTotal > 0 && songsFilled === 0) {
-            progressClass += ' status-chip-progress-empty'
-          }
-          return (
-            <div className="status-strip" aria-label="Plan status">
-              {songsTotal > 0 && (
-                <span className={`status-chip ${progressClass}`}>
-                  <Icon name="music" size={12} />
-                  {songsFilled} of {songsTotal} picked
-                </span>
-              )}
-              {dayLabel && (
-                <span className="status-chip status-chip-day">{dayLabel}</span>
-              )}
-            </div>
-          )
-        })()}
       </div>
 
       <div className="plan-body">
@@ -2718,12 +2691,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         const emptySongSlots = (items ?? []).filter(
           (it) => isSongSlot(it) && !it.songId,
         )
-        const inLibraryCount = candidates.filter(
-          (c) => c.matchStatus === 'matched',
-        ).length
-        const rejectedCount = candidates.filter(
-          (c) => c.decision === 'reject',
-        ).length
 
         if (active.length === 0) return null
         return (
@@ -2731,25 +2698,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           <h3 className="ai-heading">
             <span className="sparkle" aria-hidden>✨</span>
             <span className="gradient-text">AI candidates</span>
-            <span
-              className="candidates-summary"
-              aria-label="Candidate counts"
-            >
-              <span className="cs-num">{active.length}</span>
-              <span className="cs-label">
-                candidate{active.length === 1 ? '' : 's'}
-              </span>
-              <span className="cs-sep" aria-hidden>·</span>
-              <span className="cs-num cs-num-matched">{inLibraryCount}</span>
-              <span className="cs-label">in library</span>
-              {rejectedCount > 0 && (
-                <>
-                  <span className="cs-sep" aria-hidden>·</span>
-                  <span className="cs-num cs-num-rejected">{rejectedCount}</span>
-                  <span className="cs-label">rejected</span>
-                </>
-              )}
-            </span>
+            <span className="candidates-summary">({active.length})</span>
           </h3>
           <ul>
             {active.map((c, i) => {
@@ -2807,16 +2756,12 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       <span className="author"> — {c.suggestion.author}</span>
                     )}
                   </div>
-                  {c.suggestion.slots && c.suggestion.slots.length > 0 && (
-                    <div className="slot-tags">
-                      {c.suggestion.slots.map((s, si) => (
-                        <span key={si} className="slot-tag">
-                          {s}
-                        </span>
-                      ))}
-                    </div>
-                  )}
                   <div className="cstatus">
+                    {c.suggestion.slots?.map((s, si) => (
+                      <span key={`slot-${si}`} className="slot-tag">
+                        {s}
+                      </span>
+                    ))}
                     {c.matchStatus === 'checking' && (
                       <span className="chip chip-checking">
                         checking library…
@@ -2847,9 +2792,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                               >
                                 last played{' '}
                                 {relativeTime(c.song!.lastScheduledAt)}
-                                {c.song!.lastScheduledShortDates && (
-                                  <> · {c.song!.lastScheduledShortDates}</>
-                                )}
                               </span>
                             )
                           })()
@@ -3158,30 +3100,3 @@ function relativeTime(iso: string): string {
   return `${years} year${years === 1 ? '' : 's'} ago`
 }
 
-// Forward-looking relative label used in the plan-header status strip.
-// "Today" / "Tomorrow" / "In 4 days" — and yesterday/past for completed
-// services so the chip still reads sensibly when revisiting an old plan.
-function relativeDayLabel(iso: string | null | undefined): string | null {
-  if (!iso) return null
-  const target = new Date(iso)
-  if (Number.isNaN(target.getTime())) return null
-  const startOfDay = (d: Date) => {
-    const x = new Date(d)
-    x.setHours(0, 0, 0, 0)
-    return x
-  }
-  const days = Math.round(
-    (startOfDay(target).getTime() - startOfDay(new Date()).getTime()) /
-      (1000 * 60 * 60 * 24),
-  )
-  if (days === 0) return 'Today'
-  if (days === 1) return 'Tomorrow'
-  if (days === -1) return 'Yesterday'
-  if (days > 1 && days < 14) return `In ${days} days`
-  if (days < -1 && days > -14) return `${-days} days ago`
-  return target.toLocaleDateString(undefined, {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  })
-}

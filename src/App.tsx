@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { onAuthStateChanged, type User } from 'firebase/auth'
 import { auth } from './lib/firebase'
 import { logOut } from './lib/auth'
@@ -9,6 +9,7 @@ import { PlanList } from './components/PlanList'
 import { PlanDetail } from './components/PlanDetail'
 import { PcoSetup } from './components/PcoSetup'
 import { AdminPage } from './components/AdminPage'
+import { Icon } from './components/Icon'
 
 function useHashRoute(): string {
   const [hash, setHash] = useState(() => window.location.hash)
@@ -24,7 +25,27 @@ export default function App() {
   const [user, setUser] = useState<User | null | undefined>(undefined)
   const [pcoReady, setPcoReady] = useState<boolean | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const userMenuRef = useRef<HTMLDivElement>(null)
   const hash = useHashRoute()
+
+  useEffect(() => {
+    if (!userMenuOpen) return
+    const onDocPointer = (e: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setUserMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDocPointer)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocPointer)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [userMenuOpen])
 
   useEffect(() => onAuthStateChanged(auth, setUser), [])
 
@@ -97,13 +118,48 @@ export default function App() {
           </a>
         </h1>
         <div className="who">
-          <span className="email">{user.email}</span>
-          {isAdmin && (
-            <a className="admin-link" href="#admin" title="System-wide AI defaults">
-              Admin
-            </a>
-          )}
-          <button onClick={() => logOut()}>Sign out</button>
+          <div className="user-menu" ref={userMenuRef}>
+            <button
+              type="button"
+              className="user-menu-trigger icon-text"
+              aria-haspopup="menu"
+              aria-expanded={userMenuOpen}
+              onClick={() => setUserMenuOpen((v) => !v)}
+            >
+              <span className="email">{user.email}</span>
+              <Icon
+                name="chevron-down"
+                size={12}
+                className={`user-menu-caret${userMenuOpen ? ' is-open' : ''}`}
+              />
+            </button>
+            {userMenuOpen && (
+              <div className="user-menu-items" role="menu">
+                {isAdmin && (
+                  <a
+                    className="user-menu-item icon-text"
+                    href="#admin"
+                    role="menuitem"
+                    onClick={() => setUserMenuOpen(false)}
+                  >
+                    Admin
+                    <Icon name="settings" size={14} />
+                  </a>
+                )}
+                <button
+                  type="button"
+                  className="user-menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setUserMenuOpen(false)
+                    void logOut()
+                  }}
+                >
+                  Sign out
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
       <main>
@@ -124,7 +180,7 @@ export default function App() {
           <PlanDetail serviceTypeId={planMatch[1]} planId={planMatch[2]} />
         ) : (
           <>
-            <h2>Recent and upcoming</h2>
+            <h2>Upcoming services</h2>
             <PlanList currentUserName={leaderName} currentUserEmail={user.email} />
           </>
         )}

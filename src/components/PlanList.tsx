@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { listPlans, type Plan, type TeamMember } from '../lib/api'
 import { namesMatch } from '../lib/names'
-import { Icon } from './Icon'
 import { EmptyState } from './EmptyState'
 
 interface Props {
@@ -66,15 +65,11 @@ export function PlanList({ currentUserName, currentUserEmail }: Props) {
   todayMidnight.setHours(0, 0, 0, 0)
   const todayTs = todayMidnight.getTime()
 
-  const past: Plan[] = []
-  const upcoming: Plan[] = []
-  for (const p of plans) {
-    const isPast = p.sortDate && new Date(p.sortDate).getTime() < todayTs
-    if (isPast) past.push(p)
-    else upcoming.push(p)
-  }
+  const upcoming = plans.filter(
+    (p) => !p.sortDate || new Date(p.sortDate).getTime() >= todayTs,
+  )
 
-  const renderPlan = (p: Plan, isPast: boolean) => {
+  const renderPlan = (p: Plan) => {
     const heading = p.title || p.seriesTitle || '(no title)'
     const sub = p.title && p.seriesTitle ? p.seriesTitle : null
     const team = p.teamMembers ?? []
@@ -95,17 +90,17 @@ export function PlanList({ currentUserName, currentUserEmail }: Props) {
     return (
       <li key={`${p.serviceTypeId}/${p.id}`}>
         <a
-          className="pco-quick icon-text"
+          className="pco-quick iconbtn iconbtn-sm iconbtn-pco"
           href={`https://services.planningcenteronline.com/plans/${p.id}`}
           target="_blank"
           rel="noopener noreferrer"
           title="Open this plan in Planning Center"
+          aria-label="Open this plan in Planning Center"
         >
-          Planning Center
-          <Icon name="external-link" size={12} />
+          <img src="/planning-center-icon.png" alt="" className="iconbtn-img" />
         </a>
         <a
-          className={`plan-link${stateClass}${isPast ? ' past' : ''}`}
+          className={`plan-link${stateClass}`}
           href={`#plan/${p.serviceTypeId}/${p.id}`}
         >
           {ledByMe && <span className="me-flag">You're leading</span>}
@@ -118,9 +113,6 @@ export function PlanList({ currentUserName, currentUserEmail }: Props) {
           <div className="title">{heading}</div>
           {sub && <div className="series">{sub}</div>}
           <div className="meta-row">
-            {p.serviceTypeName && (
-              <span className="service-type">{p.serviceTypeName}</span>
-            )}
             {p.sortDate && (
               <span className="date">
                 {new Date(p.sortDate).toLocaleDateString(undefined, {
@@ -130,6 +122,10 @@ export function PlanList({ currentUserName, currentUserEmail }: Props) {
                 })}
               </span>
             )}
+            {(() => {
+              const label = nearTermDayLabel(p.sortDate)
+              return label ? <span className="day-relative">{label}</span> : null
+            })()}
             {leaders.length > 0 && (
               <span className="leaders">
                 led by {leaders.map((l) => l.name).join(', ')}
@@ -155,6 +151,27 @@ export function PlanList({ currentUserName, currentUserEmail }: Props) {
     )
   }
 
+  // Countdown chip — only renders when the service is within ~3 weeks.
+  // Past that, the full date in the row is informative enough on its own.
+  function nearTermDayLabel(iso: string | null | undefined): string | null {
+    if (!iso) return null
+    const target = new Date(iso)
+    if (Number.isNaN(target.getTime())) return null
+    const startOfDay = (d: Date) => {
+      const x = new Date(d)
+      x.setHours(0, 0, 0, 0)
+      return x
+    }
+    const days = Math.round(
+      (startOfDay(target).getTime() - startOfDay(new Date()).getTime()) /
+        (1000 * 60 * 60 * 24),
+    )
+    if (days < 0 || days > 21) return null
+    if (days === 0) return 'Today'
+    if (days === 1) return 'Tomorrow'
+    return `In ${days} days`
+  }
+
   function songsProgressClass({ filled, total }: { filled: number; total: number }): string {
     if (total === 0) return ''
     if (filled === 0) return 'progress-empty'
@@ -162,31 +179,9 @@ export function PlanList({ currentUserName, currentUserEmail }: Props) {
     return 'progress-partial'
   }
 
-  const pastCountLabel =
-    past.length === 1 ? '1 recent past service' : `${past.length} recent past services`
-  const myPastCount = past.filter((p) => (p.teamMembers ?? []).some(matchesMe)).length
-
   return (
     <div className="plan-list">
-      {past.length > 0 && (
-        <details className="past-plans-group">
-          <summary>
-            <span className="chevron" aria-hidden>
-              <Icon name="chevron-right" size={14} />
-            </span>
-            <span>{pastCountLabel}</span>
-            {myPastCount > 0 && (
-              <span className="past-served-count">
-                · you served in {myPastCount}
-              </span>
-            )}
-          </summary>
-          <ul className="plans past-plans-list">
-            {past.map((p) => renderPlan(p, true))}
-          </ul>
-        </details>
-      )}
-      <ul className="plans">{upcoming.map((p) => renderPlan(p, false))}</ul>
+      <ul className="plans">{upcoming.map((p) => renderPlan(p))}</ul>
     </div>
   )
 }
