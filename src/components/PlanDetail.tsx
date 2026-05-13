@@ -3,13 +3,11 @@ import {
   clearSongFromSlot,
   loadSession,
   placeSongInSlot,
-  reorderItems as reorderItemsCall,
   saveSession,
   savePlanNotes,
   savePlanTheme,
   searchSongs,
   suggestSongs,
-  swapSlotPlaceholders as swapSlotPlaceholdersCall,
   type AiAction,
   type AiCandidate,
   type ConversationTurn,
@@ -31,14 +29,20 @@ import {
 } from '../lib/cache'
 import { isSongSlot } from '../lib/songSlots'
 import {
-  buildKnownSongTitles,
   fallbackSlotTitle as fallbackSlotTitleHelper,
-  findEvictionTarget,
-  placeholderForSlot as placeholderForSlotHelper,
   resolveRestoreTitle,
 } from '../lib/planActions/helpers'
-import { resolvePlan } from '../lib/planActions/resolver'
+import {
+  resolvePlan,
+  type Assignment,
+} from '../lib/planActions/resolver'
 import { executePlan, type ExecutorDeps } from '../lib/planActions/executor'
+import {
+  compileClearSlot,
+  compileCommitToSlot,
+  compileDropCandidateOnSlot,
+  compileSlotToSlot,
+} from '../lib/planActions/compile'
 import { usePromptConfig } from '../lib/usePromptConfig'
 import { ArrangementKeyEditor } from './ArrangementKeyEditor'
 import { PromptBody } from './PromptBody'
@@ -586,21 +590,13 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       // that fires PCO writes. Drives the single post-stream refresh.
       let pcoWritesFired = false
 
-      // Executor deps for the AI flow. Each set_slot_contents
+      // Executor deps shared with UI flows. Each set_slot_contents
       // assignment list runs through resolvePlan + executePlan;
       // executePlan does optimistic state, PCO calls, chat messages,
-      // and rollback. deferRefresh=true on each call so we refresh
+      // and rollback. deferRefresh=true on the AI side so we refresh
       // once at the end of the stream rather than after every AI
-      // tool call.
-      const executorDeps: ExecutorDeps = {
-        serviceTypeId,
-        planId,
-        pco: { placeSongInSlot, clearSongFromSlot },
-        setCandidates: (update) =>
-          setCandidates((prev) => update(prev) as CandidateMatch[]),
-        appendSystemMessage,
-        refreshPlanState,
-      }
+      // tool call (UI flows refresh per-call).
+      const executorDeps = executorDepsForCurrent()
 
       const applyAction = async (action: AiAction) => {
         const now = Date.now()
@@ -872,378 +868,46 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     }
   }
 
-  // Unified action layer for PCO write intents. Both user-driven
-  // flows (DnD, slot pickers) and AI-driven flows (commit_song /
-  // clear_slot tool calls) go through these three helpers. Each
-  // handles: optimistic state update, the Cloud Function call,
-  // optional items refresh (deferred for AI batching), failure
-  // rollback, and the chat-log system message. Source: 'user' vs
-  // 'ai' only affects message formatting.
-
-  async function placeSongAction(opts: {
-    candidate: CandidateMatch
-    slotItem: PlanItem
-    source?: 'user' | 'ai'
-    deferRefresh?: boolean
-  }): Promise<void> {
-    const { candidate, slotItem } = opts
-    const source = opts.source ?? 'user'
-    const deferRefresh = opts.deferRefresh ?? false
-    if (!candidate.song?.id) {
-      const msg =
-        source === 'ai'
-          ? `⚠ AI tried to commit "${candidate.suggestion.title}" but it isn't matched to a song in your Planning Center library — skipped`
-          : `⚠ Can't commit "${candidate.suggestion.title}" — no matching song in your Planning Center library`
-      appendSystemMessage(msg)
-      return
+  // Build the deps object the executor needs. Used by both the AI
+  // flow (handleSuggest builds its own with deferRefresh=true so it
+  // can refresh once at end of stream) and UI-driven flows (which
+  // run one assignment-set at a time, refresh per-call). Same shape
+  // for both — the only difference is the executePlan options.
+  function executorDepsForCurrent(): ExecutorDeps {
+    return {
+      serviceTypeId,
+      planId,
+      pco: { placeSongInSlot, clearSongFromSlot },
+      setCandidates: (update) =>
+        setCandidates((prev) => update(prev) as CandidateMatch[]),
+      appendSystemMessage,
+      refreshPlanState,
     }
-    const songId = candidate.song.id
-    const songTitle = candidate.suggestion.title
-    // Move semantics: clear old slot first if the candidate is
-    // currently committed elsewhere. The Cloud Function handles the
-    // clear+commit chain atomically server-side.
-    const isMove =
-      candidate.committedAt != null &&
-      candidate.assignedSlotItemId != null &&
-      candidate.assignedSlotItemId !== slotItem.id
-    const fromSlotItemId = isMove ? candidate.assignedSlotItemId : undefined
-    const fromSlotRestoreTitle =
-      isMove && fromSlotItemId
-        ? resolveRestoreTitle({
-            slotItemId: fromSlotItemId,
-            slotPlaceholders,
-            candidatePriorSlotTitle: candidate.priorSlotTitle,
-            // No taint check at commit-time move-source — we trust
-            // the candidate's prior since the source slot's title
-            // was the one we captured at original commit.
-            fallbackForSlot: fallbackSlotTitle,
-          })
-        : undefined
-    const fromSlotIndex =
-      isMove && fromSlotItemId
-        ? (items ?? [])
-            .filter(isSongSlot)
-            .findIndex((it) => it.id === fromSlotItemId) + 1
-        : null
-    const slotIndex =
-      (items ?? []).filter(isSongSlot).findIndex((it) => it.id === slotItem.id) + 1
-    const slotLabel = slotItem.title || fallbackSlotTitle(slotItem.id)
-    const newPriorSlotTitle = placeholderForSlot(slotItem)
-    // Overwrite semantics: if a different committed candidate is
-    // sitting in the target slot, evict it back to the candidate
-    // pool (decision stays 'pending', commit state cleared) so the
-    // user can re-pick it later. Match the AI's set_slot_contents
-    // path so user-driven and AI-driven overwrites behave the same.
-    // Title for the system message uses the candidate's suggestion
-    // title when we know it, falling back to the slot's PCO songTitle
-    // when the displaced song was placed via PCO directly.
-    const evictedCandidate = findEvictionTarget(
-      slotItem.id,
+  }
+
+  // The single UI entry point for slot-state changes. Compiles
+  // happen at the call site (small, scenario-specific functions in
+  // src/lib/planActions/compile); resolver + executor are shared
+  // with the AI flow so a bug in either lands the same way for
+  // both sources. See docs/unification-plan.md.
+  async function performUiAction(assignments: Assignment[]): Promise<void> {
+    if (assignments.length === 0) return
+    const plan = resolvePlan(assignments, {
+      items: items ?? [],
       candidates,
-      candidate.id,
-    )
-    const evictedTitle =
-      evictedCandidate?.suggestion.title ?? slotItem.songTitle ?? null
-    const evictionRollback = evictedCandidate
-      ? {
-          id: evictedCandidate.id,
-          committedAt: evictedCandidate.committedAt,
-          assignedSlotItemId: evictedCandidate.assignedSlotItemId,
-          priorSlotTitle: evictedCandidate.priorSlotTitle,
-        }
-      : null
-    const rollbackSnapshot = {
-      decision: candidate.decision,
-      committedAt: candidate.committedAt,
-      assignedSlotItemId: candidate.assignedSlotItemId,
-      priorSlotTitle: candidate.priorSlotTitle,
-    }
-    // Optimistic flip. commitPending shields the new candidate from
-    // the reconciliation effect until items refreshes (see CLAUDE.md
-    // note on the batching pattern). The evicted candidate (if any)
-    // is reset in the same setCandidates call so the UI never
-    // momentarily shows two candidates committed to the same slot.
-    setCandidates((prev) =>
-      prev.map((c) => {
-        if (c.id === candidate.id) {
-          return {
-            ...c,
-            committedAt: Date.now(),
-            assignedSlotItemId: slotItem.id,
-            priorSlotTitle: newPriorSlotTitle,
-            commitPending: true,
-          }
-        }
-        if (evictedCandidate && c.id === evictedCandidate.id) {
-          return {
-            ...c,
-            committedAt: null,
-            assignedSlotItemId: null,
-            priorSlotTitle: null,
-          }
-        }
-        return c
-      }),
-    )
-    const replaceSuffix = slotItem.songId
-      ? ` (replacing "${evictedTitle ?? '(song)'}")`
-      : ''
-    if (source === 'ai') {
-      appendSystemMessage(
-        isMove
-          ? `🤖 AI moved "${songTitle}" from song slot ${fromSlotIndex ?? '?'} to song slot ${slotIndex}${replaceSuffix}`
-          : `🤖 AI committed "${songTitle}" to song slot ${slotIndex}${replaceSuffix}`,
-      )
-    } else {
-      appendSystemMessage(
-        isMove
-          ? `↕ Moved "${songTitle}" → ${slotLabel}${replaceSuffix}`
-          : `↗ Committed "${songTitle}" → ${slotLabel}${replaceSuffix}`,
-      )
-    }
-    try {
-      await placeSongInSlot({
-        serviceTypeId,
-        planId,
-        slotItemId: slotItem.id,
-        songId,
-        songTitle,
-        ...(fromSlotItemId ? { fromSlotItemId } : {}),
-        ...(fromSlotRestoreTitle ? { fromSlotRestoreTitle } : {}),
-      })
-      if (!deferRefresh) {
-        await refreshPlanState()
-        setCandidates((prev) =>
-          prev.map((c) =>
-            c.id === candidate.id ? { ...c, commitPending: false } : c,
-          ),
-        )
-      }
-      // When deferred (AI batched flow), the caller's post-stream
-      // cleanup is responsible for the items refresh + clearing
-      // commitPending. Leaving commitPending=true here is correct.
-    } catch (e) {
-      const err = e as Error
-      setCandidates((prev) =>
-        prev.map((c) => {
-          if (c.id === candidate.id) {
-            return { ...c, ...rollbackSnapshot, commitPending: false }
-          }
-          if (evictionRollback && c.id === evictionRollback.id) {
-            return {
-              ...c,
-              committedAt: evictionRollback.committedAt,
-              assignedSlotItemId: evictionRollback.assignedSlotItemId,
-              priorSlotTitle: evictionRollback.priorSlotTitle,
-            }
-          }
-          return c
-        }),
-      )
-      const failMsg =
-        source === 'ai'
-          ? `⚠ AI ${isMove ? 'move' : 'commit'} failed for "${songTitle}" — ${err.message}`
-          : `⚠ ${isMove ? 'Move' : 'Commit'} failed for "${songTitle}" — ${err.message}`
-      appendSystemMessage(failMsg)
-      if (source === 'user') {
-        setGenerateError(err.message)
-      }
-    }
-  }
-
-  async function clearSlotAction(opts: {
-    slotItem: PlanItem
-    source?: 'user' | 'ai'
-    deferRefresh?: boolean
-  }): Promise<void> {
-    const { slotItem } = opts
-    const source = opts.source ?? 'user'
-    const deferRefresh = opts.deferRefresh ?? false
-    if (!slotItem.songId) return
-    const slotIndex =
-      (items ?? []).filter(isSongSlot).findIndex((it) => it.id === slotItem.id) + 1
-    // Restore-title resolution via the shared resolver — see
-    // src/lib/planActions/helpers.ts for the priority order.
-    const committedCandidate = candidates.find(
-      (c) => c.assignedSlotItemId === slotItem.id && c.committedAt != null,
-    )
-    const knownSongTitlesLower = buildKnownSongTitles(candidates, items)
-    const restoreTitle = resolveRestoreTitle({
-      slotItemId: slotItem.id,
       slotPlaceholders,
-      candidatePriorSlotTitle: committedCandidate?.priorSlotTitle,
-      knownSongTitles: knownSongTitlesLower,
-      fallbackForSlot: fallbackSlotTitle,
     })
-    const songTitle =
-      committedCandidate?.suggestion.title ?? slotItem.songTitle ?? '(song)'
-    const rollbackByCandidate = new Map(
-      candidates
-        .filter((c) => c.assignedSlotItemId === slotItem.id && c.committedAt)
-        .map((c) => [
-          c.id,
-          {
-            committedAt: c.committedAt,
-            assignedSlotItemId: c.assignedSlotItemId,
-            priorSlotTitle: c.priorSlotTitle,
-          },
-        ]),
-    )
-    setCandidates((prev) =>
-      prev.map((c) =>
-        c.assignedSlotItemId === slotItem.id
-          ? {
-              ...c,
-              assignedSlotItemId: null,
-              committedAt: null,
-              priorSlotTitle: null,
-            }
-          : c,
-      ),
-    )
-    if (source === 'ai') {
-      appendSystemMessage(
-        `🤖 AI cleared "${songTitle}" from song slot ${slotIndex}`,
-      )
-    } else {
-      appendSystemMessage(
-        `↶ Cleared "${songTitle}" from ${restoreTitle}`,
-      )
-    }
-    try {
-      await clearSongFromSlot({
-        serviceTypeId,
-        planId,
-        slotItemId: slotItem.id,
-        restoreTitle,
-      })
-      if (!deferRefresh) {
-        await refreshPlanState()
-      }
-    } catch (e) {
-      const err = e as Error
-      setCandidates((prev) =>
-        prev.map((c) => {
-          const snap = rollbackByCandidate.get(c.id)
-          return snap ? { ...c, ...snap } : c
-        }),
-      )
-      const failMsg =
-        source === 'ai'
-          ? `⚠ AI clear failed for song slot ${slotIndex} — ${err.message}`
-          : `⚠ Clear failed for ${restoreTitle} — ${err.message}`
-      appendSystemMessage(failMsg)
-      if (source === 'user') {
-        setGenerateError(err.message)
-      }
-    }
+    await executePlan(plan, executorDepsForCurrent(), { source: 'user' })
   }
 
-  async function swapSlotsAction(opts: {
-    slotA: PlanItem
-    slotB: PlanItem
-    source?: 'user' | 'ai'
-  }): Promise<void> {
-    const { slotA, slotB } = opts
-    const source = opts.source ?? 'user'
-    const order = (items ?? []).map((it) => it.id)
-    const aIdx = order.indexOf(slotA.id)
-    const bIdx = order.indexOf(slotB.id)
-    if (aIdx === -1 || bIdx === -1) return
-    const newOrder = [...order]
-    newOrder[aIdx] = slotB.id
-    newOrder[bIdx] = slotA.id
-    const aLabel = slotA.songTitle ?? slotA.title ?? 'slot'
-    const bLabel = slotB.songTitle ?? slotB.title ?? 'slot'
-    if (source === 'ai') {
-      appendSystemMessage(`🤖 AI swapped "${aLabel}" with "${bLabel}"`)
-    } else {
-      appendSystemMessage(`↔ Swapped "${aLabel}" with "${bLabel}"`)
-    }
-    try {
-      await reorderItemsCall({
-        serviceTypeId,
-        planId,
-        orderedItemIds: newOrder,
-      })
-      // Apply the swap locally rather than refetching. PCO's
-      // read-after-write on item_reorder can return the pre-swap
-      // ordering for a beat — that's what was leaving the UI showing
-      // the old positions until a manual reload caught up. We know
-      // exactly what the post-swap state looks like (same items, two
-      // positions traded, their sequence values traded with them),
-      // so we apply it directly and bust the cache so a later
-      // navigate-away-and-back picks up fresh data from PCO.
-      setItems((prev) => {
-        if (!prev) return prev
-        const ai = prev.findIndex((it) => it.id === slotA.id)
-        const bi = prev.findIndex((it) => it.id === slotB.id)
-        if (ai === -1 || bi === -1) return prev
-        const a = prev[ai]
-        const b = prev[bi]
-        const next = [...prev]
-        next[ai] = { ...b, sequence: a.sequence }
-        next[bi] = { ...a, sequence: b.sequence }
-        return next
-      })
-      // Trade the placeholders too — without this, the item that
-      // moves to position N still carries the placeholder for its
-      // OLD position, and a later clear restores the wrong title.
-      // Optimistic local swap first; the callable persists it so
-      // a fresh load from a different session sees the right map.
-      setSlotPlaceholders((prev) => {
-        const valA = prev[slotA.id]
-        const valB = prev[slotB.id]
-        if (valA === undefined && valB === undefined) return prev
-        const next = { ...prev }
-        if (valB !== undefined) next[slotA.id] = valB
-        else delete next[slotA.id]
-        if (valA !== undefined) next[slotB.id] = valA
-        else delete next[slotB.id]
-        return next
-      })
-      try {
-        await swapSlotPlaceholdersCall({
-          planId,
-          itemIdA: slotA.id,
-          itemIdB: slotB.id,
-        })
-      } catch (e) {
-        // Persist failure isn't fatal — local state still reflects
-        // the swap. Worst case, a fresh session load picks up the
-        // pre-swap map and restores the "wrong" placeholder once.
-        console.warn('[songpicker] swapSlotPlaceholders persist failed:', e)
-      }
-      invalidatePlanContext(serviceTypeId, planId)
-      const affected = new Set([slotA.id, slotB.id])
-      setCandidates((prev) =>
-        prev.map((c) =>
-          c.assignedSlotItemId && affected.has(c.assignedSlotItemId)
-            ? { ...c, priorSlotTitle: null }
-            : c,
-        ),
-      )
-    } catch (e) {
-      const err = e as Error
-      const failMsg =
-        source === 'ai'
-          ? `⚠ AI swap failed — ${err.message}`
-          : `⚠ Swap failed — ${err.message}`
-      appendSystemMessage(failMsg)
-      if (source === 'user') {
-        setGenerateError(err.message)
-      }
-    }
-  }
 
-  // Thin wrappers binding the pure helpers to this component's closure
-  // (items, slotPlaceholders). Both call into src/lib/planActions/helpers.
-  // See that module for the docs and tests.
+  // Thin wrapper binding the pure helper to this component's `items`
+  // closure. Used by the PCO-direct fallback in reorderSlotItem to
+  // build a human-friendly destination label and the move-source
+  // restore title; the unified resolver+executor flow doesn't need
+  // it (the resolver builds its own internally).
   function fallbackSlotTitle(itemId: string): string {
     return fallbackSlotTitleHelper(itemId, items)
-  }
-  function placeholderForSlot(slotItem: PlanItem): string | null {
-    return placeholderForSlotHelper(slotItem, slotPlaceholders, fallbackSlotTitle)
   }
 
   // Drag-and-drop state. Two distinct drag modes:
@@ -1321,62 +985,46 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   }
 
 
-  // Drop handler for a filled song slot dragged onto another song slot.
-  // Branches on source/target fill state per the user's mental model
-  // — placeholders are tied to slot positions, songs move between
-  // them. The asymmetric (one filled, one empty) cases route through
-  // placeSongAction as a MOVE — placeholders never travel via
-  // reorder, only the song does. The both-filled case is the only
-  // genuine reorder; swapSlotsAction handles the placeholder swap so
-  // a later clear restores the right placeholder for the new
-  // position. Both-empty is a no-op (nothing to move).
+  // Drop handler for a song slot dragged onto another song slot.
+  // The compileSlotToSlot helper figures out the right intent
+  // (move / swap / no-op) based on which sides are filled and emits
+  // assignments — those flow through the same resolver+executor as
+  // the AI's set_slot_contents tool calls. The PCO-direct fallback
+  // below catches the one shape compileSlotToSlot can't represent:
+  // a filled slot whose song was linked via PCO directly (no
+  // candidate record), so there's no candidateId to put in the
+  // assignment.
   async function reorderSlotItem(draggedId: string, targetId: string) {
     if (draggedId === targetId) return
     const draggedSlot = (items ?? []).find((it) => it.id === draggedId)
     const targetSlot = (items ?? []).find((it) => it.id === targetId)
     if (!draggedSlot || !targetSlot) return
 
+    const assignments = compileSlotToSlot(
+      draggedSlot,
+      targetSlot,
+      candidates,
+      items ?? [],
+    )
+    if (assignments.length > 0) {
+      await performUiAction(assignments)
+      return
+    }
+
+    // PCO-direct outlier: one slot has a song that's not tracked as
+    // a candidate (linked through PCO web UI before songpicker saw
+    // the plan, perhaps). Both-empty also lands here and no-ops.
     const sourceFilled = !!draggedSlot.songId
     const targetFilled = !!targetSlot.songId
-
-    if (sourceFilled && targetFilled) {
-      // Both filled → real swap. Sequences trade; songs travel with
-      // their items; placeholders ALSO trade (handled inside
-      // swapSlotsAction) so the position binding survives.
-      await swapSlotsAction({ slotA: draggedSlot, slotB: targetSlot })
-      return
-    }
-    if (!sourceFilled && !targetFilled) {
-      // Both empty → nothing to move. Reordering two empty
-      // placeholders has no visible effect anyway.
-      return
-    }
-    // Exactly one is filled. Move that song into the other slot,
-    // letting the empty slot's placeholder stay where it is. The
-    // "moving slot" is whichever currently has the song; the
-    // "destination" is the other.
+    if (!sourceFilled && !targetFilled) return
     const movingSlot = sourceFilled ? draggedSlot : targetSlot
     const destSlot = sourceFilled ? targetSlot : draggedSlot
-    const committedCand = candidates.find(
-      (c) =>
-        c.assignedSlotItemId === movingSlot.id &&
-        c.committedAt != null &&
-        c.song,
-    )
-    if (committedCand) {
-      await placeSongAction({ candidate: committedCand, slotItem: destSlot })
-      return
-    }
     if (!movingSlot.songId || !movingSlot.songTitle) {
       setGenerateError(
         `Can't move "${movingSlot.songTitle ?? movingSlot.title}" — missing song info on the source slot.`,
       )
       return
     }
-    // The moving slot has no committed candidate in our state
-    // (e.g., the song was linked via PCO directly before songpicker
-    // started). No candidate prior to consult — the resolver falls
-    // through persistedPlaceholder → "Song N".
     const sourceRestoreTitle = resolveRestoreTitle({
       slotItemId: movingSlot.id,
       slotPlaceholders,
@@ -1440,7 +1088,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             // old key here silently no-op'd the clear.
             if (dragKind === 'slot' && dragSourceId) {
               const slot = (items ?? []).find((it) => it.id === dragSourceId)
-              if (slot) void clearSlotAction({ slotItem: slot })
+              if (slot) {
+                void performUiAction(compileClearSlot(slot, items ?? []))
+              }
             }
             endDrag()
           }}
@@ -1585,10 +1235,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                         (c) => c.id === dragSourceId,
                       )
                       if (candidate) {
-                        void placeSongAction({
-                          candidate,
-                          slotItem: it,
-                        })
+                        void performUiAction(
+                          compileDropCandidateOnSlot(candidate.id, it, items ?? []),
+                        )
                       }
                     } else if (dragKind === 'slot' && dragSourceId) {
                       void reorderSlotItem(dragSourceId, it.id)
@@ -1618,7 +1267,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                           <button
                             type="button"
                             className="clear-slot-btn"
-                            onClick={() => void clearSlotAction({ slotItem: it })}
+                            onClick={() =>
+                              void performUiAction(compileClearSlot(it, items ?? []))
+                            }
                             title="Remove this song from the slot and reopen it for new suggestions"
                             aria-label="Remove song from slot"
                           >
@@ -2194,10 +1845,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                                     className="commit-menu-item"
                                     onClick={() => {
                                       setOpenCommitMenuId(null)
-                                      void placeSongAction({
-                                        candidate: c,
-                                        slotItem: s,
-                                      })
+                                      void performUiAction(
+                                        compileCommitToSlot(c.id, s, items ?? []),
+                                      )
                                     }}
                                   >
                                     {s.title}
