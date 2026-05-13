@@ -45,14 +45,15 @@ import {
 } from './planActions/compile'
 import {
   fallbackSlotTitle as fallbackSlotTitleHelper,
-  resolveRestoreTitle,
 } from './planActions/helpers'
 
-// SPA-internal candidate shape. Superset of CandidateState (the
-// minimal interface the planActions helpers require) — adds React-
-// transient fields that don't persist (commitPending) and the
-// matched library Song type from the API. Lives here rather than
-// in PlanDetail so the hook can fully own candidate-pool state.
+// SPA-internal candidate shape. Phase 6 dropped committedAt /
+// assignedSlotItemId / priorSlotTitle / commitPending — those were
+// derived/transient state that drifted from PCO. The candidate now
+// just carries: identity, the AI's suggestion, optional matched
+// library song, decision (pending|reject), and a few timestamps /
+// errors. "Is this candidate currently committed?" is computed by
+// the UI from items.songId === candidate.song?.id.
 export interface CandidateMatch {
   id: string
   suggestion: SongSuggestion
@@ -61,19 +62,6 @@ export interface CandidateMatch {
   error?: string
   decision: Decision
   addedAt: number
-  assignedSlotItemId: string | null
-  committedAt: number | null
-  /** Title the slot had right before this candidate was committed. Used
-   *  by clearPickedSlot to restore that title in PCO instead of leaving
-   *  the song name behind. */
-  priorSlotTitle: string | null
-  /** Transient SPA-only flag set true the moment we optimistically
-   *  flip committedAt during a commit, and cleared once the
-   *  post-PCO items refresh lands. The reconciliation effect skips
-   *  pending candidates so it doesn't see "new committedAt vs.
-   *  pre-refresh items" and wrongly reset the commit. Never
-   *  persisted — defaults to false on session load. */
-  commitPending: boolean
 }
 
 function newCandidateId(): string {
@@ -103,9 +91,14 @@ function toPersisted(c: CandidateMatch): PersistedCandidate {
     error: c.error ?? null,
     decision: c.decision,
     addedAt: c.addedAt,
-    assignedSlotItemId: c.assignedSlotItemId,
-    committedAt: c.committedAt,
-    priorSlotTitle: c.priorSlotTitle,
+    // Phase 6: assignedSlotItemId / committedAt / priorSlotTitle
+    // are no longer on CandidateMatch. Persistence keeps them in
+    // the schema (PersistedCandidate is shared with the Cloud
+    // Function) but always writes nulls — values are derived from
+    // PCO state at load time.
+    assignedSlotItemId: null,
+    committedAt: null,
+    priorSlotTitle: null,
   }
 }
 
@@ -134,10 +127,6 @@ function fromPersisted(p: PersistedCandidate): CandidateMatch {
     error: p.error ?? undefined,
     decision: p.decision,
     addedAt: p.addedAt,
-    assignedSlotItemId: p.assignedSlotItemId,
-    committedAt: p.committedAt,
-    priorSlotTitle: p.priorSlotTitle ?? null,
-    commitPending: false,
   }
 }
 
@@ -306,6 +295,10 @@ export interface PlanStateApi {
   fallbackSlotTitle: (itemId: string) => string
   /** True when the AI is mid-stream — used to disable inputs. */
   isGenerating: boolean
+  /** True iff this candidate's matched library song is currently
+   *  linked to a slot in the PCO plan. Phase 6 derived state — the
+   *  candidate doesn't store this; we look it up on every render. */
+  isCandidateCommitted: (candidate: { song?: { id?: string } | null }) => boolean
 }
 
 export function usePlanState(
@@ -445,31 +438,10 @@ export function usePlanState(
     return () => clearTimeout(id)
   }, [candidates, messages, sessionLoaded, planId])
 
-  // Reconcile committed candidates with current PCO items state.
-  useEffect(() => {
-    if (!items || !sessionLoaded) return
-    const staleIds: string[] = []
-    for (const c of candidates) {
-      if (c.committedAt == null) continue
-      if (c.commitPending) continue
-      const slot = items.find((it) => it.id === c.assignedSlotItemId)
-      const stillCommitted =
-        !!slot && !!slot.songId && c.song?.id === slot.songId
-      if (!stillCommitted) staleIds.push(c.id)
-    }
-    if (staleIds.length === 0) return
-    const staleSet = new Set(staleIds)
-    setCandidates((prev) =>
-      prev.map((c) =>
-        staleSet.has(c.id)
-          ? { ...c, committedAt: null, priorSlotTitle: null }
-          : c,
-      ),
-    )
-    appendSystemMessage(
-      `↺ ${staleIds.length} slot${staleIds.length === 1 ? '' : 's'} cleared in Planning Center — matching candidate${staleIds.length === 1 ? '' : 's'} marked uncommitted`,
-    )
-  }, [items, candidates, sessionLoaded])
+  // (Phase 6 deleted the reconciliation effect that used to compare
+  // candidates' committedAt to items.songId. Candidate "committed
+  // status" is now derived on every render from items.songId, so
+  // there's no per-candidate state to drift out of sync.)
 
   // Auto-save theme/notes on change.
   useEffect(() => {
@@ -548,8 +520,7 @@ export function usePlanState(
       serviceTypeId,
       planId,
       pco: { placeSongInSlot, clearSongFromSlot },
-      setCandidates: (update) =>
-        setCandidates((prev) => update(prev) as CandidateMatch[]),
+      setItems,
       appendSystemMessage,
       refreshPlanState,
     }
@@ -561,10 +532,28 @@ export function usePlanState(
     if (assignments.length === 0) return
     const plan = resolvePlan(assignments as Assignment[], {
       items: items ?? [],
-      candidates,
       slotPlaceholders,
     })
     await executePlan(plan, executorDepsForCurrent(), { source: 'user' })
+  }
+
+  function committedSongIds(): Set<string> {
+    const out = new Set<string>()
+    for (const it of items ?? []) {
+      if (it.songId) out.add(it.songId)
+    }
+    return out
+  }
+
+  function isCandidateCommitted(candidate: {
+    song?: { id?: string } | null
+  }): boolean {
+    const id = candidate.song?.id
+    if (!id) return false
+    for (const it of items ?? []) {
+      if (it.songId === id) return true
+    }
+    return false
   }
 
   function decisionDeps(opts: {
@@ -574,6 +563,7 @@ export function usePlanState(
       setCandidates: (update) =>
         setCandidates((prev) => update(prev) as CandidateMatch[]),
       appendSystemMessage,
+      committedSongIds: committedSongIds(),
       onRejectsLanded: opts.withRejectSignal
         ? (n) => {
             for (let i = 0; i < n; i++) bumpRejectSignal()
@@ -628,108 +618,17 @@ export function usePlanState(
     const targetSlot = (items ?? []).find((it) => it.id === targetId)
     if (!draggedSlot || !targetSlot) return
 
+    // Phase 6: compileSlotToSlot operates on items.songId only —
+    // PCO-direct songs and candidate-tracked songs go through the
+    // same path. No fallback needed for the both-filled case;
+    // compile produces a swap-pair assignment that the resolver
+    // and executor handle uniformly.
     const assignments = compileSlotToSlot(
       draggedSlot,
       targetSlot,
-      candidates,
       items ?? [],
     )
-    if (assignments.length > 0) {
-      await performUiAction(assignments)
-      return
-    }
-
-    // PCO-direct outlier: at least one slot has a song that's not
-    // tracked as a candidate (linked via PCO web UI before
-    // songpicker observed it, or the candidate record drifted out
-    // of sync). Both-empty also lands here and no-ops.
-    const sourceFilled = !!draggedSlot.songId
-    const targetFilled = !!targetSlot.songId
-    if (!sourceFilled && !targetFilled) return
-
-    if (sourceFilled && targetFilled) {
-      // Both filled — swap songs without losing either. Two PCO
-      // PATCHes, like the unified executor would do for a
-      // candidate-tracked swap, but issued directly because the
-      // assignments[] path can't represent a swap without
-      // candidateIds on both sides.
-      if (
-        !draggedSlot.songId ||
-        !draggedSlot.songTitle ||
-        !targetSlot.songId ||
-        !targetSlot.songTitle
-      ) {
-        setGenerateError("Can't swap — missing song info on one of the slots.")
-        return
-      }
-      console.warn(
-        '[songpicker] reorderSlotItem fallback (both filled): one or both slots lacks a candidate record. Going through paired PCO PATCHes. See compileSlotToSlot for the unified path.',
-      )
-      const draggedSongId = draggedSlot.songId
-      const draggedSongTitle = draggedSlot.songTitle
-      const targetSongId = targetSlot.songId
-      const targetSongTitle = targetSlot.songTitle
-      try {
-        // Paired PATCHes: each slot gets the other's song. Items
-        // stay at their positions (no reorder), titles + songIds
-        // swap. Order doesn't matter because both are independent
-        // PATCH calls — no source-clear needed.
-        await placeSongInSlot({
-          serviceTypeId,
-          planId,
-          slotItemId: draggedSlot.id,
-          songId: targetSongId,
-          songTitle: targetSongTitle,
-        })
-        await placeSongInSlot({
-          serviceTypeId,
-          planId,
-          slotItemId: targetSlot.id,
-          songId: draggedSongId,
-          songTitle: draggedSongTitle,
-        })
-        await refreshPlanState()
-        appendSystemMessage(
-          `↔ Swapped "${draggedSongTitle}" with "${targetSongTitle}"`,
-        )
-      } catch (e) {
-        setGenerateError((e as Error).message)
-      }
-      return
-    }
-
-    // Exactly one filled — move that song into the empty slot.
-    const movingSlot = sourceFilled ? draggedSlot : targetSlot
-    const destSlot = sourceFilled ? targetSlot : draggedSlot
-    if (!movingSlot.songId || !movingSlot.songTitle) {
-      setGenerateError(
-        `Can't move "${movingSlot.songTitle ?? movingSlot.title}" — missing song info on the source slot.`,
-      )
-      return
-    }
-    const sourceRestoreTitle = resolveRestoreTitle({
-      slotItemId: movingSlot.id,
-      slotPlaceholders,
-      fallbackForSlot: fallbackSlotTitle,
-    })
-    const songTitle = movingSlot.songTitle
-    const destLabel =
-      destSlot.title?.trim() || fallbackSlotTitle(destSlot.id)
-    try {
-      await placeSongInSlot({
-        serviceTypeId,
-        planId,
-        slotItemId: destSlot.id,
-        songId: movingSlot.songId,
-        songTitle,
-        fromSlotItemId: movingSlot.id,
-        fromSlotRestoreTitle: sourceRestoreTitle,
-      })
-      await refreshPlanState()
-      appendSystemMessage(`↕ Moved "${songTitle}" → ${destLabel}`)
-    } catch (e) {
-      setGenerateError((e as Error).message)
-    }
+    await performUiAction(assignments)
   }
 
   // The big AI-turn driver. Streams assistant text + tool actions
@@ -767,10 +666,23 @@ export function usePlanState(
         itemIdBySlotIndex.set(idx + 1, it.id)
       })
 
+      // Phase 6: candidate "committed" status + slot assignment are
+      // both derived from items at AI-payload-build time (PCO is the
+      // truth, candidates are the pool). Build a song.id → slot
+      // index map once; each candidate looks itself up.
+      const slotIndexBySongId = new Map<string, number>()
+      for (const it of items ?? []) {
+        if (it.songId) {
+          const idx = slotIndexByItemId.has(it.id)
+            ? songSlotItems.findIndex((s) => s.id === it.id) + 1
+            : 0
+          if (idx > 0) slotIndexBySongId.set(it.songId, idx)
+        }
+      }
       const knownCandidateIds = lastSentCandidateIdsRef.current
       const aiCandidates: AiCandidate[] = candidates.map((c) => {
-        const slotIndex = c.assignedSlotItemId
-          ? slotIndexByItemId.get(c.assignedSlotItemId)
+        const slotIndex = c.song?.id
+          ? slotIndexBySongId.get(c.song.id)
           : undefined
         const isKnownToAi = knownCandidateIds.has(c.id)
         return {
@@ -787,14 +699,18 @@ export function usePlanState(
             slotIndex !== undefined && totalSongSlots > 0
               ? { index: slotIndex, total: totalSongSlots }
               : undefined,
-          committed: c.committedAt != null,
+          committed: slotIndex !== undefined,
           inLibrary: c.matchStatus === 'matched',
         }
       })
 
+      // Build a set of song.ids currently linked in a slot — used
+      // to filter `alreadyInPlan` so the AI doesn't see items that
+      // are already represented as candidates (avoids duplicate-
+      // suggestion noise).
       const committedSongIds = new Set(
         candidates
-          .filter((c) => c.committedAt != null && c.song?.id)
+          .filter((c) => c.song?.id && slotIndexBySongId.has(c.song.id))
           .map((c) => c.song!.id),
       )
       const alreadyInPlan = (items ?? [])
@@ -857,10 +773,6 @@ export function usePlanState(
               matchStatus: 'checking',
               decision: 'pending',
               addedAt: now,
-              assignedSlotItemId: null,
-              committedAt: null,
-              priorSlotTitle: null,
-              commitPending: false,
             }
             minted.push(c)
             titleById.set(c.id, c.suggestion.title)
@@ -883,9 +795,40 @@ export function usePlanState(
           )
           if (result.changedIds.length > 0) setRejectedPoolOpen(true)
         } else if (action.kind === 'set_slot_contents') {
+          // The AI's tool surface uses {slotIndex, candidateId};
+          // translate to the song-ref Assignment shape the resolver
+          // expects. Lookup candidate by id; pull song.id +
+          // suggestion.title. Skip + warn for unmatched candidates.
+          const candById = new Map(candidates.map((c) => [c.id, c]))
+          const translated: Assignment[] = []
+          const warnings: string[] = []
+          for (const a of action.assignments) {
+            if (a.candidateId == null) {
+              translated.push({ slotIndex: a.slotIndex, song: null })
+              continue
+            }
+            const c = candById.get(a.candidateId)
+            if (!c) {
+              warnings.push(
+                `AI referenced an unknown candidate (${a.candidateId}) — skipped`,
+              )
+              continue
+            }
+            if (!c.song?.id) {
+              warnings.push(
+                `AI tried to commit "${c.suggestion.title}" but it isn't matched to a song in your Planning Center library — skipped`,
+              )
+              continue
+            }
+            translated.push({
+              slotIndex: a.slotIndex,
+              song: { id: c.song.id, title: c.suggestion.title },
+            })
+          }
+          for (const w of warnings) appendSystemMessage(`⚠ ${w}`)
           const plan = resolvePlan(
-            action.assignments,
-            { items: items ?? [], candidates, slotPlaceholders },
+            translated,
+            { items: items ?? [], slotPlaceholders },
             { autoRefresh },
           )
           const result = await executePlan(plan, executorDeps, {
@@ -943,13 +886,10 @@ export function usePlanState(
       if (pcoWritesFired) {
         try {
           await refreshPlanState()
-          setCandidates((prev) =>
-            prev.map((c) =>
-              c.commitPending ? { ...c, commitPending: false } : c,
-            ),
-          )
         } catch {
-          // Refresh is best-effort.
+          // Refresh is best-effort. Items state still reflects
+          // optimistic updates from the executor — slightly stale
+          // but not incorrect.
         }
       }
     } catch (e) {
@@ -1004,5 +944,6 @@ export function usePlanState(
     refreshPlanState,
     fallbackSlotTitle,
     isGenerating: generating,
+    isCandidateCommitted,
   }
 }

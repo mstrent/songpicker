@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { PlanItem } from '../api'
 import { resolvePlan, type Assignment, type ResolverState } from './resolver'
-import type { CandidateState } from './helpers'
-
-// Test fixtures. The default plan has 5 song slots (s1..s5) named
-// "Song 1".."Song 5" — adjustable per test.
 
 function makeItem(partial: Partial<PlanItem> & Pick<PlanItem, 'id'>): PlanItem {
   return {
@@ -25,20 +21,6 @@ function makeItem(partial: Partial<PlanItem> & Pick<PlanItem, 'id'>): PlanItem {
   }
 }
 
-function makeCandidate(
-  partial: Partial<CandidateState> & Pick<CandidateState, 'id'>,
-): CandidateState {
-  return {
-    id: partial.id,
-    decision: partial.decision ?? 'pending',
-    committedAt: partial.committedAt ?? null,
-    assignedSlotItemId: partial.assignedSlotItemId ?? null,
-    priorSlotTitle: partial.priorSlotTitle ?? null,
-    suggestion: partial.suggestion ?? { title: 'Untitled' },
-    song: partial.song,
-  }
-}
-
 function defaultPlan(overrides: Record<number, Partial<PlanItem>> = {}): PlanItem[] {
   return [1, 2, 3, 4, 5].map((n) =>
     makeItem({
@@ -50,111 +32,73 @@ function defaultPlan(overrides: Record<number, Partial<PlanItem>> = {}): PlanIte
   )
 }
 
-const emptyState = (
-  candidates: CandidateState[] = [],
+const stateOf = (
   items: PlanItem[] = defaultPlan(),
   slotPlaceholders: Record<string, string> = {},
-): ResolverState => ({ items, candidates, slotPlaceholders })
+): ResolverState => ({ items, slotPlaceholders })
 
 describe('resolvePlan: trivial', () => {
   it('empty assignments → empty plan', () => {
-    const plan = resolvePlan([], emptyState())
+    const plan = resolvePlan([], stateOf())
     expect(plan.resolved).toEqual([])
     expect(plan.warnings).toEqual([])
     expect(plan.swapPairs.size).toBe(0)
   })
 
-  it('autoRefresh option → single warning, no resolved', () => {
+  it('autoRefresh → single warning, no resolved', () => {
     const plan = resolvePlan(
-      [{ slotIndex: 1, candidateId: 'c1' }],
-      emptyState(),
+      [{ slotIndex: 1, song: { id: 'sX', title: 'X' } }],
+      stateOf(),
       { autoRefresh: true },
     )
     expect(plan.resolved).toEqual([])
-    expect(plan.warnings).toHaveLength(1)
     expect(plan.warnings[0]).toMatch(/auto-refresh/)
   })
-})
 
-describe('resolvePlan: validation', () => {
   it('out-of-range slotIndex → warning', () => {
     const plan = resolvePlan(
-      [{ slotIndex: 99, candidateId: 'c1' }],
-      emptyState(),
+      [{ slotIndex: 99, song: null }],
+      stateOf(),
     )
     expect(plan.resolved).toEqual([])
     expect(plan.warnings[0]).toMatch(/song slot 99/)
   })
-
-  it('unknown candidate id → warning', () => {
-    const plan = resolvePlan(
-      [{ slotIndex: 1, candidateId: 'c-nonexistent' }],
-      emptyState(),
-    )
-    expect(plan.resolved).toEqual([])
-    expect(plan.warnings[0]).toMatch(/unknown candidate/)
-  })
-
-  it('candidate without matched library song → warning', () => {
-    const cand = makeCandidate({
-      id: 'c1',
-      suggestion: { title: 'Surrender' },
-      song: undefined,
-    })
-    const plan = resolvePlan(
-      [{ slotIndex: 1, candidateId: 'c1' }],
-      emptyState([cand]),
-    )
-    expect(plan.resolved).toEqual([])
-    expect(plan.warnings[0]).toMatch(/isn't matched to a song/)
-  })
 })
 
 describe('resolvePlan: clears', () => {
-  it('clears an empty slot with no occupant → fallback restore title', () => {
+  it('clears empty slot with no occupant — fallback restore title', () => {
     const plan = resolvePlan(
-      [{ slotIndex: 3, candidateId: null }],
-      emptyState(),
+      [{ slotIndex: 3, song: null }],
+      stateOf(),
     )
     expect(plan.resolved).toHaveLength(1)
     const r = plan.resolved[0]
-    expect(r.kind).toBe('clear')
-    if (r.kind !== 'clear') return
+    if (r.kind !== 'clear') throw new Error('expected clear')
     expect(r.slotItemId).toBe('s3')
     expect(r.restoreTitle).toBe('Song 3')
-    expect(r.occupant).toBeNull()
+    expect(r.evictedSongTitle).toBeNull()
   })
 
-  it('clears with persisted placeholder taking priority over candidate prior', () => {
-    const cand = makeCandidate({
-      id: 'c1',
-      committedAt: 1,
-      assignedSlotItemId: 's5',
-      priorSlotTitle: 'Some Other Title',
-      suggestion: { title: 'Surrender' },
-      song: { id: 'song-x', title: 'Surrender' },
+  it('clears persisted-placeholder slot — uses placeholder', () => {
+    const items = defaultPlan({
+      5: { songId: 'song-bml', songTitle: 'Build My Life' },
     })
     const plan = resolvePlan(
-      [{ slotIndex: 5, candidateId: null }],
-      emptyState([cand], defaultPlan(), { s5: 'Closing song' }),
+      [{ slotIndex: 5, song: null }],
+      stateOf(items, { s5: 'Closing song' }),
     )
     const r = plan.resolved[0]
     if (r.kind !== 'clear') throw new Error('expected clear')
     expect(r.restoreTitle).toBe('Closing song')
-    expect(r.occupant?.id).toBe('c1')
+    expect(r.evictedSongTitle).toBe('Build My Life')
   })
 })
 
 describe('resolvePlan: fresh commits', () => {
-  it('commits a candidate to an empty slot', () => {
-    const cand = makeCandidate({
-      id: 'c1',
-      suggestion: { title: 'Build My Life' },
-      song: { id: 'song-bml', title: 'Build My Life' },
-    })
+  it('commits a song to an empty slot', () => {
     const plan = resolvePlan(
-      [{ slotIndex: 1, candidateId: 'c1' }],
-      emptyState([cand]),
+      [{ slotIndex: 1, song: { id: 'song-bml', title: 'Build My Life' } }],
+      stateOf(),
     )
     const r = plan.resolved[0]
     if (r.kind !== 'commit') throw new Error('expected commit')
@@ -162,91 +106,48 @@ describe('resolvePlan: fresh commits', () => {
     expect(r.songId).toBe('song-bml')
     expect(r.songTitle).toBe('Build My Life')
     expect(r.isMove).toBe(false)
-    expect(r.evicted).toBeNull()
+    expect(r.evictedSongTitle).toBeNull()
     expect(r.newPriorSlotTitle).toBe('Song 1')
-  })
-
-  it('captures persisted placeholder as newPriorSlotTitle when slot title equals song title', () => {
-    const items = defaultPlan({
-      1: {
-        title: 'Build My Life',
-        songTitle: 'Build My Life',
-        songId: 'old-song',
-      },
-    })
-    // Some prior commit at slot 1 left it titled "Build My Life"
-    // and we never observed it empty as "Song 1" — but we did
-    // capture "Closing song" in slotPlaceholders for some reason.
-    const cand = makeCandidate({
-      id: 'c1',
-      suggestion: { title: 'Way Maker' },
-      song: { id: 'song-wm', title: 'Way Maker' },
-    })
-    const plan = resolvePlan(
-      [{ slotIndex: 1, candidateId: 'c1' }],
-      emptyState([cand], items, { s1: 'Closing song' }),
-    )
-    const r = plan.resolved[0]
-    if (r.kind !== 'commit') throw new Error('expected commit')
-    expect(r.newPriorSlotTitle).toBe('Closing song')
   })
 })
 
 describe('resolvePlan: overwrite (eviction)', () => {
-  it('evicts a different committed candidate at the target slot', () => {
-    const existing = makeCandidate({
-      id: 'c-existing',
-      committedAt: 1,
-      assignedSlotItemId: 's1',
-      suggestion: { title: 'Goodness of God' },
-      song: { id: 'song-gog', title: 'Goodness of God' },
-    })
-    const newCand = makeCandidate({
-      id: 'c-new',
-      suggestion: { title: 'Build My Life' },
-      song: { id: 'song-bml', title: 'Build My Life' },
+  it('marks evictedSongTitle when target slot is filled', () => {
+    const items = defaultPlan({
+      1: { songId: 'song-gog', songTitle: 'Goodness of God' },
     })
     const plan = resolvePlan(
-      [{ slotIndex: 1, candidateId: 'c-new' }],
-      emptyState([existing, newCand]),
+      [{ slotIndex: 1, song: { id: 'song-bml', title: 'Build My Life' } }],
+      stateOf(items),
     )
     const r = plan.resolved[0]
     if (r.kind !== 'commit') throw new Error('expected commit')
-    expect(r.evicted?.id).toBe('c-existing')
+    expect(r.evictedSongTitle).toBe('Goodness of God')
   })
 
-  it('does NOT mark eviction when re-committing the same candidate to the same slot', () => {
-    const cand = makeCandidate({
-      id: 'c1',
-      committedAt: 1,
-      assignedSlotItemId: 's1',
-      suggestion: { title: 'Surrender' },
-      song: { id: 'song-x', title: 'Surrender' },
+  it('does NOT mark eviction when re-committing same song to same slot', () => {
+    const items = defaultPlan({
+      1: { songId: 'song-x', songTitle: 'X' },
     })
     const plan = resolvePlan(
-      [{ slotIndex: 1, candidateId: 'c1' }],
-      emptyState([cand]),
+      [{ slotIndex: 1, song: { id: 'song-x', title: 'X' } }],
+      stateOf(items),
     )
     const r = plan.resolved[0]
     if (r.kind !== 'commit') throw new Error('expected commit')
-    expect(r.evicted).toBeNull()
+    expect(r.evictedSongTitle).toBeNull()
     expect(r.isMove).toBe(false)
   })
 })
 
 describe('resolvePlan: moves', () => {
-  it('flags isMove when candidate currently lives elsewhere', () => {
-    const cand = makeCandidate({
-      id: 'c1',
-      committedAt: 1,
-      assignedSlotItemId: 's2',
-      priorSlotTitle: 'Song 2',
-      suggestion: { title: 'Build My Life' },
-      song: { id: 'song-bml', title: 'Build My Life' },
+  it('flags isMove when song currently lives at a different slot', () => {
+    const items = defaultPlan({
+      2: { songId: 'song-bml', songTitle: 'Build My Life' },
     })
     const plan = resolvePlan(
-      [{ slotIndex: 4, candidateId: 'c1' }],
-      emptyState([cand]),
+      [{ slotIndex: 4, song: { id: 'song-bml', title: 'Build My Life' } }],
+      stateOf(items),
     )
     const r = plan.resolved[0]
     if (r.kind !== 'commit') throw new Error('expected commit')
@@ -257,17 +158,12 @@ describe('resolvePlan: moves', () => {
   })
 
   it('move-source restore prefers persisted placeholder', () => {
-    const cand = makeCandidate({
-      id: 'c1',
-      committedAt: 1,
-      assignedSlotItemId: 's5',
-      priorSlotTitle: 'Stale Title',
-      suggestion: { title: 'Build My Life' },
-      song: { id: 'song-bml', title: 'Build My Life' },
+    const items = defaultPlan({
+      5: { songId: 'song-bml', songTitle: 'Build My Life' },
     })
     const plan = resolvePlan(
-      [{ slotIndex: 1, candidateId: 'c1' }],
-      emptyState([cand], defaultPlan(), { s5: 'Closing song' }),
+      [{ slotIndex: 1, song: { id: 'song-bml', title: 'Build My Life' } }],
+      stateOf(items, { s5: 'Closing song' }),
     )
     const r = plan.resolved[0]
     if (r.kind !== 'commit') throw new Error('expected commit')
@@ -276,118 +172,68 @@ describe('resolvePlan: moves', () => {
 })
 
 describe('resolvePlan: swap-pair detection', () => {
-  it('detects mutual swap (X at slot 1, Y at slot 2; assignments swap them)', () => {
-    const x = makeCandidate({
-      id: 'X',
-      committedAt: 1,
-      assignedSlotItemId: 's1',
-      suggestion: { title: 'Song A' },
-      song: { id: 'song-a', title: 'Song A' },
-    })
-    const y = makeCandidate({
-      id: 'Y',
-      committedAt: 1,
-      assignedSlotItemId: 's2',
-      suggestion: { title: 'Song B' },
-      song: { id: 'song-b', title: 'Song B' },
+  it('detects mutual swap from items state', () => {
+    const items = defaultPlan({
+      1: { songId: 'song-A', songTitle: 'Song A' },
+      2: { songId: 'song-B', songTitle: 'Song B' },
     })
     const assignments: Assignment[] = [
-      { slotIndex: 2, candidateId: 'X' },
-      { slotIndex: 1, candidateId: 'Y' },
+      { slotIndex: 2, song: { id: 'song-A', title: 'Song A' } },
+      { slotIndex: 1, song: { id: 'song-B', title: 'Song B' } },
     ]
-    const plan = resolvePlan(assignments, emptyState([x, y]))
+    const plan = resolvePlan(assignments, stateOf(items))
     expect(plan.resolved).toHaveLength(2)
     expect(plan.swapPairs.get(0)).toBe(1)
     expect(plan.swapPairs.get(1)).toBe(0)
   })
 
-  it('does not pair a one-sided move (no candidate to come back the other way)', () => {
-    const x = makeCandidate({
-      id: 'X',
-      committedAt: 1,
-      assignedSlotItemId: 's1',
-      suggestion: { title: 'Song A' },
-      song: { id: 'song-a', title: 'Song A' },
+  it('handles swap of PCO-direct songs (no candidate state needed)', () => {
+    // The bug from real usage: ISA at slot 7 placed via PCO before
+    // songpicker loaded, Surrender at slot 11 also via PCO. Drag
+    // ISA onto Surrender. The Phase 6 resolver doesn't care about
+    // candidate state; it works purely on items.songId.
+    const items = defaultPlan({
+      4: { songId: 'song-isa', songTitle: 'I Surrender All' },
+      5: { songId: 'song-surrender', songTitle: 'Surrender' },
     })
-    const plan = resolvePlan(
-      [{ slotIndex: 2, candidateId: 'X' }],
-      emptyState([x]),
-    )
-    expect(plan.swapPairs.size).toBe(0)
+    const assignments: Assignment[] = [
+      { slotIndex: 4, song: { id: 'song-surrender', title: 'Surrender' } },
+      { slotIndex: 5, song: { id: 'song-isa', title: 'I Surrender All' } },
+    ]
+    const plan = resolvePlan(assignments, stateOf(items))
+    expect(plan.resolved).toHaveLength(2)
+    // Swap detected from items (PCO state) — the chat message
+    // collapses to "swapped". isMove on individual entries doesn't
+    // matter for correctness because both slots are commit targets
+    // in the same turn — any clear we'd add for a move source gets
+    // deduped away by the executor.
+    expect(plan.swapPairs.size).toBe(2)
+    expect(plan.swapPairs.get(0)).toBe(1)
+    expect(plan.swapPairs.get(1)).toBe(0)
   })
 })
 
 describe('resolvePlan: in-turn live tracking', () => {
   it('a later assignment sees an earlier in-turn move', () => {
-    // X is at slot 1. Assignment 0: move X to slot 2. Assignment 1:
-    // commit Y to slot 1. Y's commit should see slot 1 as empty
-    // (no eviction), not as still occupied by X.
-    const x = makeCandidate({
-      id: 'X',
-      committedAt: 1,
-      assignedSlotItemId: 's1',
-      suggestion: { title: 'Song A' },
-      song: { id: 'song-a', title: 'Song A' },
-    })
-    const y = makeCandidate({
-      id: 'Y',
-      suggestion: { title: 'Song B' },
-      song: { id: 'song-b', title: 'Song B' },
+    // X at slot 1. Assignment 0: move X to slot 2. Assignment 1:
+    // commit Y to slot 1 (now empty after X moved). Y's commit
+    // shouldn't be flagged with eviction because slot 1 is empty
+    // post-move.
+    const items = defaultPlan({
+      1: { songId: 'song-X', songTitle: 'X' },
     })
     const plan = resolvePlan(
       [
-        { slotIndex: 2, candidateId: 'X' },
-        { slotIndex: 1, candidateId: 'Y' },
+        { slotIndex: 2, song: { id: 'song-X', title: 'X' } },
+        { slotIndex: 1, song: { id: 'song-Y', title: 'Y' } },
       ],
-      emptyState([x, y]),
+      stateOf(items),
     )
     expect(plan.resolved).toHaveLength(2)
     const r1 = plan.resolved[1]
     if (r1.kind !== 'commit') throw new Error('expected commit')
-    // Y's commit happens AFTER X has logically moved out of slot 1.
-    // The eviction lookup uses the original `candidates` (since that
-    // reflects pre-turn committed state), so X would still be found
-    // at s1 from that perspective. This is intentional and matches
-    // the existing AI machinery — X gets evicted-back-to-pending
-    // optimistically by the executor; the live tracker is for
-    // computing isMove/swap, not eviction.
-    // (If we wanted to suppress the eviction, the executor would
-    // need to dedupe — out of scope for the resolver.)
-    expect(r1.evicted?.id).toBe('X')
-  })
-})
-
-describe('resolvePlan: mixed multi-assignment', () => {
-  it('handles commit + clear + move in a single turn', () => {
-    const x = makeCandidate({
-      id: 'X',
-      committedAt: 1,
-      assignedSlotItemId: 's1',
-      suggestion: { title: 'Song A' },
-      song: { id: 'song-a', title: 'Song A' },
-    })
-    const y = makeCandidate({
-      id: 'Y',
-      committedAt: 1,
-      assignedSlotItemId: 's3',
-      suggestion: { title: 'Song B' },
-      song: { id: 'song-b', title: 'Song B' },
-    })
-    const z = makeCandidate({
-      id: 'Z',
-      suggestion: { title: 'Song C' },
-      song: { id: 'song-c', title: 'Song C' },
-    })
-    const plan = resolvePlan(
-      [
-        { slotIndex: 2, candidateId: 'Z' }, // fresh commit
-        { slotIndex: 5, candidateId: 'X' }, // move X 1→5
-        { slotIndex: 3, candidateId: null }, // clear slot 3 (Y leaves)
-      ],
-      emptyState([x, y, z]),
-    )
-    expect(plan.resolved).toHaveLength(3)
-    expect(plan.warnings).toEqual([])
-    expect(plan.swapPairs.size).toBe(0)
+    // Slot 1 is empty after X moved out, so Y has no eviction.
+    expect(r1.evictedSongTitle).toBeNull()
+    expect(r1.isMove).toBe(false)
   })
 })

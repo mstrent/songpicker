@@ -64,6 +64,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setDecision,
     clearCandidates,
     refreshPlanState,
+    isCandidateCommitted,
   } = usePlanState(serviceTypeId, planId)
 
   // UI-only state. Everything below this line is rendering / drag
@@ -357,7 +358,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       )
                       if (candidate) {
                         void performUiAction(
-                          compileDropCandidateOnSlot(candidate.id, it, items ?? []),
+                          compileDropCandidateOnSlot(candidate, it, items ?? []),
                         )
                       }
                     } else if (dragKind === 'slot' && dragSourceId) {
@@ -741,7 +742,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           <ul>
             {active.map((c, i) => {
               const matched = c.matchStatus === 'matched' && c.song
-              const candidateDraggable = !!matched && !c.committedAt
+              const isCommitted = isCandidateCommitted(c)
+              const candidateDraggable = !!matched && !isCommitted
               const candidateBeingDragged =
                 dragKind === 'candidate' && dragSourceId === c.id
               // Stagger entrance — CSS animation reads this delay so
@@ -884,7 +886,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                         type="button"
                         className={`decision-btn decision-reject icon-text${c.decision === 'reject' ? ' on' : ''}`}
                         onClick={() => setDecision(c.id, 'reject')}
-                        disabled={!!c.committedAt}
+                        disabled={isCommitted}
                         title={
                           c.decision === 'reject'
                             ? 'Click again to undo'
@@ -895,7 +897,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                         Reject
                       </button>
 
-                      {matched && c.committedAt && (
+                      {matched && isCommitted && (
                         // Service order on the left is the source of
                         // truth for WHICH slot. Showing a slot label
                         // here was nonsensical anyway — PCO overwrites
@@ -906,7 +908,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                         </span>
                       )}
 
-                      {matched && !c.committedAt && (() => {
+                      {matched && !isCommitted && (() => {
                         // Replaces the old <select> with a button +
                         // popover. The button is the primary "action"
                         // affordance on each card and gets accent
@@ -953,7 +955,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                                     onClick={() => {
                                       setOpenCommitMenuId(null)
                                       void performUiAction(
-                                        compileCommitToSlot(c.id, s, items ?? []),
+                                        compileCommitToSlot(c, s, items ?? []),
                                       )
                                     }}
                                   >
