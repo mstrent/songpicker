@@ -1327,39 +1327,77 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       (items ?? []).filter(isSongSlot).findIndex((it) => it.id === slotItem.id) + 1
     const slotLabel = slotItem.title || fallbackSlotTitle(slotItem.id)
     const newPriorSlotTitle = placeholderForSlot(slotItem)
+    // Overwrite semantics: if a different committed candidate is
+    // sitting in the target slot, evict it back to the candidate
+    // pool (decision stays 'pending', commit state cleared) so the
+    // user can re-pick it later. Match the AI's set_slot_contents
+    // path so user-driven and AI-driven overwrites behave the same.
+    // Title for the system message uses the candidate's suggestion
+    // title when we know it, falling back to the slot's PCO songTitle
+    // when the displaced song was placed via PCO directly.
+    const evictedCandidate = candidates.find(
+      (c) =>
+        c.id !== candidate.id &&
+        c.assignedSlotItemId === slotItem.id &&
+        c.committedAt != null,
+    )
+    const evictedTitle =
+      evictedCandidate?.suggestion.title ?? slotItem.songTitle ?? null
+    const evictionRollback = evictedCandidate
+      ? {
+          id: evictedCandidate.id,
+          committedAt: evictedCandidate.committedAt,
+          assignedSlotItemId: evictedCandidate.assignedSlotItemId,
+          priorSlotTitle: evictedCandidate.priorSlotTitle,
+        }
+      : null
     const rollbackSnapshot = {
       decision: candidate.decision,
       committedAt: candidate.committedAt,
       assignedSlotItemId: candidate.assignedSlotItemId,
       priorSlotTitle: candidate.priorSlotTitle,
     }
-    // Optimistic flip. commitPending shields the candidate from the
-    // reconciliation effect until items refreshes (see CLAUDE.md note
-    // on the batching pattern).
+    // Optimistic flip. commitPending shields the new candidate from
+    // the reconciliation effect until items refreshes (see CLAUDE.md
+    // note on the batching pattern). The evicted candidate (if any)
+    // is reset in the same setCandidates call so the UI never
+    // momentarily shows two candidates committed to the same slot.
     setCandidates((prev) =>
-      prev.map((c) =>
-        c.id === candidate.id
-          ? {
-              ...c,
-              committedAt: Date.now(),
-              assignedSlotItemId: slotItem.id,
-              priorSlotTitle: newPriorSlotTitle,
-              commitPending: true,
-            }
-          : c,
-      ),
+      prev.map((c) => {
+        if (c.id === candidate.id) {
+          return {
+            ...c,
+            committedAt: Date.now(),
+            assignedSlotItemId: slotItem.id,
+            priorSlotTitle: newPriorSlotTitle,
+            commitPending: true,
+          }
+        }
+        if (evictedCandidate && c.id === evictedCandidate.id) {
+          return {
+            ...c,
+            committedAt: null,
+            assignedSlotItemId: null,
+            priorSlotTitle: null,
+          }
+        }
+        return c
+      }),
     )
+    const replaceSuffix = slotItem.songId
+      ? ` (replacing "${evictedTitle ?? '(song)'}")`
+      : ''
     if (source === 'ai') {
       appendSystemMessage(
         isMove
-          ? `🤖 AI moved "${songTitle}" from song slot ${fromSlotIndex ?? '?'} to song slot ${slotIndex}`
-          : `🤖 AI committed "${songTitle}" to song slot ${slotIndex}`,
+          ? `🤖 AI moved "${songTitle}" from song slot ${fromSlotIndex ?? '?'} to song slot ${slotIndex}${replaceSuffix}`
+          : `🤖 AI committed "${songTitle}" to song slot ${slotIndex}${replaceSuffix}`,
       )
     } else {
       appendSystemMessage(
         isMove
-          ? `↕ Moved "${songTitle}" → ${slotLabel}`
-          : `↗ Committed "${songTitle}" → ${slotLabel}`,
+          ? `↕ Moved "${songTitle}" → ${slotLabel}${replaceSuffix}`
+          : `↗ Committed "${songTitle}" → ${slotLabel}${replaceSuffix}`,
       )
     }
     try {
@@ -1389,11 +1427,20 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     } catch (e) {
       const err = e as Error
       setCandidates((prev) =>
-        prev.map((c) =>
-          c.id === candidate.id
-            ? { ...c, ...rollbackSnapshot, commitPending: false }
-            : c,
-        ),
+        prev.map((c) => {
+          if (c.id === candidate.id) {
+            return { ...c, ...rollbackSnapshot, commitPending: false }
+          }
+          if (evictionRollback && c.id === evictionRollback.id) {
+            return {
+              ...c,
+              committedAt: evictionRollback.committedAt,
+              assignedSlotItemId: evictionRollback.assignedSlotItemId,
+              priorSlotTitle: evictionRollback.priorSlotTitle,
+            }
+          }
+          return c
+        }),
       )
       const failMsg =
         source === 'ai'
@@ -1929,8 +1976,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                   it.songAuthor ||
                   it.songCcli)
               const draggable = isSong && filled
-              const isCommitTarget =
-                dragKind === 'candidate' && isSong && !filled
+              // Candidates can be dropped onto any song slot — empty
+              // slots commit fresh, filled slots replace the existing
+              // song (and return the displaced song to the candidate
+              // pool as uncommitted).
+              const isCommitTarget = dragKind === 'candidate' && isSong
               // Only song slots (filled OR empty) accept reorder drops —
               // dropping onto a Welcome / Announcements / Sermon item
               // would be confusing because those aren't the "spots"
@@ -1988,7 +2038,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       const candidate = candidates.find(
                         (c) => c.id === dragSourceId,
                       )
-                      if (candidate && !it.songId) {
+                      if (candidate) {
                         void placeSongAction({
                           candidate,
                           slotItem: it,
