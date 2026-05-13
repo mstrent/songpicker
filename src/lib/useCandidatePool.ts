@@ -1,11 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  clearSongFromSlot,
   loadSession,
-  placeSongInSlot,
   saveSession,
-  savePlanNotes,
-  savePlanTheme,
   searchSongs,
   suggestSongs,
   type AiAction,
@@ -14,46 +10,29 @@ import {
   type Decision,
   type MatchStatus,
   type PersistedCandidate,
-  type Plan,
   type PlanItem,
-  type PlanNote,
   type SessionMessage,
   type Song,
   type SongSuggestion,
 } from './api'
-import {
-  invalidatePlanContext,
-  loadPlanContext,
-  patchCachedNotes,
-  patchCachedTheme,
-} from './cache'
 import { isSongSlot } from './songSlots'
 import {
   applyDecisionChange,
   type ApplyDecisionDeps,
 } from './planActions/decisions'
-import {
-  resolvePlan,
-  type Assignment,
-} from './planActions/resolver'
-import {
-  executePlan,
-  type ExecutorDeps,
-} from './planActions/executor'
-import {
-  compileSlotToSlot,
-} from './planActions/compile'
-import {
-  fallbackSlotTitle as fallbackSlotTitleHelper,
-} from './planActions/helpers'
+import type { Assignment } from './planActions/resolver'
+import type { PlanDataApi } from './usePlanData'
 
-// SPA-internal candidate shape. Phase 6 dropped committedAt /
-// assignedSlotItemId / priorSlotTitle / commitPending — those were
-// derived/transient state that drifted from PCO. The candidate now
-// just carries: identity, the AI's suggestion, optional matched
-// library song, decision (pending|reject), and a few timestamps /
-// errors. "Is this candidate currently committed?" is computed by
-// the UI from items.songId === candidate.song?.id.
+// Songpicker's candidate pool — AI-suggested songs the user is
+// considering, their decisions (pending / reject), the chat log
+// transcript, and the AI driver. Depends on usePlanData for items
+// state (to derive "is this candidate currently in the plan?")
+// and for the slot-state operation entry point (so AI tool calls
+// land through the same path UI flows do).
+//
+// The pool is upstream of slot-filling — see CLAUDE.md
+// (Architecture philosophy) and docs/unification-plan.md.
+
 export interface CandidateMatch {
   id: string
   suggestion: SongSuggestion
@@ -91,11 +70,8 @@ function toPersisted(c: CandidateMatch): PersistedCandidate {
     error: c.error ?? null,
     decision: c.decision,
     addedAt: c.addedAt,
-    // Phase 6: assignedSlotItemId / committedAt / priorSlotTitle
-    // are no longer on CandidateMatch. Persistence keeps them in
-    // the schema (PersistedCandidate is shared with the Cloud
-    // Function) but always writes nulls — values are derived from
-    // PCO state at load time.
+    // Derived state — always nulls in persistence; recomputed from
+    // PCO items at render time (see Phase 6 in unification-plan.md).
     assignedSlotItemId: null,
     committedAt: null,
     priorSlotTitle: null,
@@ -128,44 +104,6 @@ function fromPersisted(p: PersistedCandidate): CandidateMatch {
     decision: p.decision,
     addedAt: p.addedAt,
   }
-}
-
-function formatNotesSource(notes: readonly PlanNote[]): string {
-  if (!notes || notes.length === 0) return ''
-  return notes
-    .filter((n) => n.content && n.content.trim())
-    .map((n) =>
-      n.category ? `[${n.category}] ${n.content.trim()}` : n.content.trim(),
-    )
-    .join('\n\n')
-}
-
-function buildServiceOrderText(items: PlanItem[] | null): string {
-  if (!items || items.length === 0) return ''
-  const totalSongSlots = items.filter(isSongSlot).length
-  let songIdx = 0
-  return items
-    .map((it) => {
-      if (!isSongSlot(it)) {
-        return `${it.sequence}. ${it.title || '(no title)'}`
-      }
-      songIdx += 1
-      const positionTag = `[song slot ${songIdx} of ${totalSongSlots}]`
-      const base = `${it.sequence}. ${positionTag}`
-      if (it.songId) {
-        const disamb = formatSongDisamb(it)
-        return `${base} — picked: ${it.songTitle ?? '(song)'}${disamb ? ` ${disamb}` : ''}`
-      }
-      return `${base} — (empty, needs a pick)`
-    })
-    .join('\n')
-}
-
-function formatSongDisamb(it: PlanItem): string {
-  const parts: string[] = []
-  if (it.songAuthor) parts.push(`by ${it.songAuthor}`)
-  if (it.songCcli) parts.push(`CCLI ${it.songCcli}`)
-  return parts.length > 0 ? `(${parts.join(', ')})` : ''
 }
 
 const HISTORY_PROSE_CAP = 8
@@ -243,136 +181,102 @@ function buildAiHistory(messages: SessionMessage[]): ConversationTurn[] {
     } else if (m.role === 'assistant') {
       history.push({ role: 'assistant', content: m.content })
     } else {
-      // system events render as a plain user-side note in history
       history.push({ role: 'user', content: `[event] ${m.content}` })
     }
   }
   return history
 }
 
-export interface PlanStateApi {
-  // Loaded
-  plan: Plan | null
-  notes: PlanNote[] | null
-  items: PlanItem[] | null
-  slotPlaceholders: Record<string, string>
-  loadError: string | null
-  // Per-plan editable
-  theme: string
-  themeSource: string
-  notesText: string
-  notesSource: string
-  criteria: string
-  // Pool
+function buildServiceOrderText(items: PlanItem[] | null): string {
+  if (!items || items.length === 0) return ''
+  const totalSongSlots = items.filter(isSongSlot).length
+  let songIdx = 0
+  return items
+    .map((it) => {
+      if (!isSongSlot(it)) {
+        return `${it.sequence}. ${it.title || '(no title)'}`
+      }
+      songIdx += 1
+      const positionTag = `[song slot ${songIdx} of ${totalSongSlots}]`
+      const base = `${it.sequence}. ${positionTag}`
+      if (it.songId) {
+        const disambParts: string[] = []
+        if (it.songAuthor) disambParts.push(`by ${it.songAuthor}`)
+        if (it.songCcli) disambParts.push(`CCLI ${it.songCcli}`)
+        const disamb = disambParts.length > 0 ? `(${disambParts.join(', ')})` : ''
+        return `${base} — picked: ${it.songTitle ?? '(song)'}${disamb ? ` ${disamb}` : ''}`
+      }
+      return `${base} — (empty, needs a pick)`
+    })
+    .join('\n')
+}
+
+export interface CandidatePoolApi {
   candidates: CandidateMatch[]
   messages: SessionMessage[]
   sessionLoaded: boolean
-  // Status
+  criteria: string
+  setCriteria: (s: string) => void
   generating: boolean
   generateError: string | null
-  rejectedPoolOpen: boolean
-  // Setters intended for UI
-  setTheme: (s: string) => void
-  setNotesText: (s: string) => void
-  setCriteria: (s: string) => void
-  setRejectedPoolOpen: (open: boolean) => void
   setGenerateError: (s: string | null) => void
-  /** Reset to the Planning Center source value AND immediately
-   *  clear the saved override server-side (rather than waiting on
-   *  the debounced auto-save). */
-  resetTheme: () => void
-  resetNotes: () => void
-  // Actions
+  rejectedPoolOpen: boolean
+  setRejectedPoolOpen: (open: boolean) => void
   handleSuggest: (opts?: { autoRefresh?: boolean }) => Promise<void>
-  performUiAction: (assignments: readonly Assignment[]) => Promise<void>
-  reorderSlotItem: (draggedId: string, targetId: string) => Promise<void>
   setDecision: (id: string, next: Decision) => void
   clearCandidates: () => void
   appendSystemMessage: (msg: string) => void
-  /** Used by ArrangementKeyEditor's onSaved callback. */
-  refreshPlanState: () => Promise<void>
-  /** Position-based "Song N" fallback bound to current items. */
-  fallbackSlotTitle: (itemId: string) => string
-  /** True when the AI is mid-stream — used to disable inputs. */
-  isGenerating: boolean
   /** True iff this candidate's matched library song is currently
-   *  linked to a slot in the PCO plan. Phase 6 derived state — the
-   *  candidate doesn't store this; we look it up on every render. */
+   *  linked to a slot in the PCO plan. Phase 6 derived state. */
   isCandidateCommitted: (candidate: { song?: { id?: string } | null }) => boolean
 }
 
-export function usePlanState(
-  serviceTypeId: string,
+export function useCandidatePool(
   planId: string,
-): PlanStateApi {
-  const [plan, setPlan] = useState<Plan | null>(null)
-  const [notes, setNotes] = useState<PlanNote[] | null>(null)
-  const [items, setItems] = useState<PlanItem[] | null>(null)
-  const [slotPlaceholders, setSlotPlaceholders] = useState<
-    Record<string, string>
-  >({})
-  const [loadError, setLoadError] = useState<string | null>(null)
-
-  const [themeRaw, setThemeRaw] = useState('')
-  const [themeSource, setThemeSource] = useState('')
-  const [notesTextRaw, setNotesTextRaw] = useState('')
-  const [notesSource, setNotesSource] = useState('')
-  const [criteria, setCriteria] = useState('')
-  const [generating, setGenerating] = useState(false)
-  const [generateError, setGenerateError] = useState<string | null>(null)
+  planData: PlanDataApi,
+): CandidatePoolApi {
   const [candidates, setCandidates] = useState<CandidateMatch[]>([])
   const [messages, setMessages] = useState<SessionMessage[]>([])
   const [sessionLoaded, setSessionLoaded] = useState(false)
+  const [criteria, setCriteria] = useState('')
+  const [generating, setGenerating] = useState(false)
+  const [generateError, setGenerateError] = useState<string | null>(null)
   const [rejectedPoolOpen, setRejectedPoolOpen] = useState(false)
 
-  const themeInitialized = useRef(false)
-  const notesInitialized = useRef(false)
-  const userTouchedTheme = useRef(false)
-  const userTouchedNotes = useRef(false)
   const autoRefineTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const unservedRejectsRef = useRef(0)
   const generatingRef = useRef(false)
   const lastSentCandidateIdsRef = useRef<Set<string>>(new Set())
 
-  // Public setters that mark touched + trigger auto-save effect.
-  function setTheme(value: string): void {
-    userTouchedTheme.current = true
-    setThemeRaw(value)
-  }
-  function setNotesText(value: string): void {
-    userTouchedNotes.current = true
-    setNotesTextRaw(value)
-  }
+  // Wire planData's chat-log + error sinks to point at this hook's
+  // setters. planData runs slot-state operations and emits
+  // messages / errors, which need to land on this hook's state.
+  // Using a ref-set-by-effect avoids re-creating planData's
+  // executorDeps every render.
+  useEffect(() => {
+    planData.setAppendSystemMessage((msg: string) => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: newCandidateId(),
+          role: 'system',
+          content: msg,
+          timestamp: Date.now(),
+        },
+      ])
+    })
+    planData.setGenerateErrorHandler((msg: string | null) => {
+      setGenerateError(msg)
+    })
+    // The wiring is component-stable; we only need it set once per
+    // mount of this hook. planData is referentially stable across
+    // renders within the same plan.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-  function resetTheme(): void {
-    userTouchedTheme.current = true
-    setThemeRaw(themeSource)
-    patchCachedTheme(serviceTypeId, planId, '')
-    void savePlanTheme({ planId, theme: '' }).catch(() => {})
-  }
-  function resetNotes(): void {
-    userTouchedNotes.current = true
-    setNotesTextRaw(notesSource)
-    patchCachedNotes(serviceTypeId, planId, '')
-    void savePlanNotes({ planId, notes: '' }).catch(() => {})
-  }
-
-  // Plan + session load (re-runs on plan switch). Resets every piece
-  // of per-plan state so a stale value from the prior plan can't
-  // leak into the new one.
+  // Plan-switch resets pool state.
   useEffect(() => {
     let cancelled = false
-    setLoadError(null)
-    setPlan(null)
-    setNotes(null)
-    setItems(null)
-    setThemeSource('')
-    setNotesSource('')
-    themeInitialized.current = false
-    notesInitialized.current = false
-    userTouchedTheme.current = false
-    userTouchedNotes.current = false
-
     setCandidates([])
     setMessages([])
     setSessionLoaded(false)
@@ -393,34 +297,10 @@ export function usePlanState(
       })
       .catch(() => !cancelled && setSessionLoaded(true))
 
-    loadPlanContext(serviceTypeId, planId)
-      .then((ctx) => {
-        if (cancelled) return
-        setPlan(ctx.plan)
-        setNotes(ctx.notes)
-        setItems(ctx.items)
-        setSlotPlaceholders(ctx.slotPlaceholders)
-        const themeSrc = ctx.plan.seriesTitle ?? ctx.plan.title ?? ''
-        setThemeSource(themeSrc)
-        const notesSrc = formatNotesSource(ctx.notes)
-        setNotesSource(notesSrc)
-        if (!themeInitialized.current) {
-          const saved = ctx.userTheme
-          setThemeRaw(saved && saved.trim() ? saved : themeSrc)
-          themeInitialized.current = true
-        }
-        if (!notesInitialized.current) {
-          const saved = ctx.userNotes
-          setNotesTextRaw(saved && saved.trim() ? saved : notesSrc)
-          notesInitialized.current = true
-        }
-      })
-      .catch((e: Error) => !cancelled && setLoadError(e.message))
-
     return () => {
       cancelled = true
     }
-  }, [serviceTypeId, planId])
+  }, [planId])
 
   useEffect(() => {
     generatingRef.current = generating
@@ -438,43 +318,6 @@ export function usePlanState(
     return () => clearTimeout(id)
   }, [candidates, messages, sessionLoaded, planId])
 
-  // (Phase 6 deleted the reconciliation effect that used to compare
-  // candidates' committedAt to items.songId. Candidate "committed
-  // status" is now derived on every render from items.songId, so
-  // there's no per-candidate state to drift out of sync.)
-
-  // Auto-save theme/notes on change.
-  useEffect(() => {
-    if (!userTouchedTheme.current) return
-    const id = setTimeout(() => {
-      const value = themeRaw === themeSource ? '' : themeRaw
-      patchCachedTheme(serviceTypeId, planId, value)
-      void savePlanTheme({ planId, theme: value }).catch(() => {})
-    }, 600)
-    return () => clearTimeout(id)
-  }, [themeRaw, themeSource, serviceTypeId, planId])
-
-  useEffect(() => {
-    if (!userTouchedNotes.current) return
-    const id = setTimeout(() => {
-      const value = notesTextRaw === notesSource ? '' : notesTextRaw
-      patchCachedNotes(serviceTypeId, planId, value)
-      void savePlanNotes({ planId, notes: value }).catch(() => {})
-    }, 600)
-    return () => clearTimeout(id)
-  }, [notesTextRaw, notesSource, serviceTypeId, planId])
-
-  async function refreshPlanState(): Promise<void> {
-    invalidatePlanContext(serviceTypeId, planId)
-    const fresh = await loadPlanContext(serviceTypeId, planId)
-    setItems(fresh.items)
-    setSlotPlaceholders(fresh.slotPlaceholders)
-  }
-
-  function fallbackSlotTitle(itemId: string): string {
-    return fallbackSlotTitleHelper(itemId, items)
-  }
-
   function appendSystemMessage(content: string): void {
     setMessages((prev) => [
       ...prev,
@@ -487,73 +330,23 @@ export function usePlanState(
     ])
   }
 
-  function searchAndAttachSong(c: CandidateMatch): void {
-    searchSongs({
-      query: c.suggestion.title,
-      ...(c.suggestion.author ? { author: c.suggestion.author } : {}),
-    })
-      .then((sr) => {
-        const match = sr.data.songs[0]
-        setCandidates((prev) =>
-          prev.map((cur) =>
-            cur.id === c.id
-              ? match
-                ? { ...cur, matchStatus: 'matched' as MatchStatus, song: match }
-                : { ...cur, matchStatus: 'unmatched' as MatchStatus }
-              : cur,
-          ),
-        )
-      })
-      .catch((e: Error) => {
-        setCandidates((prev) =>
-          prev.map((cur) =>
-            cur.id === c.id
-              ? { ...cur, matchStatus: 'error' as MatchStatus, error: e.message }
-              : cur,
-          ),
-        )
-      })
-  }
-
-  function executorDepsForCurrent(): ExecutorDeps {
-    return {
-      serviceTypeId,
-      planId,
-      pco: { placeSongInSlot, clearSongFromSlot },
-      setItems,
-      appendSystemMessage,
-      refreshPlanState,
-    }
-  }
-
-  async function performUiAction(
-    assignments: readonly Assignment[],
-  ): Promise<void> {
-    if (assignments.length === 0) return
-    const plan = resolvePlan(assignments as Assignment[], {
-      items: items ?? [],
-      slotPlaceholders,
-    })
-    await executePlan(plan, executorDepsForCurrent(), { source: 'user' })
-  }
-
-  function committedSongIds(): Set<string> {
-    const out = new Set<string>()
-    for (const it of items ?? []) {
-      if (it.songId) out.add(it.songId)
-    }
-    return out
-  }
-
   function isCandidateCommitted(candidate: {
     song?: { id?: string } | null
   }): boolean {
     const id = candidate.song?.id
     if (!id) return false
-    for (const it of items ?? []) {
+    for (const it of planData.items ?? []) {
       if (it.songId === id) return true
     }
     return false
+  }
+
+  function committedSongIdsSet(): Set<string> {
+    const out = new Set<string>()
+    for (const it of planData.items ?? []) {
+      if (it.songId) out.add(it.songId)
+    }
+    return out
   }
 
   function decisionDeps(opts: {
@@ -563,7 +356,7 @@ export function usePlanState(
       setCandidates: (update) =>
         setCandidates((prev) => update(prev) as CandidateMatch[]),
       appendSystemMessage,
-      committedSongIds: committedSongIds(),
+      committedSongIds: committedSongIdsSet(),
       onRejectsLanded: opts.withRejectSignal
         ? (n) => {
             for (let i = 0; i < n; i++) bumpRejectSignal()
@@ -609,47 +402,45 @@ export function usePlanState(
     unservedRejectsRef.current = 0
   }
 
-  async function reorderSlotItem(
-    draggedId: string,
-    targetId: string,
-  ): Promise<void> {
-    if (draggedId === targetId) return
-    const draggedSlot = (items ?? []).find((it) => it.id === draggedId)
-    const targetSlot = (items ?? []).find((it) => it.id === targetId)
-    if (!draggedSlot || !targetSlot) return
-
-    // Phase 6: compileSlotToSlot operates on items.songId only —
-    // PCO-direct songs and candidate-tracked songs go through the
-    // same path. No fallback needed for the both-filled case;
-    // compile produces a swap-pair assignment that the resolver
-    // and executor handle uniformly.
-    const assignments = compileSlotToSlot(
-      draggedSlot,
-      targetSlot,
-      items ?? [],
-    )
-    await performUiAction(assignments)
+  function searchAndAttachSong(c: CandidateMatch): void {
+    searchSongs({
+      query: c.suggestion.title,
+      ...(c.suggestion.author ? { author: c.suggestion.author } : {}),
+    })
+      .then((sr) => {
+        const match = sr.data.songs[0]
+        setCandidates((prev) =>
+          prev.map((cur) =>
+            cur.id === c.id
+              ? match
+                ? { ...cur, matchStatus: 'matched' as MatchStatus, song: match }
+                : { ...cur, matchStatus: 'unmatched' as MatchStatus }
+              : cur,
+          ),
+        )
+      })
+      .catch((e: Error) => {
+        setCandidates((prev) =>
+          prev.map((cur) =>
+            cur.id === c.id
+              ? { ...cur, matchStatus: 'error' as MatchStatus, error: e.message }
+              : cur,
+          ),
+        )
+      })
   }
 
-  // The big AI-turn driver. Streams assistant text + tool actions
-  // and executes them via the shared resolver+executor for slot
-  // changes / decisions / proposals. See docs/unification-plan.md
-  // and the inline comments below.
   async function handleSuggest(opts?: {
     autoRefresh?: boolean
   }): Promise<void> {
     const autoRefresh = opts?.autoRefresh === true
-    if (!themeRaw.trim() || generating) return
+    if (!planData.theme.trim() || generating) return
     if (autoRefineTimer.current) {
       clearTimeout(autoRefineTimer.current)
       autoRefineTimer.current = null
     }
     setGenerating(true)
     setGenerateError(null)
-    patchCachedTheme(serviceTypeId, planId, themeRaw)
-    void savePlanTheme({ planId, theme: themeRaw }).catch(() => {})
-    patchCachedNotes(serviceTypeId, planId, notesTextRaw)
-    void savePlanNotes({ planId, notes: notesTextRaw }).catch(() => {})
 
     const turnUserMessage = autoRefresh ? '' : criteria
     if (!autoRefresh) setCriteria('')
@@ -657,28 +448,14 @@ export function usePlanState(
     let assistantMsgId: string | null = null
 
     try {
+      const items = planData.items
       const songSlotItems = (items ?? []).filter(isSongSlot)
       const totalSongSlots = songSlotItems.length
-      const slotIndexByItemId = new Map<string, number>()
-      const itemIdBySlotIndex = new Map<number, string>()
+      const slotIndexBySongId = new Map<string, number>()
       songSlotItems.forEach((it, idx) => {
-        slotIndexByItemId.set(it.id, idx + 1)
-        itemIdBySlotIndex.set(idx + 1, it.id)
+        if (it.songId) slotIndexBySongId.set(it.songId, idx + 1)
       })
 
-      // Phase 6: candidate "committed" status + slot assignment are
-      // both derived from items at AI-payload-build time (PCO is the
-      // truth, candidates are the pool). Build a song.id → slot
-      // index map once; each candidate looks itself up.
-      const slotIndexBySongId = new Map<string, number>()
-      for (const it of items ?? []) {
-        if (it.songId) {
-          const idx = slotIndexByItemId.has(it.id)
-            ? songSlotItems.findIndex((s) => s.id === it.id) + 1
-            : 0
-          if (idx > 0) slotIndexBySongId.set(it.songId, idx)
-        }
-      }
       const knownCandidateIds = lastSentCandidateIdsRef.current
       const aiCandidates: AiCandidate[] = candidates.map((c) => {
         const slotIndex = c.song?.id
@@ -704,18 +481,13 @@ export function usePlanState(
         }
       })
 
-      // Build a set of song.ids currently linked in a slot — used
-      // to filter `alreadyInPlan` so the AI doesn't see items that
-      // are already represented as candidates (avoids duplicate-
-      // suggestion noise).
-      const committedSongIds = new Set(
-        candidates
-          .filter((c) => c.song?.id && slotIndexBySongId.has(c.song.id))
-          .map((c) => c.song!.id),
+      const candidateSongIds = new Set(
+        candidates.filter((c) => c.song?.id).map((c) => c.song!.id),
       )
       const alreadyInPlan = (items ?? [])
         .filter(
-          (it) => it.songId && it.songTitle && !committedSongIds.has(it.songId),
+          (it) =>
+            it.songId && it.songTitle && !candidateSongIds.has(it.songId),
         )
         .map((it) => it.songTitle!)
 
@@ -754,7 +526,6 @@ export function usePlanState(
       )
       let streamedText = ''
       let pcoWritesFired = false
-      const executorDeps = executorDepsForCurrent()
       const existingTitlesLower = new Set(
         candidates.map((c) => c.suggestion.title.toLowerCase()),
       )
@@ -795,13 +566,11 @@ export function usePlanState(
           )
           if (result.changedIds.length > 0) setRejectedPoolOpen(true)
         } else if (action.kind === 'set_slot_contents') {
-          // The AI's tool surface uses {slotIndex, candidateId};
-          // translate to the song-ref Assignment shape the resolver
-          // expects. Lookup candidate by id; pull song.id +
-          // suggestion.title. Skip + warn for unmatched candidates.
+          // Translate AI's candidate-id assignments into the
+          // song-ref shape the unified path expects, then forward
+          // to planData.performIntent.
           const candById = new Map(candidates.map((c) => [c.id, c]))
           const translated: Assignment[] = []
-          const warnings: string[] = []
           for (const a of action.assignments) {
             if (a.candidateId == null) {
               translated.push({ slotIndex: a.slotIndex, song: null })
@@ -809,14 +578,14 @@ export function usePlanState(
             }
             const c = candById.get(a.candidateId)
             if (!c) {
-              warnings.push(
-                `AI referenced an unknown candidate (${a.candidateId}) — skipped`,
+              appendSystemMessage(
+                `⚠ AI referenced an unknown candidate (${a.candidateId}) — skipped`,
               )
               continue
             }
             if (!c.song?.id) {
-              warnings.push(
-                `AI tried to commit "${c.suggestion.title}" but it isn't matched to a song in your Planning Center library — skipped`,
+              appendSystemMessage(
+                `⚠ AI tried to commit "${c.suggestion.title}" but it isn't matched to a song in your Planning Center library — skipped`,
               )
               continue
             }
@@ -825,15 +594,10 @@ export function usePlanState(
               song: { id: c.song.id, title: c.suggestion.title },
             })
           }
-          for (const w of warnings) appendSystemMessage(`⚠ ${w}`)
-          const plan = resolvePlan(
-            translated,
-            { items: items ?? [], slotPlaceholders },
-            { autoRefresh },
-          )
-          const result = await executePlan(plan, executorDeps, {
+          const result = await planData.performIntent(translated, {
             source: 'ai',
             deferRefresh: true,
+            autoRefresh,
           })
           if (result.pcoWritesFired) pcoWritesFired = true
         } else if (action.kind === 'unreject') {
@@ -846,11 +610,11 @@ export function usePlanState(
       }
 
       const { stream, data } = await suggestSongs.stream({
-        theme: themeRaw,
+        theme: planData.theme,
         userMessage: turnUserMessage,
         planId,
         serviceOrder,
-        planNotes: notesTextRaw,
+        planNotes: planData.notesText,
         history,
         candidates: aiCandidates,
         alreadyInPlan,
@@ -885,11 +649,9 @@ export function usePlanState(
 
       if (pcoWritesFired) {
         try {
-          await refreshPlanState()
+          await planData.refreshPlanState()
         } catch {
-          // Refresh is best-effort. Items state still reflects
-          // optimistic updates from the executor — slightly stale
-          // but not incorrect.
+          // Refresh is best-effort.
         }
       }
     } catch (e) {
@@ -912,38 +674,20 @@ export function usePlanState(
   }
 
   return {
-    plan,
-    notes,
-    items,
-    slotPlaceholders,
-    loadError,
-    theme: themeRaw,
-    themeSource,
-    notesText: notesTextRaw,
-    notesSource,
-    criteria,
     candidates,
     messages,
     sessionLoaded,
+    criteria,
+    setCriteria,
     generating,
     generateError,
-    rejectedPoolOpen,
-    setTheme,
-    setNotesText,
-    setCriteria,
-    setRejectedPoolOpen,
     setGenerateError,
-    resetTheme,
-    resetNotes,
+    rejectedPoolOpen,
+    setRejectedPoolOpen,
     handleSuggest,
-    performUiAction,
-    reorderSlotItem,
     setDecision,
     clearCandidates,
     appendSystemMessage,
-    refreshPlanState,
-    fallbackSlotTitle,
-    isGenerating: generating,
     isCandidateCommitted,
   }
 }

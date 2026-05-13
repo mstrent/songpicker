@@ -5,7 +5,8 @@ import {
   compileCommitToSlot,
   compileDropCandidateOnSlot,
 } from '../lib/planActions/compile'
-import { usePlanState } from '../lib/usePlanState'
+import { usePlanData } from '../lib/usePlanData'
+import { useCandidatePool } from '../lib/useCandidatePool'
 import { usePromptConfig } from '../lib/usePromptConfig'
 import { ArrangementKeyEditor } from './ArrangementKeyEditor'
 import { PromptBody } from './PromptBody'
@@ -33,10 +34,13 @@ interface Props {
 }
 
 export function PlanDetail({ serviceTypeId, planId }: Props) {
-  // All "model" state + actions live in usePlanState — see
-  // src/lib/usePlanState.ts. PlanDetail keeps only what's truly UI:
-  // DnD state + ghost, popover open-state, the chat-log scroll ref,
-  // the per-plan prompt configs.
+  // The "model" lives in two hooks reflecting the PCO/candidate
+  // split (see CLAUDE.md). PlanDetail composes them; everything
+  // else here is pure UI — DnD state + ghost, popover open-state,
+  // the chat-log scroll ref, the per-plan prompt configs.
+
+  // PCO-side state + slot operations.
+  const planData = usePlanData(serviceTypeId, planId)
   const {
     plan,
     notes,
@@ -46,26 +50,30 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     themeSource,
     notesText,
     notesSource,
-    criteria,
+    setTheme,
+    setNotesText,
+    resetTheme,
+    resetNotes,
+    performIntent,
+    reorderSlotItem,
+    refreshPlanState,
+  } = planData
+
+  // Songpicker-side candidate pool, depends on planData.
+  const {
     candidates,
     messages,
+    criteria,
+    setCriteria,
     generating,
     generateError,
     rejectedPoolOpen,
-    setTheme,
-    setNotesText,
-    setCriteria,
     setRejectedPoolOpen,
-    resetTheme,
-    resetNotes,
     handleSuggest,
-    performUiAction,
-    reorderSlotItem,
     setDecision,
     clearCandidates,
-    refreshPlanState,
     isCandidateCommitted,
-  } = usePlanState(serviceTypeId, planId)
+  } = useCandidatePool(planId, planData)
 
   // UI-only state. Everything below this line is rendering / drag
   // concerns; nothing in this section talks to the model.
@@ -211,7 +219,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             if (dragKind === 'slot' && dragSourceId) {
               const slot = (items ?? []).find((it) => it.id === dragSourceId)
               if (slot) {
-                void performUiAction(compileClearSlot(slot, items ?? []))
+                void performIntent(compileClearSlot(slot, items ?? []))
               }
             }
             endDrag()
@@ -357,7 +365,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                         (c) => c.id === dragSourceId,
                       )
                       if (candidate) {
-                        void performUiAction(
+                        void performIntent(
                           compileDropCandidateOnSlot(candidate, it, items ?? []),
                         )
                       }
@@ -390,7 +398,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                             type="button"
                             className="clear-slot-btn"
                             onClick={() =>
-                              void performUiAction(compileClearSlot(it, items ?? []))
+                              void performIntent(compileClearSlot(it, items ?? []))
                             }
                             title="Remove this song from the slot and reopen it for new suggestions"
                             aria-label="Remove song from slot"
@@ -954,7 +962,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                                     className="commit-menu-item"
                                     onClick={() => {
                                       setOpenCommitMenuId(null)
-                                      void performUiAction(
+                                      void performIntent(
                                         compileCommitToSlot(c, s, items ?? []),
                                       )
                                     }}
