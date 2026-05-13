@@ -237,10 +237,13 @@ export const savePlanNotes = onCall(async (req) => {
 
 export const searchSongs = onCall(async (req) => {
   const { uid } = await requireAllowed(req)
-  const { query } = req.data as { query?: string }
+  const { query, author } = req.data as { query?: string; author?: string }
   if (!query) throw new HttpsError('invalid-argument', 'query required')
   const client = await pcoForUser(uid)
-  const songs = await client.searchSongs(query)
+  const songs = await client.searchSongs(
+    query,
+    typeof author === 'string' && author.trim() ? { author: author.trim() } : {},
+  )
   return { songs }
 })
 

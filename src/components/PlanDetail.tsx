@@ -379,7 +379,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   // we used inline before, hoisted now that propose-songs can fire from
   // multiple call sites (a single AI turn can emit multiple proposals).
   function searchAndAttachSong(c: CandidateMatch) {
-    searchSongs({ query: c.suggestion.title })
+    searchSongs({
+      query: c.suggestion.title,
+      ...(c.suggestion.author ? { author: c.suggestion.author } : {}),
+    })
       .then((sr) => {
         const match = sr.data.songs[0]
         setCandidates((prev) =>
@@ -907,11 +910,14 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
               // pre-turn snapshot if we have one. Fall back to the
               // slot's current title only when there was no prior
               // committed candidate (i.e., fresh commit to a slot
-              // whose title still IS the placeholder).
+              // whose title still IS the placeholder) — and even then
+              // route through placeholderForSlot so we don't capture
+              // a song name from a slot that was committed via PCO
+              // directly (e.g., the user placed a song through PCO
+              // before songpicker started).
               const newPriorSlotTitle =
                 preTurnSlotPlaceholders.get(targetItemId) ??
-                r.slotItem.title ??
-                null
+                placeholderForSlot(r.slotItem)
               return prev.map((c) => {
                 if (c.id === candidate.id) {
                   return {
@@ -1305,7 +1311,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     const slotIndex =
       (items ?? []).filter(isSongSlot).findIndex((it) => it.id === slotItem.id) + 1
     const slotLabel = slotItem.title || fallbackSlotTitle(slotItem.id)
-    const newPriorSlotTitle = slotItem.title ?? null
+    const newPriorSlotTitle = placeholderForSlot(slotItem)
     const rollbackSnapshot = {
       decision: candidate.decision,
       committedAt: candidate.committedAt,
@@ -1563,6 +1569,29 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     const songSlotItems = (items ?? []).filter(isSongSlot)
     const idx = songSlotItems.findIndex((s) => s.id === itemId)
     return idx >= 0 ? `Song ${idx + 1}` : 'Song'
+  }
+
+  // Capture-time helper for `priorSlotTitle`. PCO rewrites a slot's
+  // `title` attribute to the linked song's name when a song is
+  // committed (we do this explicitly via PATCH; the PCO web UI does
+  // it implicitly). So a slot whose `title` equals its `songTitle`
+  // isn't holding a true placeholder — it's holding the previous
+  // song's name. Capturing that as `priorSlotTitle` would taint the
+  // next clear's restore step (clearSlotAction's taint detector
+  // can't catch it once the song record is gone from candidates +
+  // items). Falling back to the position-based "Song N" is lossy in
+  // the edge case of a worship leader who manually placed a song
+  // through PCO into a slot named "Communion song" — that custom
+  // name is unrecoverable here — but strictly better than restoring
+  // a stale song title.
+  function placeholderForSlot(slotItem: PlanItem): string | null {
+    const title = slotItem.title?.trim() ?? null
+    if (!title) return null
+    const songTitle = slotItem.songTitle?.trim()
+    if (songTitle && songTitle.toLowerCase() === title.toLowerCase()) {
+      return fallbackSlotTitle(slotItem.id)
+    }
+    return title
   }
 
   // Drag-and-drop state. Two distinct drag modes:

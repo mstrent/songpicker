@@ -443,12 +443,21 @@ export class PcoClient {
     })
   }
 
-  async searchSongs(query: string): Promise<Song[]> {
+  async searchSongs(
+    query: string,
+    opts: { author?: string } = {},
+  ): Promise<Song[]> {
     // PCO's /songs endpoint silently ignores `q=` and `where[title_like]=`
     // (verified — both return the default-ordered library regardless of
-    // input). Only `where[title]=` (case-insensitive exact match) actually
-    // filters. Try the title verbatim, then again with parentheticals
-    // stripped to handle AI suggestions like "How Great Is Our God (Hillsong)".
+    // input). `where[title]=` filters, but the matching is fuzzier than
+    // documented: searching "Surrender" returns "I Surrender",
+    // "I Surrender All", and "Surrender" — i.e., substring/contains, not
+    // exact. So we always filter the API results client-side to true
+    // case-insensitive title equality before returning. When multiple
+    // library entries genuinely share the title (rare), the optional
+    // `opts.author` provides a tiebreaker via author-overlap scoring so
+    // the AI-proposed song doesn't get linked to a same-title-different-
+    // author song just because PCO returned it first.
     const tryTitle = async (title: string): Promise<Song[]> => {
       const trimmed = title.trim()
       if (!trimmed) return []
@@ -468,7 +477,7 @@ export class PcoClient {
         }>
       >(`/songs?${params}`)
       const data = Array.isArray(json.data) ? json.data : [json.data]
-      return data.map((d) => ({
+      const all: Song[] = data.map((d) => ({
         id: d.id,
         title: d.attributes.title,
         author: d.attributes.author,
@@ -478,6 +487,15 @@ export class PcoClient {
         lastScheduledAt: d.attributes.last_scheduled_at,
         lastScheduledShortDates: d.attributes.last_scheduled_short_dates,
       }))
+      const target = trimmed.toLowerCase()
+      const exact = all.filter((s) => s.title.trim().toLowerCase() === target)
+      if (exact.length <= 1 || !opts.author) return exact
+      const author = opts.author
+      return [...exact].sort(
+        (a, b) =>
+          authorOverlapScore(b.author, author) -
+          authorOverlapScore(a.author, author),
+      )
     }
 
     const direct = await tryTitle(query)
@@ -648,4 +666,46 @@ export class PcoClient {
     const created = Array.isArray(json.data) ? json.data[0] : json.data
     return { id: created.id }
   }
+}
+
+// Score how well a PCO song's `author` field overlaps with the
+// AI-proposed author. Used as a tiebreaker in searchSongs when more
+// than one library entry shares a title.
+//
+//   3 — exact case-insensitive equality
+//   2 — one string contains the other (handles "Phil Wickham" vs.
+//       "Phil Wickham / Brandon Lake")
+//   N — count of distinct >=3-char tokens shared between the two
+//       (handles slash/comma-separated co-writer lists where neither
+//       string contains the other but they share writer names)
+//   0 — no signal
+//
+// Tokens shorter than 3 chars are dropped to avoid garbage matches on
+// initials and connectives ("of", "&"). Genuinely ambiguous cases
+// where the AI gives a publisher ("Hillsong Worship") and PCO records
+// the writers ("Brooke Ligertwood / Jason Ingram") will tie at 0 and
+// fall back to PCO's natural order — acceptable, since both are
+// plausibly correct linkages.
+function authorOverlapScore(
+  pcoAuthor: string | null,
+  queryAuthor: string,
+): number {
+  if (!pcoAuthor) return 0
+  const a = pcoAuthor.toLowerCase().trim()
+  const b = queryAuthor.toLowerCase().trim()
+  if (!a || !b) return 0
+  if (a === b) return 3
+  if (a.includes(b) || b.includes(a)) return 2
+  const tokenize = (s: string): Set<string> =>
+    new Set(
+      s
+        .split(/[\s/&,]+/)
+        .map((t) => t.trim())
+        .filter((t) => t.length >= 3),
+    )
+  const aTokens = tokenize(a)
+  const bTokens = tokenize(b)
+  let overlap = 0
+  for (const t of aTokens) if (bTokens.has(t)) overlap++
+  return overlap
 }

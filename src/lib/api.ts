@@ -228,10 +228,10 @@ export const setSlotArrangementKey = httpsCallable<
   { ok: boolean }
 >(functions, 'setSlotArrangementKey')
 
-export const searchSongs = httpsCallable<{ query: string }, { songs: Song[] }>(
-  functions,
-  'searchSongs',
-)
+export const searchSongs = httpsCallable<
+  { query: string; author?: string },
+  { songs: Song[] }
+>(functions, 'searchSongs')
 
 export type PromptType = 'structure' | 'role'
 export type PromptSource = 'plan' | 'user' | 'system'

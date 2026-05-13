@@ -13,12 +13,19 @@
 These are non-obvious things we've burned time on; don't relearn them.
 
 - **`?q=` is broken on `/songs`.** PCO silently ignores the parameter
-  and returns the library in default order. Use
-  `?where[title]=<title>` (case-insensitive exact match) instead.
-  `?where[title_like]=` is also silently ignored. See
-  `functions/src/pco/client.ts` searchSongs for the working pattern,
-  with a parenthetical-stripped retry for AI titles like
-  "How Great Is Our God (Hillsong)".
+  and returns the library in default order. `?where[title_like]=` is
+  also silently ignored. `?where[title]=<title>` filters but the
+  matching is fuzzier than the docs suggest — verified that searching
+  "Surrender" returns "I Surrender", "I Surrender All", and
+  "Surrender" (i.e., substring/contains, not exact). So always
+  filter the API results client-side to true case-insensitive title
+  equality before using them. `searchSongs` in
+  `functions/src/pco/client.ts` does this, plus a parenthetical-
+  stripped retry for AI titles like "How Great Is Our God (Hillsong)"
+  and an optional `author` tiebreaker for the rare case where two
+  library entries genuinely share the title — without the tiebreaker
+  the AI's "Surrender" by Marc James would silently link to "I
+  Surrender All" because PCO's default sort surfaces it first.
 - **`item_type` is unreliable.** Many plans store everything as
   `"item"` even for song slots. Use the title heuristic in
   `functions/src/pco/songSlots.ts` (matches "Song N" or
