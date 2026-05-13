@@ -400,18 +400,9 @@ function parseUnreject(obj: Record<string, unknown>): UnrejectAction | null {
 
 // If the model called tools but emitted no prose text, synthesize a
 // short status line so the chat log doesn't have a blank assistant
-// turn. Verb-neutral on purpose: the server can't tell a fresh
-// commit from a move (the SPA decides at apply time), so we count
-// total changes instead of naming each kind. The per-action 🤖
-// system messages carry the accurate detail.
+// turn. The per-action 🤖 system messages carry the detail; the
+// prose line just needs to mark the turn as finished.
 function fallbackMessage(actions: AiAction[]): string {
   if (actions.length === 0) return 'No changes this turn.'
-  const total = actions.reduce((sum, a) => {
-    if (a.kind === 'propose') return sum + a.suggestions.length
-    if (a.kind === 'remove') return sum + a.ids.length
-    if (a.kind === 'unreject') return sum + a.ids.length
-    if (a.kind === 'set_slot_contents') return sum + a.assignments.length
-    return sum + 1
-  }, 0)
-  return `Done — ${total} change${total === 1 ? '' : 's'}.`
+  return 'Done.'
 }
