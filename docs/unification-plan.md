@@ -236,25 +236,57 @@ fixed at the architecture level (no fallback path needed). All UI
 and AI flows continue to work. Tests cover the new resolver +
 compile shape. PlanDetail composes the two hooks instead of one.
 
-### Phase 5 — Optimizations
+### Phase 5 — Optimizations + cleanup (revised post-Phase-6)
 
-- **Bulk searchSongs**: Cloud Function accepts a batch, runs PCO calls
-  under `pMap`. AI's `propose` action fires one batched call instead of
-  N sequential lookups.
-- **Split refresh granularity**: `refreshSlotState()` re-fetches just
-  items + slotPlaceholders (not plan / notes / user prompts), used
-  after slot writes. `refreshPlanState()` stays as the full reload.
-- **Reconciliation effect cleanup**: with the unified executor as the
-  only writer of commit state, the defensive reconciliation effect's
-  noisy "↺ N slots cleared in PCO" message can fire silently for the
-  PCO-web-UI-edit case (still correct, just less chatty).
-- **Manual "add candidate" UI** (optional asymmetry fix): if Matt
-  wants the ability to type a song and add it as a candidate without
-  going through the AI, a small UI calls into the same `propose`
-  flow.
+Re-scoped after Phase 6 landed. The original Phase 5 included a
+"reconciliation effect cleanup" item — that's moot now because
+Phase 6 deleted the reconciliation effect entirely (no derived
+candidate state to reconcile). Two new items surfaced from what we
+actually built; one original item ("manual add candidate") was
+deferred as separate UX work.
 
-**Acceptance:** Each item is independently committable; no flow
-regresses; bundle size doesn't grow significantly.
+**Phase 5a** — Delete the dead `swapSlotPlaceholders` callable +
+Cloud Function + Firestore rule entry. We left this dangling at
+the end of Phase 3b ("deletion in Phase 3e cleanup") but Phase 6's
+paired-PATCH swap doesn't need it. Quick cleanup.
+
+**Phase 5b** — Extract the AI's
+candidate-id-to-song-ref translation as a testable pure helper.
+Today it's inline inside `useCandidatePool.handleSuggest`'s
+`applyAction` for `set_slot_contents`. Critical boundary (one bug
+silently breaks all AI commits) with no coverage.
+
+**Phase 5c** — Bulk `searchSongs`. AI proposes N songs → SPA fires
+N sequential `searchSongs` callables; Cloud Function PCO calls
+already use `pMap` for concurrency, but each callable is its own
+round-trip. Batch the callable to take a list, run the PCO calls
+server-side under existing concurrency.
+
+**Phase 5d** — Split refresh granularity. `refreshPlanState`
+re-fetches plan + notes + items + slotPlaceholders + user prompts
+on every slot write — none of those except items + slotPlaceholders
+typically change with a slot write. New `refreshSlotState()`
+Cloud Function returning just `{items, slotPlaceholders}`; keep
+the existing full reload for plan switches. Modest but measurable
+PCO-traffic reduction.
+
+**Phase 5e** — Hook integration tests for `usePlanData` /
+`useCandidatePool`. Phase 4 deferred these; they're more important
+post-Phase-6 because the hook composition (planData + candidate
+pool wiring, AI translation boundary) is the largest untested
+surface. React Testing Library + `renderHook` + mocked callables.
+Acceptance: realistic flows (load → commit → clear → swap →
+reject → suggest) drive the hooks and assert on returned state;
+the AI translation helper from 5b has direct unit tests.
+
+Out of Phase 5: **manual "add candidate" UI** is deferred as
+separate UX work — small per-call, but designing the form +
+placement + validation is its own conversation. Slots cleanly
+into `useCandidatePool.handleAddManual(suggestion)` when picked
+up.
+
+**Acceptance:** Each sub-phase is independently committable; no
+flow regresses; the AI translation + the hooks have test coverage.
 
 ## What we keep
 
