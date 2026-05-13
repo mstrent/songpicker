@@ -38,6 +38,7 @@ import {
   resolveRestoreTitle,
 } from '../lib/planActions/helpers'
 import { resolvePlan } from '../lib/planActions/resolver'
+import { executePlan, type ExecutorDeps } from '../lib/planActions/executor'
 import { usePromptConfig } from '../lib/usePromptConfig'
 import { ArrangementKeyEditor } from './ArrangementKeyEditor'
 import { PromptBody } from './PromptBody'
@@ -581,33 +582,27 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         candidates.map((c): [string, string] => [c.id, c.suggestion.title]),
       )
       let streamedText = ''
-      // Per-turn PCO write plan. We BUFFER commits and clears here
-      // instead of firing them per-action — that lets a swap (two
-      // commits whose target slots are each other's source) land
-      // cleanly. Phase 1 clears all sources, Phase 2 commits all
-      // targets. PCO PATCH is idempotent on songId/title so the
-      // commit phase overwrites whatever's at the target slot.
-      //
-      // The Map keys deliberately collapse duplicates: only the LAST
-      // commit per slot survives, and a clear gets dropped if a
-      // commit later targets the same slot (the commit's PATCH
-      // would overwrite the cleared state anyway).
-      const plannedClears = new Map<
-        string,
-        { slotItem: PlanItem; restoreTitle: string }
-      >()
-      const plannedCommits = new Map<
-        string,
-        {
-          candidateId: string
-          songId: string
-          songTitle: string
-          rollback: () => void
-        }
-      >()
+      // Per-turn cumulative write flag — set by any executePlan call
+      // that fires PCO writes. Drives the single post-stream refresh.
       let pcoWritesFired = false
 
-      const applyAction = (action: AiAction) => {
+      // Executor deps for the AI flow. Each set_slot_contents
+      // assignment list runs through resolvePlan + executePlan;
+      // executePlan does optimistic state, PCO calls, chat messages,
+      // and rollback. deferRefresh=true on each call so we refresh
+      // once at the end of the stream rather than after every AI
+      // tool call.
+      const executorDeps: ExecutorDeps = {
+        serviceTypeId,
+        planId,
+        pco: { placeSongInSlot, clearSongFromSlot },
+        setCandidates: (update) =>
+          setCandidates((prev) => update(prev) as CandidateMatch[]),
+        appendSystemMessage,
+        refreshPlanState,
+      }
+
+      const applyAction = async (action: AiAction) => {
         const now = Date.now()
         if (action.kind === 'propose') {
           const minted: CandidateMatch[] = []
@@ -675,183 +670,20 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           // This is typically the AI misreading "remove X, replace
           // with Y" as a rejection + commit (it's just displacement).
         } else if (action.kind === 'set_slot_contents') {
-          // Pure resolver does all the planning: validates assignments,
-          // computes restore titles, eviction targets, swap pairs,
-          // priorSlotTitle inheritance, and the move source clears.
-          // The executor below just applies the Plan — optimistic
-          // state, plannedClears/Commits maps, chat messages.
-          // See src/lib/planActions/resolver.ts.
+          // Pure resolver does all the planning; executor applies it
+          // (optimistic state + PCO calls + chat messages + rollback).
+          // deferRefresh=true means we do a single items refresh after
+          // the whole stream finishes rather than per-action.
           const plan = resolvePlan(
             action.assignments,
             { items: items ?? [], candidates, slotPlaceholders },
             { autoRefresh },
           )
-          for (const w of plan.warnings) {
-            appendSystemMessage(`⚠ ${w}`)
-          }
-          if (plan.resolved.length === 0) return
-
-          const emittedSwapMessageFor = new Set<number>()
-          for (let i = 0; i < plan.resolved.length; i++) {
-            const r = plan.resolved[i]
-            if (r.kind === 'clear') {
-              const songTitle =
-                r.occupant?.suggestion.title ?? r.slotItem.songTitle ?? 'song'
-              setCandidates((prev) =>
-                prev.map((c) =>
-                  c.assignedSlotItemId === r.slotItemId
-                    ? {
-                        ...c,
-                        committedAt: null,
-                        assignedSlotItemId: null,
-                        priorSlotTitle: null,
-                      }
-                    : c,
-                ),
-              )
-              plannedClears.set(r.slotItemId, {
-                slotItem: r.slotItem,
-                restoreTitle: r.restoreTitle,
-              })
-              pcoWritesFired = true
-              appendSystemMessage(
-                `🤖 AI cleared "${songTitle}" from song slot ${r.slotIndex}`,
-              )
-              continue
-            }
-            // Commit (fresh / move / overwrite / swap-half)
-            const candidateId = r.candidate.id
-            // Rollback snapshots — captured from CURRENT state at the
-            // moment of optimistic update, so a failed PCO call can
-            // restore exactly what we displaced.
-            let rollbackForCandidate:
-              | {
-                  id: string
-                  decision: 'pending' | 'reject'
-                  committedAt: number | null
-                  assignedSlotItemId: string | null
-                  priorSlotTitle: string | null
-                }
-              | null = null
-            let evictedRollback:
-              | {
-                  id: string
-                  committedAt: number | null
-                  assignedSlotItemId: string | null
-                  priorSlotTitle: string | null
-                }
-              | null = null
-            setCandidates((prev) => {
-              const me = prev.find((c) => c.id === candidateId)
-              if (me) {
-                rollbackForCandidate = {
-                  id: me.id,
-                  decision: me.decision,
-                  committedAt: me.committedAt,
-                  assignedSlotItemId: me.assignedSlotItemId,
-                  priorSlotTitle: me.priorSlotTitle,
-                }
-              }
-              if (r.evicted) {
-                const evictedNow = prev.find((c) => c.id === r.evicted!.id)
-                if (evictedNow) {
-                  evictedRollback = {
-                    id: evictedNow.id,
-                    committedAt: evictedNow.committedAt,
-                    assignedSlotItemId: evictedNow.assignedSlotItemId,
-                    priorSlotTitle: evictedNow.priorSlotTitle,
-                  }
-                }
-              }
-              return prev.map((c) => {
-                if (c.id === candidateId) {
-                  return {
-                    ...c,
-                    committedAt: now,
-                    assignedSlotItemId: r.slotItemId,
-                    priorSlotTitle: r.newPriorSlotTitle,
-                    commitPending: true,
-                  }
-                }
-                if (
-                  c.assignedSlotItemId === r.slotItemId &&
-                  c.committedAt != null &&
-                  c.id !== candidateId
-                ) {
-                  return {
-                    ...c,
-                    committedAt: null,
-                    assignedSlotItemId: null,
-                    priorSlotTitle: null,
-                  }
-                }
-                return c
-              })
-            })
-            if (r.isMove && r.fromSlotItem && r.fromSlotRestoreTitle) {
-              plannedClears.set(r.fromSlotItem.id, {
-                slotItem: r.fromSlotItem,
-                restoreTitle: r.fromSlotRestoreTitle,
-              })
-            }
-            plannedCommits.set(r.slotItemId, {
-              candidateId,
-              songId: r.songId,
-              songTitle: r.songTitle,
-              rollback: () => {
-                setCandidates((prev) =>
-                  prev.map((c) => {
-                    if (
-                      rollbackForCandidate &&
-                      c.id === rollbackForCandidate.id
-                    ) {
-                      return {
-                        ...c,
-                        decision: rollbackForCandidate.decision,
-                        committedAt: rollbackForCandidate.committedAt,
-                        assignedSlotItemId:
-                          rollbackForCandidate.assignedSlotItemId,
-                        priorSlotTitle: rollbackForCandidate.priorSlotTitle,
-                        commitPending: false,
-                      }
-                    }
-                    if (evictedRollback && c.id === evictedRollback.id) {
-                      return {
-                        ...c,
-                        committedAt: evictedRollback.committedAt,
-                        assignedSlotItemId: evictedRollback.assignedSlotItemId,
-                        priorSlotTitle: evictedRollback.priorSlotTitle,
-                      }
-                    }
-                    return c
-                  }),
-                )
-              },
-            })
-            pcoWritesFired = true
-
-            // System message: one combined "swapped" for swap pairs,
-            // otherwise per-assignment commit / move.
-            const partner = plan.swapPairs.get(i)
-            if (partner !== undefined) {
-              if (!emittedSwapMessageFor.has(i)) {
-                const other = plan.resolved[partner]
-                if (other.kind === 'commit') {
-                  appendSystemMessage(
-                    `🤖 AI swapped "${r.songTitle}" and "${other.songTitle}"`,
-                  )
-                  emittedSwapMessageFor.add(i)
-                  emittedSwapMessageFor.add(partner)
-                }
-              }
-            } else {
-              appendSystemMessage(
-                r.isMove
-                  ? `🤖 AI moved "${r.songTitle}" from song slot ${r.fromSlotIndex ?? '?'} to song slot ${r.slotIndex}`
-                  : `🤖 AI committed "${r.songTitle}" to song slot ${r.slotIndex}`,
-              )
-            }
-          }
+          const result = await executePlan(plan, executorDeps, {
+            source: 'ai',
+            deferRefresh: true,
+          })
+          if (result.pcoWritesFired) pcoWritesFired = true
         } else if (action.kind === 'unreject') {
           setCandidates((prev) =>
             prev.map((c) =>
@@ -903,7 +735,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             ),
           )
         } else if (chunk.kind === 'action') {
-          applyAction(chunk.action)
+          await applyAction(chunk.action)
         }
       }
 
@@ -919,63 +751,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           ),
         )
       }
-      // Execute the planned PCO writes in two phases. Phase 1 clears
-      // every involved source slot; Phase 2 commits all targets.
-      // This order is what makes swaps work — clearing both A's
-      // source and B's source before committing either prevents one
-      // commit from clobbering the other. Drop clears for slots
-      // that are also commit targets in this same turn (the commit's
-      // PATCH overwrites the slot anyway, so a separate clear is
-      // wasted PCO traffic).
-      if (pcoWritesFired) {
-        for (const slotId of plannedCommits.keys()) {
-          plannedClears.delete(slotId)
-        }
-        // Phase 1: clears
-        for (const [slotItemId, { restoreTitle }] of plannedClears) {
-          try {
-            await clearSongFromSlot({
-              serviceTypeId,
-              planId,
-              slotItemId,
-              restoreTitle,
-            })
-          } catch (e) {
-            const err = e as Error
-            appendSystemMessage(
-              `⚠ Clear failed for a slot — ${err.message}`,
-            )
-          }
-        }
-        // Phase 2: commits. No fromSlotItemId because phase 1 has
-        // already cleared whatever sources needed clearing.
-        for (const [
-          slotItemId,
-          { songId, songTitle, rollback },
-        ] of plannedCommits) {
-          try {
-            await placeSongInSlot({
-              serviceTypeId,
-              planId,
-              slotItemId,
-              songId,
-              songTitle,
-            })
-          } catch (e) {
-            const err = e as Error
-            rollback()
-            appendSystemMessage(
-              `⚠ AI commit failed for "${songTitle}" — ${err.message}`,
-            )
-          }
-        }
-      }
-      // Single items refresh after the turn — picks up commits, clears,
-      // title restorations all in one PCO read. Clear commitPending in
-      // the same React render as setItems(fresh) so the reconciliation
-      // effect sees both updates together (per CLAUDE.md: setItems
-      // before setCandidates batches them into a single render with
-      // consistent state).
+      // executePlan calls fired PCO writes per-set_slot_contents-action
+      // with deferRefresh=true; do the single items refresh now that
+      // the whole stream has finished. setItems lands before the
+      // commitPending cleanup so the reconciliation effect sees both
+      // updates together (per CLAUDE.md: setItems before setCandidates).
       if (pcoWritesFired) {
         try {
           await refreshPlanState()
