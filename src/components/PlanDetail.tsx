@@ -30,6 +30,14 @@ import {
   patchCachedTheme,
 } from '../lib/cache'
 import { isSongSlot } from '../lib/songSlots'
+import {
+  buildKnownSongTitles,
+  fallbackSlotTitle as fallbackSlotTitleHelper,
+  findEvictionTarget,
+  placeholderForSlot as placeholderForSlotHelper,
+  preTurnSlotPlaceholders as preTurnSlotPlaceholdersHelper,
+  resolveRestoreTitle,
+} from '../lib/planActions/helpers'
 import { usePromptConfig } from '../lib/usePromptConfig'
 import { ArrangementKeyEditor } from './ArrangementKeyEditor'
 import { PromptBody } from './PromptBody'
@@ -676,53 +684,13 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             )
             return
           }
-          // Build a set of all song titles known to the SPA — candidates,
-          // their matched songs, and any songs currently committed in
-          // the service order. We use this as a taint detector: a
-          // priorSlotTitle matching any of these is almost certainly a
-          // stale song name (the slot's title got overwritten on commit
-          // and then was preserved through later moves/swaps as a
-          // "prior"). True placeholder names like "Song 1" or
-          // "Communion song" won't appear in this set so they survive.
-          const knownSongTitlesLower = new Set<string>()
-          for (const c of candidates) {
-            const t = c.suggestion.title.trim().toLowerCase()
-            if (t) knownSongTitlesLower.add(t)
-            const st = c.song?.title?.trim().toLowerCase()
-            if (st) knownSongTitlesLower.add(st)
-          }
-          for (const it of items ?? []) {
-            const st = it.songTitle?.trim().toLowerCase()
-            if (st) knownSongTitlesLower.add(st)
-          }
-          const isTaintedTitle = (t: string | null | undefined): boolean => {
-            const trimmed = t?.trim()
-            if (!trimmed) return false
-            return knownSongTitlesLower.has(trimmed.toLowerCase())
-          }
-
-          // Pre-turn snapshot of slot placeholder identities. For each
-          // currently-committed candidate, capture the slot's original
-          // placeholder name. Incoming commits in this turn inherit
-          // from this map so a swap doesn't lose the placeholder.
-          // Skip any entries whose priorSlotTitle is tainted (matches
-          // any known song title) — those got overwritten in a prior
-          // turn and shouldn't propagate further.
-          const preTurnSlotPlaceholders = new Map<string, string>()
-          for (const c of candidates) {
-            if (
-              c.committedAt &&
-              c.assignedSlotItemId &&
-              c.priorSlotTitle &&
-              c.priorSlotTitle.trim() &&
-              !isTaintedTitle(c.priorSlotTitle)
-            ) {
-              preTurnSlotPlaceholders.set(
-                c.assignedSlotItemId,
-                c.priorSlotTitle.trim(),
-              )
-            }
-          }
+          // Taint detection + pre-turn snapshot — see
+          // src/lib/planActions/helpers.ts for the full rationale.
+          const knownSongTitlesLower = buildKnownSongTitles(candidates, items)
+          const preTurnSlotPlaceholders = preTurnSlotPlaceholdersHelper(
+            candidates,
+            knownSongTitlesLower,
+          )
           // Validate + resolve each assignment up front. Invalid ones
           // get a ⚠ marker and drop out of the plan.
           type ResolvedCommit = {
@@ -823,17 +791,15 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                 (c) =>
                   c.assignedSlotItemId === r.slotItemId && c.committedAt != null,
               )
-              // Restore title: same priority order as clearSlotAction —
-              //   1. server-persisted slotPlaceholders[itemId]
-              //   2. occupant's stored prior, if not tainted
-              //   3. position-based "Song N"
-              const persistedPlaceholder =
-                slotPlaceholders[r.slotItemId]?.trim() || null
-              const storedPrior = occupant?.priorSlotTitle?.trim()
-              const restoreTitle =
-                persistedPlaceholder ||
-                (!isTaintedTitle(storedPrior) && storedPrior) ||
-                fallbackSlotTitle(r.slotItemId)
+              // Restore title via the shared resolver — same
+              // priority order as clearSlotAction.
+              const restoreTitle = resolveRestoreTitle({
+                slotItemId: r.slotItemId,
+                slotPlaceholders,
+                candidatePriorSlotTitle: occupant?.priorSlotTitle,
+                knownSongTitles: knownSongTitlesLower,
+                fallbackForSlot: fallbackSlotTitle,
+              })
               const songTitle =
                 occupant?.suggestion.title ?? r.slotItem.songTitle ?? 'song'
               setCandidates((prev) =>
@@ -903,11 +869,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                   priorSlotTitle: me.priorSlotTitle,
                 }
               }
-              const evicted = prev.find(
-                (c) =>
-                  c.id !== candidate.id &&
-                  c.assignedSlotItemId === targetItemId &&
-                  c.committedAt != null,
+              const evicted = findEvictionTarget(
+                targetItemId,
+                prev,
+                candidate.id,
               )
               if (evicted) {
                 evictedRollback = {
@@ -955,10 +920,12 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
               })
             })
             if (isMove && currentSlot) {
-              const restoreTitle =
-                slotPlaceholders[currentSlot]?.trim() ||
-                candidate.priorSlotTitle?.trim() ||
-                fallbackSlotTitle(currentSlot)
+              const restoreTitle = resolveRestoreTitle({
+                slotItemId: currentSlot,
+                slotPlaceholders,
+                candidatePriorSlotTitle: candidate.priorSlotTitle,
+                fallbackForSlot: fallbackSlotTitle,
+              })
               const slotItemForClear = (items ?? []).find(
                 (it) => it.id === currentSlot,
               )
@@ -1313,9 +1280,15 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     const fromSlotItemId = isMove ? candidate.assignedSlotItemId : undefined
     const fromSlotRestoreTitle =
       isMove && fromSlotItemId
-        ? slotPlaceholders[fromSlotItemId]?.trim() ||
-          candidate.priorSlotTitle?.trim() ||
-          fallbackSlotTitle(fromSlotItemId)
+        ? resolveRestoreTitle({
+            slotItemId: fromSlotItemId,
+            slotPlaceholders,
+            candidatePriorSlotTitle: candidate.priorSlotTitle,
+            // No taint check at commit-time move-source — we trust
+            // the candidate's prior since the source slot's title
+            // was the one we captured at original commit.
+            fallbackForSlot: fallbackSlotTitle,
+          })
         : undefined
     const fromSlotIndex =
       isMove && fromSlotItemId
@@ -1335,11 +1308,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     // Title for the system message uses the candidate's suggestion
     // title when we know it, falling back to the slot's PCO songTitle
     // when the displaced song was placed via PCO directly.
-    const evictedCandidate = candidates.find(
-      (c) =>
-        c.id !== candidate.id &&
-        c.assignedSlotItemId === slotItem.id &&
-        c.committedAt != null,
+    const evictedCandidate = findEvictionTarget(
+      slotItem.id,
+      candidates,
+      candidate.id,
     )
     const evictedTitle =
       evictedCandidate?.suggestion.title ?? slotItem.songTitle ?? null
@@ -1464,37 +1436,19 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     if (!slotItem.songId) return
     const slotIndex =
       (items ?? []).filter(isSongSlot).findIndex((it) => it.id === slotItem.id) + 1
-    // Restore-title resolution, in priority order:
-    //   1. Server-persisted slotPlaceholder for this itemId — captured
-    //      the last time we observed the slot empty in PCO. Most
-    //      reliable; survives sessions and pre-songpicker PCO state
-    //      changes (subject to ever having seen the slot empty).
-    //   2. Title captured on the committed candidate at commit time
-    //      (priorSlotTitle), as long as it isn't tainted (matches a
-    //      currently-known song title from candidates or items).
-    //   3. Position-based "Song N" fallback.
+    // Restore-title resolution via the shared resolver — see
+    // src/lib/planActions/helpers.ts for the priority order.
     const committedCandidate = candidates.find(
       (c) => c.assignedSlotItemId === slotItem.id && c.committedAt != null,
     )
-    const persistedPlaceholder = slotPlaceholders[slotItem.id]?.trim() || null
-    const knownSongTitlesLower = new Set<string>()
-    for (const c of candidates) {
-      const t = c.suggestion.title.trim().toLowerCase()
-      if (t) knownSongTitlesLower.add(t)
-      const st = c.song?.title?.trim().toLowerCase()
-      if (st) knownSongTitlesLower.add(st)
-    }
-    for (const it of items ?? []) {
-      const st = it.songTitle?.trim().toLowerCase()
-      if (st) knownSongTitlesLower.add(st)
-    }
-    const storedPrior = committedCandidate?.priorSlotTitle?.trim()
-    const priorIsTainted =
-      !!(storedPrior && knownSongTitlesLower.has(storedPrior.toLowerCase()))
-    const restoreTitle =
-      persistedPlaceholder ||
-      (!priorIsTainted && storedPrior) ||
-      fallbackSlotTitle(slotItem.id)
+    const knownSongTitlesLower = buildKnownSongTitles(candidates, items)
+    const restoreTitle = resolveRestoreTitle({
+      slotItemId: slotItem.id,
+      slotPlaceholders,
+      candidatePriorSlotTitle: committedCandidate?.priorSlotTitle,
+      knownSongTitles: knownSongTitlesLower,
+      fallbackForSlot: fallbackSlotTitle,
+    })
     const songTitle =
       committedCandidate?.suggestion.title ?? slotItem.songTitle ?? '(song)'
     const rollbackByCandidate = new Map(
@@ -1659,42 +1613,14 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     }
   }
 
-  // Generate the SPA's fallback slot title for a given song-slot item —
-  // "Song N" where N is its 1-based position among song slots in the
-  // current service order. Used when clearing a committed slot for which
-  // we have no stored prior title (e.g. session candidates were cleared,
-  // or the candidate predates the priorSlotTitle field).
+  // Thin wrappers binding the pure helpers to this component's closure
+  // (items, slotPlaceholders). Both call into src/lib/planActions/helpers.
+  // See that module for the docs and tests.
   function fallbackSlotTitle(itemId: string): string {
-    const songSlotItems = (items ?? []).filter(isSongSlot)
-    const idx = songSlotItems.findIndex((s) => s.id === itemId)
-    return idx >= 0 ? `Song ${idx + 1}` : 'Song'
+    return fallbackSlotTitleHelper(itemId, items)
   }
-
-  // Capture-time helper for `priorSlotTitle`. PCO rewrites a slot's
-  // `title` attribute to the linked song's name when a song is
-  // committed (we do this explicitly via PATCH; the PCO web UI does
-  // it implicitly). So a slot whose `title` equals its `songTitle`
-  // isn't holding a true placeholder — it's holding the previous
-  // song's name. Capturing that as `priorSlotTitle` would taint the
-  // next clear's restore step (clearSlotAction's taint detector
-  // can't catch it once the song record is gone from candidates +
-  // items). Falling back to the position-based "Song N" is lossy in
-  // the edge case of a worship leader who manually placed a song
-  // through PCO into a slot named "Communion song" — that custom
-  // name is unrecoverable here — but strictly better than restoring
-  // a stale song title.
   function placeholderForSlot(slotItem: PlanItem): string | null {
-    const title = slotItem.title?.trim() ?? null
-    if (!title) return null
-    const songTitle = slotItem.songTitle?.trim()
-    if (songTitle && songTitle.toLowerCase() === title.toLowerCase()) {
-      // Title was rewritten by a previous song link — prefer the
-      // server-persisted placeholder if we have one (captured the last
-      // time we observed this slot empty), otherwise fall through to
-      // the position-based "Song N".
-      return slotPlaceholders[slotItem.id] ?? fallbackSlotTitle(slotItem.id)
-    }
-    return title
+    return placeholderForSlotHelper(slotItem, slotPlaceholders, fallbackSlotTitle)
   }
 
   // Drag-and-drop state. Two distinct drag modes:
@@ -1826,13 +1752,13 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     }
     // The moving slot has no committed candidate in our state
     // (e.g., the song was linked via PCO directly before songpicker
-    // started). Its current title is the song name — not a
-    // placeholder — so prefer the server-persisted placeholder over
-    // `.title` here, falling back to "Song N" if we've never seen
-    // this slot empty.
-    const sourceRestoreTitle =
-      slotPlaceholders[movingSlot.id]?.trim() ||
-      fallbackSlotTitle(movingSlot.id)
+    // started). No candidate prior to consult — the resolver falls
+    // through persistedPlaceholder → "Song N".
+    const sourceRestoreTitle = resolveRestoreTitle({
+      slotItemId: movingSlot.id,
+      slotPlaceholders,
+      fallbackForSlot: fallbackSlotTitle,
+    })
     const songTitle = movingSlot.songTitle
     const destLabel =
       destSlot.title?.trim() || fallbackSlotTitle(destSlot.id)
