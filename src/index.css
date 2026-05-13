@@ -117,6 +117,64 @@ textarea {
   font: inherit;
 }
 
+/* icon primitive — Lucide-style hairline SVGs. Sized via the `size` prop
+   on the component, vertically centered with surrounding text. */
+.icon {
+  display: inline-block;
+  vertical-align: -0.18em;
+  flex-shrink: 0;
+}
+/* Inline-icon-followed-by-text layout used in pill links and chips. */
+.icon-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+/* Friendly empty-state block. Single large icon + heading + supporting
+   line. Used in the plan list, plan-detail right column, and anywhere
+   else a list / column ends up rendering nothing. */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  text-align: center;
+  padding: 2.5rem 1.5rem;
+  background: var(--surface);
+  border: 1px dashed var(--border-strong);
+  border-radius: 14px;
+  color: var(--muted);
+  margin: 0.5rem 0;
+}
+.empty-state-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  margin-bottom: 0.35rem;
+}
+.empty-state-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--fg);
+  letter-spacing: -0.005em;
+}
+.empty-state-body {
+  font-size: 0.92rem;
+  color: var(--muted);
+  line-height: 1.5;
+  max-width: 32rem;
+}
+.empty-state-emph {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* layout */
 
 .centered {
@@ -156,13 +214,21 @@ textarea {
   margin: 0;
   font-size: 1.5rem;
   letter-spacing: -0.01em;
+  font-weight: 700;
 }
 .app header h1 a {
   color: inherit;
   text-decoration: none;
 }
+/* Wordmark gradient lives on the "picker" half of the logo only —
+   clipped to the text so we get the AI palette without painting a
+   stain across the whole header. -webkit-* keeps Safari rendering. */
 .app header h1 .accent {
-  color: var(--accent);
+  background: var(--ai-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
 }
 
 .app header .who {
@@ -725,6 +791,36 @@ textarea {
   min-width: 0;
 }
 
+/* At-a-glance chip row beneath the title — progress, day-relative
+   countdown, theme. Wraps cleanly on narrow widths. */
+.plan-detail .status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.4rem 0 0;
+}
+.plan-detail .status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.plan-detail .status-chip-progress { color: var(--accent); border-color: transparent; background: var(--accent-soft); }
+.plan-detail .status-chip-progress-done { color: var(--success); background: var(--success-soft); }
+.plan-detail .status-chip-progress-empty { color: var(--warm-strong); background: var(--warm-soft); }
+.plan-detail .status-chip-day {
+  color: var(--fg);
+  background: var(--bg);
+  border-color: var(--border-strong);
+}
+
 .plan-detail section {
   /* The plan-left / plan-right flex containers control inter-section
      spacing via `gap`; section margins would stack on top of that and
@@ -996,8 +1092,14 @@ textarea {
 }
 .service-order .item.song-empty-slot {
   border-style: dashed;
-  border-color: var(--warm);
-  background: var(--warm-soft);
+  border-width: 1.5px;
+  border-color: var(--border-strong);
+  background: transparent;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.service-order .item.song-empty-slot:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .service-order .ititle-link {
@@ -1008,10 +1110,13 @@ textarea {
   text-decoration: underline;
 }
 .service-order .song-empty {
-  color: var(--warm-strong);
-  font-weight: 600;
+  color: var(--muted);
+  font-weight: 400;
   font-size: 0.85rem;
   font-style: italic;
+}
+.service-order .item.song-empty-slot:hover .song-empty {
+  color: var(--accent);
 }
 
 /* Item-type badges removed — they didn't add signal. The visual styling
@@ -1054,8 +1159,17 @@ textarea {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 0.25rem;
+  gap: 0.35rem;
   flex-shrink: 0;
+}
+/* Inner row that lays the three lookup icons side-by-side — keeps the
+   key picker above (column flow from .item-actions) and the icons
+   together in their own horizontal strip below. */
+.service-order .item-actions .lookup-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.3rem;
 }
 
 /* Arrangement + key picker — the Key chip on a filled slot is a button
@@ -1415,6 +1529,25 @@ textarea {
   border-radius: 10px;
   padding: 0.85rem 1rem;
   box-shadow: var(--shadow-sm);
+  /* Entrance animation — per-card delay applied inline as
+     animation-delay so streamed candidates cascade in. backwards keeps
+     the starting opacity in place during the delay window. */
+  animation: candidate-enter 0.35s ease-out backwards;
+}
+@keyframes candidate-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .candidate {
+    animation: none;
+  }
 }
 .candidate.match-matched { border-left: 3px solid var(--success); }
 .candidate.match-unmatched { border-left: 3px solid var(--warm); }
@@ -1458,28 +1591,6 @@ textarea {
   cursor: not-allowed;
 }
 
-/* Slot picker: select dropdown that commits a matched, uncommitted
-   candidate directly on selection. Sits inline with the Reject pill. */
-.candidate .slot-picker {
-  background: var(--bg);
-  color: var(--fg);
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  font: inherit;
-  font-size: 0.78rem;
-  font-weight: 500;
-  padding: 0.22rem 0.6rem;
-  cursor: pointer;
-}
-.candidate .slot-picker:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-.candidate .slot-picker:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
 .candidate .committed-badge {
   background: var(--success-soft);
   color: var(--success);
@@ -1499,32 +1610,6 @@ textarea {
 }
 .candidate .ctitle-link:hover {
   text-decoration: underline;
-}
-
-.candidate .chart-search-link {
-  color: var(--warm-strong);
-  font-size: 0.8rem;
-  text-decoration: none;
-  border-bottom: 1px dashed var(--warm);
-}
-.candidate .chart-search-link:hover {
-  border-bottom-style: solid;
-  text-decoration: none;
-}
-
-/* Spotify search link — appears on candidates and in service-order songs. */
-.spotify-link {
-  color: #1db954;
-  font-size: 0.8rem;
-  text-decoration: none;
-  font-weight: 500;
-  white-space: nowrap;
-}
-.spotify-link:hover {
-  text-decoration: underline;
-}
-@media (prefers-color-scheme: dark) {
-  .spotify-link { color: #1ed760; }
 }
 
 /* ──── AI affordances ──── */
@@ -1590,16 +1675,15 @@ textarea {
   -webkit-text-fill-color: transparent;
   color: transparent;
 }
-.ai-heading .provider-tag {
+.ai-heading .candidates-summary {
+  /* Right-aligns on the same row as the heading — gives the row a
+     proper title/stats split without a second line. Resets the
+     uppercase/letter-spacing from .ai-heading h3 so the numbers read
+     normally. */
+  margin-left: auto;
   text-transform: none;
   letter-spacing: 0;
   font-weight: 500;
-  font-size: 0.7rem;
-  color: var(--muted);
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  padding: 0.1rem 0.55rem;
-  background: var(--bg);
 }
 
 .candidate .reasoning {
@@ -1724,18 +1808,6 @@ textarea {
   background: var(--error-soft);
   filter: none;
 }
-.admin-section.read-only pre {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.75rem 1rem;
-  font-size: 0.85rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--fg);
-  margin: 0;
-}
 .admin-section .hardcoded-display {
   margin-top: 0.85rem;
   font-size: 0.85rem;
@@ -1745,20 +1817,42 @@ textarea {
   color: var(--muted);
   list-style: none;
   user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-weight: 600;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+.admin-section .hardcoded-display summary:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 .admin-section .hardcoded-display summary::-webkit-details-marker {
   display: none;
 }
 .admin-section .hardcoded-display summary::before {
-  content: '▸ ';
-  color: var(--muted);
-  font-size: 0.85em;
+  /* Chevron drawn with CSS borders — keeps the disclosure marker close
+     to the summary text without needing an inline Icon component
+     (details/summary doesn't render arbitrary children pre-marker). */
+  content: '';
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-right: 1.75px solid currentColor;
+  border-bottom: 1.75px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+  margin-right: 0.1rem;
 }
 .admin-section .hardcoded-display[open] summary::before {
-  content: '▾ ';
+  transform: rotate(45deg);
 }
 .admin-section .hardcoded-display pre {
-  margin-top: 0.5rem;
+  margin-top: 0.7rem;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -1780,7 +1874,9 @@ textarea {
 }
 .admin-reason-item {
   display: grid;
-  grid-template-columns: 1fr auto auto auto;
+  /* text | count | source | (proto?) | date | remove. The proto cell
+     is rendered conditionally; auto columns collapse when absent. */
+  grid-template-columns: 1fr repeat(5, auto);
   align-items: center;
   gap: 0.6rem;
   padding: 0.45rem 0.7rem;
@@ -1789,9 +1885,89 @@ textarea {
   border-radius: 8px;
   font-size: 0.88rem;
 }
+/* Proto chips are AI-distilled chips that haven't earned a slot in
+   the user-facing picker yet. Visually softened so the admin can scan
+   "what's active" at a glance. Still fully interactive. */
+.admin-reason-item.is-proto {
+  opacity: 0.65;
+  background: var(--bg);
+}
+.admin-reason-proto {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--border);
+}
 .admin-reason-text {
+  /* Rendered as a <button> so the whole chip text is the rename
+     affordance. Strip the default button chrome so it reads as text. */
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: inherit;
   font-weight: 500;
   color: var(--fg);
+  cursor: pointer;
+  text-align: left;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.admin-reason-text:hover {
+  filter: none;
+  color: var(--accent);
+}
+.admin-reason-text:hover .admin-reason-edit-icon {
+  opacity: 1;
+}
+.admin-reason-edit-icon {
+  opacity: 0;
+  color: var(--muted);
+  transition: opacity 0.15s ease;
+}
+.admin-reason-text:hover .admin-reason-edit-icon {
+  color: var(--accent);
+}
+.admin-reason-edit {
+  font: inherit;
+  font-weight: 500;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  min-width: 0;
+}
+.admin-reason-edit:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+.admin-reason-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 0.78rem;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  letter-spacing: 0.01em;
+}
+.admin-reason-collision {
+  grid-column: 1 / -1;
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--error);
+  background: var(--error-soft);
+  padding: 0.3rem 0.55rem;
+  border-radius: 6px;
 }
 .admin-reason-source {
   font-size: 0.7rem;
@@ -1824,10 +2000,14 @@ textarea {
   border: 1px solid var(--border-strong);
   border-radius: 999px;
   color: var(--muted);
-  font-size: 0.95rem;
-  line-height: 1;
-  padding: 0.15rem 0.55rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
   cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
 }
 .admin-reason-remove:hover:not(:disabled) {
   color: var(--surface);
@@ -2267,15 +2447,199 @@ textarea {
 .badge.matched { background: var(--success-soft); color: var(--success); }
 .badge.unmatched { background: var(--warm-soft); color: var(--warm-strong); }
 .badge.error { background: var(--error-soft); color: var(--error); }
-.last-played { color: var(--muted); }
-/* "Played recently" — within the last 4 weeks. Visual nudge to think
-   twice (worship leaders generally want to space repeats out) without
-   excluding the song. Uses the --warm palette so it reads as a
-   caution, not a hard error. */
-.last-played-recent {
-  color: var(--warm-strong);
-  background: var(--warm-soft);
-  padding: 0.05rem 0.4rem;
+
+/* ─── Candidate redesign ─── */
+
+/* Counts inlined at the right edge of the AI candidates heading row.
+   Rendered as a <span> so it sits on the heading's baseline. */
+.candidates-summary {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.candidates-summary .cs-num {
+  font-weight: 700;
+  color: var(--fg);
+}
+.candidates-summary .cs-num-matched { color: var(--success); }
+.candidates-summary .cs-num-rejected { color: var(--muted); }
+.candidates-summary .cs-sep {
+  color: var(--border-strong);
+  margin: 0 0.05rem;
+}
+
+/* Uniform chip primitive used in the candidate metadata row.
+   Smaller and more text-friendly than .badge — chips can hold an icon
+   plus a short label without shouting. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.18rem 0.55rem;
   border-radius: 999px;
+  font-size: 0.76rem;
   font-weight: 600;
+  letter-spacing: 0.01em;
+  background: var(--bg);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.chip-matched {
+  background: var(--success-soft);
+  color: var(--success);
+  border-color: transparent;
+}
+.chip-unmatched {
+  background: var(--warm-soft);
+  color: var(--warm-strong);
+  border-color: transparent;
+}
+.chip-checking {
+  color: var(--muted);
+  background: var(--border);
+  border-color: transparent;
+}
+.chip-error {
+  background: var(--error-soft);
+  color: var(--error);
+  border-color: transparent;
+}
+.chip-time { font-weight: 500; }
+.chip-never { font-style: italic; }
+.chip-recent {
+  background: var(--warm-soft);
+  color: var(--warm-strong);
+  border-color: transparent;
+  font-weight: 600;
+}
+.chip-ccli { font-weight: 500; }
+
+/* Icon-only square buttons for outbound listen/lookup actions.
+   Brand-tinted on hover; neutral at rest so a row of three doesn't read
+   as a noisy parade of colors. */
+.iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease,
+    transform 0.12s ease;
+}
+.iconbtn:hover {
+  text-decoration: none;
+  transform: translateY(-1px);
+}
+.iconbtn-sm {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+}
+.iconbtn-spotify:hover {
+  color: #1db954;
+  border-color: #1db954;
+  background: rgba(29, 185, 84, 0.08);
+}
+.iconbtn-youtube:hover {
+  color: #ff0000;
+  border-color: #ff0000;
+  background: rgba(255, 0, 0, 0.08);
+}
+.iconbtn-chart:hover {
+  color: var(--warm-strong);
+  border-color: var(--warm);
+  background: var(--warm-soft);
+}
+@media (prefers-color-scheme: dark) {
+  .iconbtn-spotify:hover { color: #1ed760; border-color: #1ed760; }
+  .iconbtn-youtube:hover { color: #ff4444; border-color: #ff4444; }
+}
+
+/* Decision row: outbound icon buttons on the left, reject + commit on
+   the right. Keeps the most-used commit affordance pinned visually at
+   the bottom-right of every card. */
+.candidate .decision-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.65rem;
+}
+.candidate .decision-row .listen-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+.candidate .decision-row .decision-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+/* Promoted commit button — primary affordance per card. Accent fill
+   when actionable, muted outline when the card has no open slot. */
+.commit-menu {
+  position: relative;
+  display: inline-block;
+}
+.commit-btn {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.32rem 0.8rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: filter 0.12s ease, transform 0.12s ease;
+}
+.commit-btn:hover {
+  filter: brightness(1.07);
+}
+.commit-btn:disabled {
+  background: transparent;
+  color: var(--muted);
+  border: 1px dashed var(--border-strong);
+  cursor: not-allowed;
+}
+.commit-menu-pop {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  min-width: 11rem;
+  z-index: 20;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: var(--shadow-md);
+  padding: 0.3rem;
+  display: grid;
+  gap: 0.1rem;
+}
+.commit-menu-item {
+  background: transparent;
+  color: var(--fg);
+  border: 0;
+  text-align: left;
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 0.4rem 0.65rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.commit-menu-item:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  filter: none;
 }

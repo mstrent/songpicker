@@ -34,6 +34,7 @@ import {
   publicShape as publicRejectionReasonsShape,
   recordRejectReason as recordRejectReasonInternal,
   removeCommonReason as removeCommonReasonInternal,
+  renameCommonReason as renameCommonReasonInternal,
 } from './rejectionReasons'
 import {
   loadPickerSession,
@@ -580,8 +581,8 @@ export const getRejectionReasons = onCall(async (req) => {
   return publicRejectionReasonsShape(doc)
 })
 
-// Bound the secret here too so the inline distillation path (when
-// freeformSinceDistill crosses the threshold) can reach Claude.
+// Bound the secret here too so the inline match + distillation
+// (Tier 2 / Tier 3 in recordRejectReason) can reach Claude.
 export const recordRejectReason = onCall(
   { secrets: [ANTHROPIC_API_KEY] },
   async (req) => {
@@ -599,8 +600,11 @@ export const recordRejectReason = onCall(
         return null
       }
     })()
-    const doc = await recordRejectReasonInternal(reason, apiKey)
-    return publicRejectionReasonsShape(doc)
+    const { doc, matchedChipText } = await recordRejectReasonInternal(reason, apiKey)
+    return {
+      ...publicRejectionReasonsShape(doc),
+      matchedChipText,
+    }
   },
 )
 
@@ -613,4 +617,27 @@ export const removeCommonReason = onCall(async (req) => {
   await removeCommonReasonInternal(text)
   const doc = await listRejectionReasons()
   return publicRejectionReasonsShape(doc)
+})
+
+// Admin-only rename of an existing reject-reason chip. Preserves
+// useCount/source. Returns the updated chip list along with an
+// optional collisionWith when the new text would merge into another
+// chip — callers surface that as an inline error.
+export const renameCommonReason = onCall(async (req) => {
+  requireAdmin(req)
+  const { oldText, newText } = req.data as {
+    oldText?: string
+    newText?: string
+  }
+  if (!oldText || typeof oldText !== 'string' || !oldText.trim()) {
+    throw new HttpsError('invalid-argument', 'oldText (non-empty string) required')
+  }
+  if (!newText || typeof newText !== 'string' || !newText.trim()) {
+    throw new HttpsError('invalid-argument', 'newText (non-empty string) required')
+  }
+  const { doc, collisionWith } = await renameCommonReasonInternal(oldText, newText)
+  return {
+    ...publicRejectionReasonsShape(doc),
+    collisionWith: collisionWith ?? null,
+  }
 })

@@ -1,13 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   getAdminPromptConfig,
   getRejectionReasons,
   removeCommonReason,
+  renameCommonReason,
   saveAdminPromptConfig,
   type AdminPromptConfig,
   type CommonReason,
   type PromptType,
 } from '../lib/api'
+import { Icon } from './Icon'
+import { activeAiChipTexts } from '../lib/chipRanking'
 
 const COPY: Record<PromptType, { label: string; help: string }> = {
   role: {
@@ -81,7 +84,10 @@ export function AdminPage() {
           model's system message. Hidden from regular users; shown here
           so admins can see exactly what the model is asked to enforce.
         </p>
-        <pre>{config.technical}</pre>
+        <details className="hardcoded-display">
+          <summary>View technical requirements</summary>
+          <pre>{config.technical}</pre>
+        </details>
       </section>
 
       <RejectionReasonsSection />
@@ -93,6 +99,13 @@ function RejectionReasonsSection() {
   const [reasons, setReasons] = useState<CommonReason[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [removingText, setRemovingText] = useState<string | null>(null)
+  // Inline-edit state: which chip is being renamed + the draft text.
+  // Keyed by the chip's current text. Collision errors live per-row.
+  const [editingText, setEditingText] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  const [renaming, setRenaming] = useState(false)
+  const [collisionError, setCollisionError] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement | null>(null)
 
   async function refresh() {
     setError(null)
@@ -108,6 +121,15 @@ function RejectionReasonsSection() {
     void refresh()
   }, [])
 
+  // Auto-focus the rename input as soon as it appears. The ref check
+  // is defensive — React may schedule the input mount across a tick.
+  useEffect(() => {
+    if (editingText !== null) {
+      const t = setTimeout(() => inputRef.current?.select(), 0)
+      return () => clearTimeout(t)
+    }
+  }, [editingText])
+
   async function handleRemove(text: string) {
     setRemovingText(text)
     setError(null)
@@ -121,6 +143,46 @@ function RejectionReasonsSection() {
     }
   }
 
+  function startEdit(text: string) {
+    setEditingText(text)
+    setDraft(text)
+    setCollisionError(null)
+  }
+
+  function cancelEdit() {
+    setEditingText(null)
+    setDraft('')
+    setCollisionError(null)
+  }
+
+  async function commitEdit() {
+    if (editingText === null) return
+    const oldText = editingText
+    const newText = draft.trim()
+    if (!newText || newText === oldText) {
+      cancelEdit()
+      return
+    }
+    setRenaming(true)
+    setError(null)
+    setCollisionError(null)
+    try {
+      const res = await renameCommonReason({ oldText, newText })
+      if (res.data.collisionWith) {
+        setCollisionError(
+          `"${res.data.collisionWith}" already covers this — delete one or pick a different name.`,
+        )
+      } else {
+        setReasons(res.data.common)
+        cancelEdit()
+      }
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setRenaming(false)
+    }
+  }
+
   return (
     <section className="admin-section">
       <h3>Reject-reason chips (system-wide pool)</h3>
@@ -128,8 +190,9 @@ function RejectionReasonsSection() {
         The clickable chips that show up on the reject-rationale picker.
         Seeded with a handful of defaults; grows automatically as users
         type freeform reasons (Claude distills the freeform log into new
-        chip-worthy categories after every few entries). Removing a chip
-        here pulls it from every user's picker immediately.
+        chip-worthy categories after every few entries). Click a chip's
+        text to rename it. Removing a chip pulls it from every user's
+        picker immediately.
       </p>
       {error && <div className="error">{error}</div>}
       {reasons === null ? (
@@ -138,27 +201,100 @@ function RejectionReasonsSection() {
         <p className="muted">No chips yet — the pool will fill in as users reject songs and add reasons.</p>
       ) : (
         <ul className="admin-reason-list">
-          {reasons.map((r) => (
-            <li key={r.text} className="admin-reason-item">
-              <span className="admin-reason-text">{r.text}</span>
-              <span className={`admin-reason-source source-${r.source}`}>
-                {sourceLabel(r.source)}
-              </span>
-              <span className="admin-reason-date">
-                {formatAddedAt(r.addedAt)}
-              </span>
-              <button
-                type="button"
-                className="admin-reason-remove"
-                onClick={() => void handleRemove(r.text)}
-                disabled={removingText !== null}
-                title="Remove this chip from the global pool"
-                aria-label={`Remove "${r.text}"`}
+          {(() => {
+            const activeAi = activeAiChipTexts(reasons)
+            return reasons.map((r) => {
+              const isEditing = editingText === r.text
+              // "Proto" = an AI-distilled chip that hasn't earned a
+              // user-facing slot yet. Visually dimmed so the admin can
+              // see at a glance which chips are live vs. queued.
+              const isProto = r.source === 'ai' && !activeAi.has(r.text)
+              return (
+              <li
+                key={r.text}
+                className={`admin-reason-item${isProto ? ' is-proto' : ''}`}
               >
-                {removingText === r.text ? '…' : '×'}
-              </button>
-            </li>
-          ))}
+                {isEditing ? (
+                  <input
+                    ref={inputRef}
+                    className="admin-reason-edit"
+                    value={draft}
+                    onChange={(e) => {
+                      setDraft(e.target.value)
+                      if (collisionError) setCollisionError(null)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        void commitEdit()
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault()
+                        cancelEdit()
+                      }
+                    }}
+                    onBlur={() => {
+                      // Blur saves rather than cancels — matches
+                      // common form-field convention. Esc is the
+                      // explicit "discard" affordance.
+                      void commitEdit()
+                    }}
+                    disabled={renaming}
+                    aria-label={`Rename "${r.text}"`}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="admin-reason-text"
+                    onClick={() => startEdit(r.text)}
+                    title="Click to rename this chip"
+                  >
+                    {r.text}
+                    <Icon
+                      name="edit"
+                      size={11}
+                      className="admin-reason-edit-icon"
+                    />
+                  </button>
+                )}
+                <span
+                  className="admin-reason-count"
+                  title={`Used ${r.useCount} time${r.useCount === 1 ? '' : 's'}`}
+                >
+                  × {r.useCount}
+                </span>
+                <span className={`admin-reason-source source-${r.source}`}>
+                  {sourceLabel(r.source)}
+                </span>
+                {isProto && (
+                  <span
+                    className="admin-reason-proto"
+                    title="Distilled but not yet in the top — hidden from the user picker until usage moves it up"
+                  >
+                    proto
+                  </span>
+                )}
+                <span className="admin-reason-date">
+                  {formatAddedAt(r.addedAt)}
+                </span>
+                <button
+                  type="button"
+                  className="admin-reason-remove"
+                  onClick={() => void handleRemove(r.text)}
+                  disabled={removingText !== null || renaming}
+                  title="Remove this chip from the global pool"
+                  aria-label={`Remove "${r.text}"`}
+                >
+                  {removingText === r.text ? '…' : <Icon name="x" size={13} />}
+                </button>
+                {isEditing && collisionError && (
+                  <div className="admin-reason-collision">
+                    {collisionError}
+                  </div>
+                )}
+              </li>
+              )
+            })
+          })()}
         </ul>
       )}
     </section>

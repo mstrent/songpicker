@@ -380,17 +380,34 @@ export const commitPlanItems = httpsCallable<
 
 /** A reason chip in the global rejection-reasons list. `source` tracks
  *  where the chip came from: 'seed' (baked-in defaults), 'manual'
- *  (typed by a user), 'ai' (distilled from freeform reasons). */
+ *  (typed by a user), 'ai' (distilled from freeform reasons).
+ *  `useCount` is the running tally of times this chip has been used
+ *  (via chip-tap, exact-text freeform, or AI-semantic match). */
 export interface CommonReason {
   text: string
   addedAt: number
   source: 'manual' | 'ai' | 'seed'
+  useCount: number
 }
 
 export interface RejectionReasonsView {
   common: CommonReason[]
-  freeformSinceDistill: number
-  lastDistilledAt: number
+}
+
+/** Response shape for recordRejectReason. `matchedChipText` is set when
+ *  the saved reason matched an existing chip (either via exact text or
+ *  AI-semantic match) — callers should overwrite their local
+ *  candidate's rejectReason with this value so future AI turns see
+ *  consistent canonical metadata. */
+export interface RecordRejectReasonResponse extends RejectionReasonsView {
+  matchedChipText: string | null
+}
+
+/** Response shape for renameCommonReason. `collisionWith` is set when
+ *  the new text would normalize to the same key as a different
+ *  existing chip — surfaced inline so the admin can resolve manually. */
+export interface RenameCommonReasonResponse extends RejectionReasonsView {
+  collisionWith: string | null
 }
 
 export const getRejectionReasons = httpsCallable<void, RejectionReasonsView>(
@@ -400,10 +417,15 @@ export const getRejectionReasons = httpsCallable<void, RejectionReasonsView>(
 
 export const recordRejectReason = httpsCallable<
   { reason: string },
-  RejectionReasonsView
+  RecordRejectReasonResponse
 >(functions, 'recordRejectReason')
 
 export const removeCommonReason = httpsCallable<
   { text: string },
   RejectionReasonsView
 >(functions, 'removeCommonReason')
+
+export const renameCommonReason = httpsCallable<
+  { oldText: string; newText: string },
+  RenameCommonReasonResponse
+>(functions, 'renameCommonReason')

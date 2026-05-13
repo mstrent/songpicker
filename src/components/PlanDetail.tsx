@@ -33,11 +33,14 @@ import {
   patchCachedTheme,
 } from '../lib/cache'
 import { isSongSlot } from '../lib/songSlots'
-import { praiseChartsSearchUrl, spotifySearchUrl } from '../lib/searchLinks'
+import { pickerVisibleChips } from '../lib/chipRanking'
 import { usePromptConfig } from '../lib/usePromptConfig'
 import { ArrangementKeyEditor } from './ArrangementKeyEditor'
 import { PromptBody } from './PromptBody'
 import { PromptPill } from './PromptPill'
+import { Icon } from './Icon'
+import { EmptyState } from './EmptyState'
+import { SongLookupLinks } from './SongLookupLinks'
 
 type OpenPrompt = 'role' | 'structure' | null
 
@@ -190,6 +193,20 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   // flip to true the first time anything gets rejected so the user
   // sees the rationale UI without an extra click.
   const [rejectedPoolOpen, setRejectedPoolOpen] = useState(false)
+
+  // Which candidate's "Commit to slot" menu is currently open (if any).
+  // Tracked at component scope so click-outside closes it globally.
+  const [openCommitMenuId, setOpenCommitMenuId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!openCommitMenuId) return
+    const onDocDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null
+      if (t && t.closest('.commit-menu')) return
+      setOpenCommitMenuId(null)
+    }
+    document.addEventListener('mousedown', onDocDown)
+    return () => document.removeEventListener('mousedown', onDocDown)
+  }, [openCommitMenuId])
 
   const themeInitialized = useRef(false)
   const notesInitialized = useRef(false)
@@ -1372,7 +1389,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
 
   // Save a freeform-typed reason. Same as setCandidateReason plus a
   // server-side call so the global log + distillation trigger see the
-  // new text. Refreshes chips from the response.
+  // new text. Refreshes chips from the response. If the backend
+  // matched the freeform text to an existing chip (exact or AI
+  // semantic), we overwrite the local rejectReason with the canonical
+  // chip text so future AI turns see uniform metadata across users.
   async function saveFreeformReason(candidateId: string, reason: string) {
     const trimmed = reason.trim()
     if (!trimmed) {
@@ -1386,6 +1406,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     try {
       const res = await recordRejectReason({ reason: trimmed })
       setReasonChips(res.data.common)
+      if (res.data.matchedChipText && res.data.matchedChipText !== trimmed) {
+        setCandidateReason(candidateId, res.data.matchedChipText)
+      }
     } catch {
       // Recording is best-effort — local reason is already saved. The
       // global chip pool just won't grow this time.
@@ -1998,15 +2021,45 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             })()}
           </span>
           <a
-            className="pco-link"
+            className="pco-link icon-text"
             href={`https://services.planningcenteronline.com/plans/${plan.id}`}
             target="_blank"
             rel="noopener noreferrer"
             title="Open in Planning Center"
           >
-            Open in Planning Center ↗
+            Open in Planning Center
+            <Icon name="external-link" size={13} />
           </a>
         </div>
+        {(() => {
+          // Status strip: at-a-glance progress + countdown. Theme used
+          // to live here too but was redundant with the plan title —
+          // dropped. Only renders when at least one chip has data.
+          const songSlots = (items ?? []).filter(isSongSlot)
+          const songsFilled = songSlots.filter((it) => it.songId != null).length
+          const songsTotal = songSlots.length
+          const dayLabel = relativeDayLabel(plan.sortDate)
+          if (songsTotal === 0 && !dayLabel) return null
+          let progressClass = 'status-chip-progress'
+          if (songsTotal > 0 && songsFilled === songsTotal) {
+            progressClass += ' status-chip-progress-done'
+          } else if (songsTotal > 0 && songsFilled === 0) {
+            progressClass += ' status-chip-progress-empty'
+          }
+          return (
+            <div className="status-strip" aria-label="Plan status">
+              {songsTotal > 0 && (
+                <span className={`status-chip ${progressClass}`}>
+                  <Icon name="music" size={12} />
+                  {songsFilled} of {songsTotal} picked
+                </span>
+              )}
+              {dayLabel && (
+                <span className="status-chip status-chip-day">{dayLabel}</span>
+              )}
+            </div>
+          )
+        })()}
       </div>
 
       <div className="plan-body">
@@ -2109,7 +2162,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     {filled ? (
                       <div className="ititle-row">
                         <a
-                          className="ititle ititle-link"
+                          className="ititle ititle-link icon-text"
                           href={`https://services.planningcenteronline.com/songs/${it.songId}`}
                           target="_blank"
                           rel="noopener noreferrer"
@@ -2119,7 +2172,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                           // gets the dragstart instead.
                           draggable={false}
                         >
-                          {displayTitle || '(song)'} ↗
+                          {displayTitle || '(song)'}
+                          <Icon name="external-link" size={12} />
                         </a>
                         {isSong && (
                           <button
@@ -2129,7 +2183,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                             title="Remove this song from the slot and reopen it for new suggestions"
                             aria-label="Remove song from slot"
                           >
-                            ×
+                            <Icon name="x" size={14} />
                           </button>
                         )}
                       </div>
@@ -2137,7 +2191,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       <div className="ititle">{it.title || '(no title)'}</div>
                     )}
                     {isSong && !filled && (
-                      <span className="song-empty">Pick a song</span>
+                      <span className="song-empty">Drop a song here</span>
                     )}
                     {showMeta && (
                       <div className="item-meta">
@@ -2194,16 +2248,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                         />
                       )}
                       {displayTitle && (
-                        <a
-                          className="spotify-link"
-                          href={spotifySearchUrl(displayTitle)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title="Search Spotify"
-                          draggable={false}
-                        >
-                          Spotify ↗
-                        </a>
+                        <div className="lookup-row">
+                          <SongLookupLinks query={displayTitle} size="sm" />
+                        </div>
                       )}
                     </div>
                   )}
@@ -2468,9 +2515,12 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                 Skip
               </button>
             </div>
-            {reasonChips.length > 0 && (
+            {(() => {
+              const visible = pickerVisibleChips(reasonChips)
+              if (visible.length === 0) return null
+              return (
               <div className="rationale-chips">
-                {reasonChips.map((chip) => (
+                {visible.map((chip) => (
                   <span key={chip.text} className="rationale-chip">
                     <button
                       type="button"
@@ -2498,7 +2548,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                   </span>
                 ))}
               </div>
-            )}
+              )
+            })()}
             <div className="rationale-freeform">
               <textarea
                 className="rationale-input"
@@ -2646,6 +2697,18 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         </div>
 
         <div className="plan-right">
+      {candidates.length === 0 && (
+        <EmptyState
+          icon="sparkle"
+          title="No suggestions yet"
+          body={
+            <>
+              Tap <span className="empty-state-emph">Suggest songs</span> to
+              get a fresh round from the AI.
+            </>
+          }
+        />
+      )}
       {candidates.length > 0 && (() => {
         // Active = not-rejected. Rejected ones get tucked into the
         // collapsed disclosure below to reduce clutter. Committed
@@ -2655,29 +2718,56 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         const emptySongSlots = (items ?? []).filter(
           (it) => isSongSlot(it) && !it.songId,
         )
+        const inLibraryCount = candidates.filter(
+          (c) => c.matchStatus === 'matched',
+        ).length
+        const rejectedCount = candidates.filter(
+          (c) => c.decision === 'reject',
+        ).length
 
         if (active.length === 0) return null
         return (
         <section className="candidates">
           <h3 className="ai-heading">
             <span className="sparkle" aria-hidden>✨</span>
-            <span className="gradient-text">
-              AI candidates ({active.length})
+            <span className="gradient-text">AI candidates</span>
+            <span
+              className="candidates-summary"
+              aria-label="Candidate counts"
+            >
+              <span className="cs-num">{active.length}</span>
+              <span className="cs-label">
+                candidate{active.length === 1 ? '' : 's'}
+              </span>
+              <span className="cs-sep" aria-hidden>·</span>
+              <span className="cs-num cs-num-matched">{inLibraryCount}</span>
+              <span className="cs-label">in library</span>
+              {rejectedCount > 0 && (
+                <>
+                  <span className="cs-sep" aria-hidden>·</span>
+                  <span className="cs-num cs-num-rejected">{rejectedCount}</span>
+                  <span className="cs-label">rejected</span>
+                </>
+              )}
             </span>
-            <span className="provider-tag">via {AI_PROVIDER_LABEL}</span>
           </h3>
           <ul>
-            {active.map((c) => {
+            {active.map((c, i) => {
               const matched = c.matchStatus === 'matched' && c.song
               const candidateDraggable = !!matched && !c.committedAt
               const candidateBeingDragged =
                 dragKind === 'candidate' && dragSourceId === c.id
+              // Stagger entrance — CSS animation reads this delay so
+              // newly-arrived cards cascade in instead of all popping
+              // at once. Cap at 12 so a big batch doesn't drag on.
+              const enterDelay = `${Math.min(i, 12) * 50}ms`
               return (
                 <li
                   key={c.id}
                   className={`candidate match-${c.matchStatus} decision-${c.decision}${
                     candidateDraggable ? ' is-draggable' : ''
                   }${candidateBeingDragged ? ' is-dragging' : ''}`}
+                  style={{ animationDelay: enterDelay }}
                   draggable={candidateDraggable || undefined}
                   onDragStart={(e) => {
                     if (!candidateDraggable) return
@@ -2700,14 +2790,15 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                   <div className="ctitle">
                     {matched ? (
                       <a
-                        className="ctitle-link"
+                        className="ctitle-link icon-text"
                         href={`https://services.planningcenteronline.com/songs/${c.song!.id}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         title="Open in Planning Center"
                         draggable={false}
                       >
-                        {c.suggestion.title} ↗
+                        {c.suggestion.title}
+                        <Icon name="external-link" size={12} />
                       </a>
                     ) : (
                       c.suggestion.title
@@ -2727,11 +2818,16 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                   )}
                   <div className="cstatus">
                     {c.matchStatus === 'checking' && (
-                      <span className="badge checking">checking library…</span>
+                      <span className="chip chip-checking">
+                        checking library…
+                      </span>
                     )}
                     {matched && (
                       <>
-                        <span className="badge matched">in library</span>
+                        <span className="chip chip-matched">
+                          <Icon name="check" size={12} />
+                          in library
+                        </span>
                         {c.song!.lastScheduledAt ? (
                           (() => {
                             const recent = playedWithinDays(
@@ -2740,7 +2836,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                             )
                             return (
                               <span
-                                className={`last-played${recent ? ' last-played-recent' : ''}`}
+                                className={`chip chip-time${recent ? ' chip-recent' : ''}`}
                                 title={
                                   recent
                                     ? `Played ${relativeTime(c.song!.lastScheduledAt)} — recent enough that congregations may notice if you repeat it`
@@ -2758,44 +2854,34 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                             )
                           })()
                         ) : (
-                          <span className="last-played">never played</span>
+                          <span className="chip chip-time chip-never">
+                            never played
+                          </span>
                         )}
                         {c.song!.ccliNumber && (
-                          <span className="last-played" title="CCLI number">
-                            · CCLI {c.song!.ccliNumber}
+                          <span
+                            className="chip chip-ccli"
+                            title="CCLI number"
+                          >
+                            CCLI {c.song!.ccliNumber}
                           </span>
                         )}
                       </>
                     )}
                     {c.matchStatus === 'unmatched' && (
-                      <>
-                        <span className="badge unmatched">not in library</span>
-                        <a
-                          className="chart-search-link"
-                          href={praiseChartsSearchUrl(c.suggestion.title)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title="Search PraiseCharts for a chord chart"
-                        >
-                          Find chart ↗
-                        </a>
-                      </>
+                      <span className="chip chip-unmatched">
+                        <Icon name="alert-triangle" size={12} />
+                        not in library
+                      </span>
                     )}
                     {c.matchStatus === 'error' && (
-                      <span className="badge error" title={c.error}>
+                      <span
+                        className="chip chip-error"
+                        title={c.error}
+                      >
                         lookup failed
                       </span>
                     )}
-                    <a
-                      className="spotify-link"
-                      href={spotifySearchUrl(c.suggestion.title)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title="Search Spotify"
-                      draggable={false}
-                    >
-                      Spotify ↗
-                    </a>
                   </div>
                   {c.suggestion.chorusSnippet && (
                     <div className="chorus-snippet">
@@ -2805,64 +2891,102 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     </div>
                   )}
                   <div className="decision-row">
-                    <button
-                      type="button"
-                      className={`decision-btn decision-reject${c.decision === 'reject' ? ' on' : ''}`}
-                      onClick={() => setDecision(c.id, 'reject')}
-                      disabled={!!c.committedAt}
-                      title={
-                        c.decision === 'reject'
-                          ? 'Click again to undo'
-                          : 'Reject this song'
-                      }
-                    >
-                      ✗ Reject
-                    </button>
+                    {/* Outbound listen/lookup buttons — square icon-only,
+                        brand-colored on hover. Provider list lives in
+                        SongLookupLinks so this row stays in sync with
+                        the service-order filled-slot row. */}
+                    <div className="listen-actions">
+                      <SongLookupLinks query={c.suggestion.title} />
+                    </div>
 
-                    {matched && c.committedAt && (
-                      // Service order on the left is the source of
-                      // truth for WHICH slot. Showing a slot label
-                      // here was nonsensical anyway — PCO overwrites
-                      // the slot's title with the song name on commit.
-                      <span className="committed-badge">✓ Committed</span>
-                    )}
+                    <div className="decision-actions">
+                      <button
+                        type="button"
+                        className={`decision-btn decision-reject icon-text${c.decision === 'reject' ? ' on' : ''}`}
+                        onClick={() => setDecision(c.id, 'reject')}
+                        disabled={!!c.committedAt}
+                        title={
+                          c.decision === 'reject'
+                            ? 'Click again to undo'
+                            : 'Reject this song'
+                        }
+                      >
+                        <Icon name="x" size={13} />
+                        Reject
+                      </button>
 
-                    {matched && !c.committedAt && (() => {
-                      // Empty slot picker commits directly on selection
-                      // — no intermediate "earmarked but not committed"
-                      // state since we dropped shortlist.
-                      const avail = emptySongSlots
-                      return (
-                        <select
-                          className="slot-picker"
-                          value=""
-                          disabled={avail.length === 0}
-                          onChange={(e) => {
-                            const slotId = e.target.value
-                            if (!slotId) return
-                            const slot = avail.find((s) => s.id === slotId)
-                            if (!slot) return
-                            void placeSongAction({ candidate: c, slotItem: slot })
-                          }}
-                          title={
-                            avail.length === 0
-                              ? 'No empty song slots available'
-                              : 'Commit to slot'
-                          }
-                        >
-                          <option value="">
-                            {avail.length === 0
-                              ? 'No open slots'
-                              : 'Commit to slot…'}
-                          </option>
-                          {avail.map((s) => (
-                            <option key={s.id} value={s.id}>
-                              {s.title}
-                            </option>
-                          ))}
-                        </select>
-                      )
-                    })()}
+                      {matched && c.committedAt && (
+                        // Service order on the left is the source of
+                        // truth for WHICH slot. Showing a slot label
+                        // here was nonsensical anyway — PCO overwrites
+                        // the slot's title with the song name on commit.
+                        <span className="committed-badge icon-text">
+                          <Icon name="check" size={13} />
+                          Committed
+                        </span>
+                      )}
+
+                      {matched && !c.committedAt && (() => {
+                        // Replaces the old <select> with a button +
+                        // popover. The button is the primary "action"
+                        // affordance on each card and gets accent
+                        // styling; the popover lists the same options
+                        // the select used to.
+                        const avail = emptySongSlots
+                        const isOpen = openCommitMenuId === c.id
+                        const disabled = avail.length === 0
+                        return (
+                          <div
+                            className={`commit-menu${isOpen ? ' open' : ''}`}
+                          >
+                            <button
+                              type="button"
+                              className="commit-btn icon-text"
+                              disabled={disabled}
+                              onClick={() =>
+                                setOpenCommitMenuId(isOpen ? null : c.id)
+                              }
+                              title={
+                                disabled
+                                  ? 'No empty song slots available'
+                                  : 'Commit to slot'
+                              }
+                              aria-haspopup="menu"
+                              aria-expanded={isOpen}
+                            >
+                              {disabled ? 'No open slots' : 'Commit to slot'}
+                              {!disabled && (
+                                <Icon name="chevron-down" size={13} />
+                              )}
+                            </button>
+                            {isOpen && !disabled && (
+                              <div
+                                className="commit-menu-pop"
+                                role="menu"
+                              >
+                                {avail.map((s) => (
+                                  <button
+                                    key={s.id}
+                                    type="button"
+                                    role="menuitem"
+                                    className="commit-menu-item"
+                                    onClick={() => {
+                                      setOpenCommitMenuId(null)
+                                      void placeSongAction({
+                                        candidate: c,
+                                        slotItem: s,
+                                      })
+                                    }}
+                                  >
+                                    {s.title}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
+                    </div>
                   </div>
                 </li>
               )
@@ -3015,8 +3139,6 @@ function formatSongDisamb(it: PlanItem): string {
   return parts.length > 0 ? `(${parts.join(', ')})` : ''
 }
 
-const AI_PROVIDER_LABEL = 'Claude Sonnet 4.6'
-
 // True iff `iso` parses to a date within the last `days` days. Used to
 // flag "recently played" candidates so the user can avoid repeating
 // what the congregation just heard.
@@ -3034,4 +3156,32 @@ function relativeTime(iso: string): string {
   if (days < 365) return `${Math.floor(days / 30)} months ago`
   const years = Math.floor(days / 365)
   return `${years} year${years === 1 ? '' : 's'} ago`
+}
+
+// Forward-looking relative label used in the plan-header status strip.
+// "Today" / "Tomorrow" / "In 4 days" — and yesterday/past for completed
+// services so the chip still reads sensibly when revisiting an old plan.
+function relativeDayLabel(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const target = new Date(iso)
+  if (Number.isNaN(target.getTime())) return null
+  const startOfDay = (d: Date) => {
+    const x = new Date(d)
+    x.setHours(0, 0, 0, 0)
+    return x
+  }
+  const days = Math.round(
+    (startOfDay(target).getTime() - startOfDay(new Date()).getTime()) /
+      (1000 * 60 * 60 * 24),
+  )
+  if (days === 0) return 'Today'
+  if (days === 1) return 'Tomorrow'
+  if (days === -1) return 'Yesterday'
+  if (days > 1 && days < 14) return `In ${days} days`
+  if (days < -1 && days > -14) return `${-days} days ago`
+  return target.toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  })
 }

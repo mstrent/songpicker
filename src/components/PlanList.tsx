@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { listPlans, type Plan, type TeamMember } from '../lib/api'
 import { namesMatch } from '../lib/names'
+import { Icon } from './Icon'
+import { EmptyState } from './EmptyState'
 
 interface Props {
   currentUserName: string | null
@@ -40,7 +42,19 @@ export function PlanList({ currentUserName, currentUserEmail }: Props) {
 
   if (error) return <div className="error">Error: {error}</div>
   if (!plans) return <div>Loading plans…</div>
-  if (plans.length === 0) return <div>No upcoming plans found.</div>
+  if (plans.length === 0)
+    return (
+      <EmptyState
+        icon="music"
+        title="No upcoming plans"
+        body={
+          <>
+            Your Planning Center service plans will show up here. Once
+            you've got a plan scheduled, jump in to start picking songs.
+          </>
+        }
+      />
+    )
 
   const myEmail = currentUserEmail?.trim().toLowerCase() ?? ''
 
@@ -81,13 +95,14 @@ export function PlanList({ currentUserName, currentUserEmail }: Props) {
     return (
       <li key={`${p.serviceTypeId}/${p.id}`}>
         <a
-          className="pco-quick"
+          className="pco-quick icon-text"
           href={`https://services.planningcenteronline.com/plans/${p.id}`}
           target="_blank"
           rel="noopener noreferrer"
           title="Open this plan in Planning Center"
         >
-          Planning Center ↗
+          Planning Center
+          <Icon name="external-link" size={12} />
         </a>
         <a
           className={`plan-link${stateClass}${isPast ? ' past' : ''}`}
@@ -157,7 +172,7 @@ export function PlanList({ currentUserName, currentUserEmail }: Props) {
         <details className="past-plans-group">
           <summary>
             <span className="chevron" aria-hidden>
-              ▸
+              <Icon name="chevron-right" size={14} />
             </span>
             <span>{pastCountLabel}</span>
             {myPastCount > 0 && (

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { savePcoCredentials } from '../lib/api'
+import { Icon } from './Icon'
 
 interface Props {
   onSaved: () => void
@@ -37,11 +38,13 @@ export function PcoSetup({ onSaved }: Props) {
         <li>
           Open{' '}
           <a
+            className="icon-text"
             href="https://api.planningcenteronline.com/oauth/applications"
             target="_blank"
             rel="noopener noreferrer"
           >
-            api.planningcenteronline.com/oauth/applications ↗
+            api.planningcenteronline.com/oauth/applications
+            <Icon name="external-link" size={12} />
           </a>
         </li>
         <li>Scroll down to <strong>Personal Access Tokens</strong>.</li>
