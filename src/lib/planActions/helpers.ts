@@ -17,10 +17,12 @@ export interface CandidateState {
   assignedSlotItemId: string | null
   priorSlotTitle: string | null
   suggestion: { title: string }
-  /** Matched library song, when known. Used as a second signal for
-   *  taint detection — the user may have committed a song whose
-   *  PCO library title differs from the AI's proposed title. */
-  song?: { title?: string | null } | null | undefined
+  /** Matched library song, when known. `title` is used as a second
+   *  signal for taint detection — the user may have committed a
+   *  song whose PCO library title differs from the AI's proposed
+   *  title. `id` is what the resolver passes to PCO as the linked
+   *  song's id when committing. */
+  song?: { id?: string; title?: string | null } | null | undefined
 }
 
 /** Build the set of normalised song titles currently "known" to the
