@@ -16,6 +16,12 @@ export interface DecisionChange {
 }
 
 export interface ApplyDecisionDeps {
+  /** Snapshot of the candidate pool as the caller sees it RIGHT
+   *  NOW. Used to compute eligibility (committed-skip,
+   *  already-rejected skip, etc.) synchronously — the React state
+   *  setter below may run its updater asynchronously, so we can't
+   *  rely on it to determine which ids actually changed. */
+  candidates: readonly CandidateState[]
   /** React-shaped state mutator. */
   setCandidates: (
     update: (prev: readonly CandidateState[]) => CandidateState[],
@@ -54,28 +60,37 @@ export function applyDecisionChange(
   source: DecisionSource,
   deps: ApplyDecisionDeps,
 ): ApplyDecisionResult {
+  // Compute eligibility synchronously from the supplied snapshot.
+  // We don't rely on setCandidates' functional updater to decide
+  // changedIds because React 19 may defer it; reading the snapshot
+  // directly gives us a deterministic result we can act on (emit
+  // messages, bump signals) before this function returns.
   const changedIds: string[] = []
   const titleById = new Map<string, string>()
-
-  deps.setCandidates((prev) => {
-    return prev.map((c) => {
-      if (!change.ids.includes(c.id)) return c
-      titleById.set(c.id, c.suggestion.title)
-      if (change.decision === 'reject') {
-        const songId = c.song?.id
-        if (songId && deps.committedSongIds.has(songId)) return c
-        if (c.decision === 'reject') return c
-        changedIds.push(c.id)
-        return { ...c, decision: 'reject' }
-      }
-      // unreject
-      if (c.decision !== 'reject') return c
+  for (const c of deps.candidates) {
+    if (!change.ids.includes(c.id)) continue
+    titleById.set(c.id, c.suggestion.title)
+    if (change.decision === 'reject') {
+      if (c.song?.id && deps.committedSongIds.has(c.song.id)) continue
+      if (c.decision === 'reject') continue
       changedIds.push(c.id)
-      return { ...c, decision: 'pending' }
-    })
-  })
+    } else {
+      if (c.decision !== 'reject') continue
+      changedIds.push(c.id)
+    }
+  }
 
   if (changedIds.length === 0) return { changedIds }
+
+  // Apply the flip via setCandidates. The functional updater is
+  // pure (idempotent); whether React runs it once or batches it is
+  // immaterial because the outcome depends only on the prev arg
+  // and the precomputed changedIds set.
+  const flipTo = change.decision === 'reject' ? 'reject' : 'pending'
+  const flipSet = new Set(changedIds)
+  deps.setCandidates((prev) =>
+    prev.map((c) => (flipSet.has(c.id) ? { ...c, decision: flipTo } : c)),
+  )
 
   const titles = changedIds
     .map((id) => titleById.get(id) ?? `(unknown ${id})`)

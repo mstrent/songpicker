@@ -31,6 +31,9 @@ function harness(
     deps: undefined as unknown as ApplyDecisionDeps,
   }
   h.deps = {
+    get candidates() {
+      return h.candidates
+    },
     setCandidates: (update) => {
       h.candidates = update(h.candidates)
     },
