@@ -1,52 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react'
-import {
-  clearSongFromSlot,
-  loadSession,
-  placeSongInSlot,
-  saveSession,
-  savePlanNotes,
-  savePlanTheme,
-  searchSongs,
-  suggestSongs,
-  type AiAction,
-  type AiCandidate,
-  type ConversationTurn,
-  type Decision,
-  type MatchStatus,
-  type PersistedCandidate,
-  type Plan,
-  type PlanItem,
-  type PlanNote,
-  type SessionMessage,
-  type Song,
-  type SongSuggestion,
-} from '../lib/api'
-import {
-  invalidatePlanContext,
-  loadPlanContext,
-  patchCachedNotes,
-  patchCachedTheme,
-} from '../lib/cache'
 import { isSongSlot } from '../lib/songSlots'
-import {
-  fallbackSlotTitle as fallbackSlotTitleHelper,
-  resolveRestoreTitle,
-} from '../lib/planActions/helpers'
-import {
-  resolvePlan,
-  type Assignment,
-} from '../lib/planActions/resolver'
-import { executePlan, type ExecutorDeps } from '../lib/planActions/executor'
 import {
   compileClearSlot,
   compileCommitToSlot,
   compileDropCandidateOnSlot,
-  compileSlotToSlot,
 } from '../lib/planActions/compile'
-import {
-  applyDecisionChange,
-  type ApplyDecisionDeps,
-} from '../lib/planActions/decisions'
+import { usePlanState } from '../lib/usePlanState'
 import { usePromptConfig } from '../lib/usePromptConfig'
 import { ArrangementKeyEditor } from './ArrangementKeyEditor'
 import { PromptBody } from './PromptBody'
@@ -68,132 +27,48 @@ const PROMPT_COPY = {
   },
 }
 
-interface CandidateMatch {
-  id: string
-  suggestion: SongSuggestion
-  matchStatus: MatchStatus
-  song?: Song
-  error?: string
-  decision: Decision
-  addedAt: number
-  assignedSlotItemId: string | null
-  committedAt: number | null
-  /** Title the slot had right before this candidate was committed. Used
-   *  by clearPickedSlot to restore that title in PCO instead of leaving
-   *  the song name behind. */
-  priorSlotTitle: string | null
-  /** Transient SPA-only flag set true the moment we optimistically
-   *  flip committedAt during an AI commit, and cleared once the
-   *  post-PCO items refresh lands. The reconciliation effect skips
-   *  pending candidates so it doesn't see "new committedAt vs.
-   *  pre-refresh items" and wrongly reset the commit. Never
-   *  persisted — defaults to false on session load. */
-  commitPending: boolean
-}
-
-function newCandidateId(): string {
-  // crypto.randomUUID is on every modern browser; fall back just in case.
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID()
-  }
-  return `c_${Date.now()}_${Math.random().toString(36).slice(2)}`
-}
-
-function toPersisted(c: CandidateMatch): PersistedCandidate {
-  return {
-    id: c.id,
-    title: c.suggestion.title,
-    author: c.suggestion.author ?? null,
-    chorusSnippet: c.suggestion.chorusSnippet ?? null,
-    slots: c.suggestion.slots ?? [],
-    matchStatus:
-      c.matchStatus === 'checking' ? 'unmatched' : c.matchStatus, // pending lookups are saved as unmatched
-    song: c.song
-      ? {
-          id: c.song.id,
-          title: c.song.title,
-          lastScheduledAt: c.song.lastScheduledAt,
-          lastScheduledShortDates: c.song.lastScheduledShortDates,
-        }
-      : null,
-    error: c.error ?? null,
-    decision: c.decision,
-    addedAt: c.addedAt,
-    assignedSlotItemId: c.assignedSlotItemId,
-    committedAt: c.committedAt,
-    priorSlotTitle: c.priorSlotTitle,
-  }
-}
-
-function fromPersisted(p: PersistedCandidate): CandidateMatch {
-  return {
-    id: p.id,
-    suggestion: {
-      title: p.title,
-      author: p.author ?? undefined,
-      chorusSnippet: p.chorusSnippet ?? undefined,
-      slots: p.slots,
-    },
-    matchStatus: p.matchStatus,
-    song: p.song
-      ? {
-          id: p.song.id,
-          title: p.song.title,
-          author: null,
-          ccliNumber: null,
-          themes: null,
-          isHidden: false,
-          lastScheduledAt: p.song.lastScheduledAt,
-          lastScheduledShortDates: p.song.lastScheduledShortDates,
-        }
-      : undefined,
-    error: p.error ?? undefined,
-    decision: p.decision,
-    addedAt: p.addedAt,
-    assignedSlotItemId: p.assignedSlotItemId,
-    committedAt: p.committedAt,
-    priorSlotTitle: p.priorSlotTitle ?? null,
-    commitPending: false,
-  }
-}
-
 interface Props {
   serviceTypeId: string
   planId: string
 }
 
 export function PlanDetail({ serviceTypeId, planId }: Props) {
-  const [plan, setPlan] = useState<Plan | null>(null)
-  const [notes, setNotes] = useState<PlanNote[] | null>(null)
-  const [items, setItems] = useState<PlanItem[] | null>(null)
-  // Persisted per-plan map of empty-slot placeholders observed in
-  // PCO. Server reconciles this on every plan load (see
-  // syncSlotPlaceholders), so this state is always the freshest
-  // capture. Used as the highest-priority source for "what should
-  // we restore the slot title to on clear?" — beats the candidate's
-  // priorSlotTitle and the position-based "Song N" fallback.
-  const [slotPlaceholders, setSlotPlaceholders] = useState<
-    Record<string, string>
-  >({})
-  const [loadError, setLoadError] = useState<string | null>(null)
+  // All "model" state + actions live in usePlanState — see
+  // src/lib/usePlanState.ts. PlanDetail keeps only what's truly UI:
+  // DnD state + ghost, popover open-state, the chat-log scroll ref,
+  // the per-plan prompt configs.
+  const {
+    plan,
+    notes,
+    items,
+    loadError,
+    theme,
+    themeSource,
+    notesText,
+    notesSource,
+    criteria,
+    candidates,
+    messages,
+    generating,
+    generateError,
+    rejectedPoolOpen,
+    setTheme,
+    setNotesText,
+    setCriteria,
+    setRejectedPoolOpen,
+    resetTheme,
+    resetNotes,
+    handleSuggest,
+    performUiAction,
+    reorderSlotItem,
+    setDecision,
+    clearCandidates,
+    refreshPlanState,
+  } = usePlanState(serviceTypeId, planId)
 
-  const [theme, setTheme] = useState('')
-  const [themeSource, setThemeSource] = useState('')
-  const [notesText, setNotesText] = useState('')
-  const [notesSource, setNotesSource] = useState('')
-  const [criteria, setCriteria] = useState('')
-  const [generating, setGenerating] = useState(false)
-  const [generateError, setGenerateError] = useState<string | null>(null)
-  const [candidates, setCandidates] = useState<CandidateMatch[]>([])
-  const [messages, setMessages] = useState<SessionMessage[]>([])
-  const [sessionLoaded, setSessionLoaded] = useState(false)
-  // Whether the rejected-pool <details> is open. Defaults closed; we
-  // flip to true the first time the AI rejects something so the user
-  // sees what just got removed without an extra click.
-  const [rejectedPoolOpen, setRejectedPoolOpen] = useState(false)
+  // UI-only state. Everything below this line is rendering / drag
+  // concerns; nothing in this section talks to the model.
 
-  // Which candidate's "Commit to slot" menu is currently open (if any).
-  // Tracked at component scope so click-outside closes it globally.
   const [openCommitMenuId, setOpenCommitMenuId] = useState<string | null>(null)
   useEffect(() => {
     if (!openCommitMenuId) return
@@ -206,691 +81,21 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     return () => document.removeEventListener('mousedown', onDocDown)
   }, [openCommitMenuId])
 
-  const themeInitialized = useRef(false)
-  const notesInitialized = useRef(false)
-
   const roleHook = usePromptConfig('role', planId)
   const structureHook = usePromptConfig('structure', planId)
   const [openPrompt, setOpenPrompt] = useState<OpenPrompt>(null)
   function togglePrompt(which: 'role' | 'structure') {
     setOpenPrompt((prev) => (prev === which ? null : which))
   }
-  // Track whether the user has actually touched the field. We don't want to
-  // auto-save the initial seed value (which would treat a never-edited field
-  // as a user override, polluting storage).
-  const userTouchedTheme = useRef(false)
-  const userTouchedNotes = useRef(false)
-  // Auto-scroll target: as text streams into the in-flight assistant
-  // message (or any new message lands), keep the log pinned to the
-  // bottom so new content stays visible without manual scrolling.
+
+  // Auto-scroll the chat log to the bottom whenever messages change
+  // so streaming text + new turns stay in view.
   const chatLogRef = useRef<HTMLDivElement | null>(null)
-  // Debounced auto-AI-turn after the user adjusts state without
-  // typing. Gated by a pair of unserved-signal counters so a single
-  // click-and-move-on reject doesn't trigger a heavyweight chat
-  // turn — fires only when the cumulative changes since the last AI
-  // turn cross a threshold worth the model's attention. Routes
-  // through the normal streaming pipeline with autoRefresh: true so
-  // the model's reply stays terse.
-  const autoRefineTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Tally of fresh rejects since the last AI turn fired. Cluster
-  // threshold is 2 — a single reject alone does nothing.
-  const unservedRejectsRef = useRef(0)
-  // generating mirrored as a ref so the debounced timer reads the
-  // current value when it fires, not the value captured at schedule
-  // time (which would skip the firing once a slow manual Send is
-  // still in flight, etc.).
-  const generatingRef = useRef(false)
-  // Candidate ids that were sent to the AI on the most recent
-  // suggestSongs call (manual or auto-refresh). Used to compact the
-  // candidates block — once the AI has seen a candidate's full info
-  // (especially the chorus snippet, the heaviest field), subsequent
-  // turns can omit it. Resets to empty on page load, which means a
-  // session resumed after closing the tab re-introduces all
-  // candidates with full data on the first turn (intentional — the
-  // AI is effectively "rebooting" its understanding of the pool).
-  const lastSentCandidateIdsRef = useRef<Set<string>>(new Set())
-
-  useEffect(() => {
-    let cancelled = false
-    setLoadError(null)
-    setPlan(null)
-    setNotes(null)
-    setItems(null)
-    setThemeSource('')
-    setNotesSource('')
-    themeInitialized.current = false
-    notesInitialized.current = false
-    userTouchedTheme.current = false
-    userTouchedNotes.current = false
-
-    setCandidates([])
-    setMessages([])
-    setSessionLoaded(false)
-
-    setRejectedPoolOpen(false)
-    // Cancel any pending auto-refine carried over from a prior plan.
-    if (autoRefineTimer.current) {
-      clearTimeout(autoRefineTimer.current)
-      autoRefineTimer.current = null
-    }
-    unservedRejectsRef.current = 0
-    lastSentCandidateIdsRef.current = new Set()
-
-    // Load the persisted candidate pool + future chat history for this plan.
-    // Survives page refreshes and lets iteration span multiple sittings.
-    loadSession({ planId })
-      .then((res) => {
-        if (cancelled) return
-        setCandidates(res.data.candidates.map(fromPersisted))
-        setMessages(res.data.messages)
-        setSessionLoaded(true)
-      })
-      .catch(() => !cancelled && setSessionLoaded(true))
-
-    loadPlanContext(serviceTypeId, planId)
-      .then((ctx) => {
-        if (cancelled) return
-        setPlan(ctx.plan)
-        setNotes(ctx.notes)
-        setItems(ctx.items)
-        setSlotPlaceholders(ctx.slotPlaceholders)
-        const themeSrc = ctx.plan.seriesTitle ?? ctx.plan.title ?? ''
-        setThemeSource(themeSrc)
-        const notesSrc = formatNotesSource(ctx.notes)
-        setNotesSource(notesSrc)
-        if (!themeInitialized.current) {
-          const saved = ctx.userTheme
-          setTheme(saved && saved.trim() ? saved : themeSrc)
-          themeInitialized.current = true
-        }
-        if (!notesInitialized.current) {
-          const saved = ctx.userNotes
-          setNotesText(saved && saved.trim() ? saved : notesSrc)
-          notesInitialized.current = true
-        }
-      })
-      .catch((e: Error) => !cancelled && setLoadError(e.message))
-
-    return () => {
-      cancelled = true
-    }
-  }, [serviceTypeId, planId])
-
-  // Pin the chat log to the bottom whenever messages change so
-  // streaming text + new turns stay in view. Cheap — only fires on
-  // messages array updates, which is the same trigger as new content.
   useEffect(() => {
     const el = chatLogRef.current
     if (!el) return
     el.scrollTop = el.scrollHeight
   }, [messages])
-
-  // Keep the generating mirror in sync.
-  useEffect(() => {
-    generatingRef.current = generating
-  }, [generating])
-
-  // Debounced auto-save: persists candidate pool + messages ~700ms after
-  // the latest change. Only fires once the session has finished loading
-  // so we don't blow away unread state with an empty array.
-  useEffect(() => {
-    if (!sessionLoaded) return
-    const id = setTimeout(() => {
-      void saveSession({
-        planId,
-        session: { candidates: candidates.map(toPersisted), messages },
-      }).catch(() => {})
-    }, 700)
-    return () => clearTimeout(id)
-  }, [candidates, messages, sessionLoaded, planId])
-
-  // Reconcile committed candidates with the current PCO service order.
-  // If a slot was cleared (or had a different song committed to it) via
-  // PCO directly, any candidate that still believes it owns that slot
-  // gets reset to uncommitted/pending so the SPA's UI matches PCO state
-  // and the AI no longer sees that song occupying the slot.
-  useEffect(() => {
-    if (!items || !sessionLoaded) return
-    const staleIds: string[] = []
-    for (const c of candidates) {
-      if (c.committedAt == null) continue
-      // Skip candidates whose commit is still in-flight — items
-      // probably hasn't refreshed yet, so the slot.songId check
-      // below would flag them stale and wipe a successful commit.
-      // commitPending clears in the same render as setItems(fresh)
-      // after the PCO write completes, so this gate naturally
-      // releases on the next reconciliation pass.
-      if (c.commitPending) continue
-      const slot = items.find((it) => it.id === c.assignedSlotItemId)
-      const stillCommitted =
-        !!slot && !!slot.songId && c.song?.id === slot.songId
-      if (!stillCommitted) staleIds.push(c.id)
-    }
-    if (staleIds.length === 0) return
-    const staleSet = new Set(staleIds)
-    setCandidates((prev) =>
-      prev.map((c) =>
-        staleSet.has(c.id)
-          ? { ...c, committedAt: null, priorSlotTitle: null }
-          : c,
-      ),
-    )
-    appendSystemMessage(
-      `↺ ${staleIds.length} slot${staleIds.length === 1 ? '' : 's'} cleared in Planning Center — matching candidate${staleIds.length === 1 ? '' : 's'} marked uncommitted`,
-    )
-  }, [items, candidates, sessionLoaded])
-
-  // Debounced auto-save: persists theme/notes ~600ms after the last keystroke.
-  // Saving '' when the value matches the PCO source keeps storage tidy (no
-  // override = falls back to source on next load).
-  useEffect(() => {
-    if (!userTouchedTheme.current) return
-    const id = setTimeout(() => {
-      const value = theme === themeSource ? '' : theme
-      patchCachedTheme(serviceTypeId, planId, value)
-      void savePlanTheme({ planId, theme: value }).catch(() => {})
-    }, 600)
-    return () => clearTimeout(id)
-  }, [theme, themeSource, serviceTypeId, planId])
-
-  useEffect(() => {
-    if (!userTouchedNotes.current) return
-    const id = setTimeout(() => {
-      const value = notesText === notesSource ? '' : notesText
-      patchCachedNotes(serviceTypeId, planId, value)
-      void savePlanNotes({ planId, notes: value }).catch(() => {})
-    }, 600)
-    return () => clearTimeout(id)
-  }, [notesText, notesSource, serviceTypeId, planId])
-
-  // Invalidate the per-session cache, fetch fresh plan state from
-  // PCO, and sync the items + slotPlaceholders React state in one
-  // call. Used by every action layer function after a PCO write
-  // succeeds. Forgetting to update slotPlaceholders alongside items
-  // is the bug class this exists to prevent — the fields move
-  // together by definition.
-  async function refreshPlanState(): Promise<void> {
-    invalidatePlanContext(serviceTypeId, planId)
-    const fresh = await loadPlanContext(serviceTypeId, planId)
-    setItems(fresh.items)
-    setSlotPlaceholders(fresh.slotPlaceholders)
-  }
-
-  // Library-match lookup for a freshly-proposed candidate. Same pattern
-  // we used inline before, hoisted now that propose-songs can fire from
-  // multiple call sites (a single AI turn can emit multiple proposals).
-  function searchAndAttachSong(c: CandidateMatch) {
-    searchSongs({
-      query: c.suggestion.title,
-      ...(c.suggestion.author ? { author: c.suggestion.author } : {}),
-    })
-      .then((sr) => {
-        const match = sr.data.songs[0]
-        setCandidates((prev) =>
-          prev.map((cur) =>
-            cur.id === c.id
-              ? match
-                ? { ...cur, matchStatus: 'matched', song: match }
-                : { ...cur, matchStatus: 'unmatched' }
-              : cur,
-          ),
-        )
-      })
-      .catch((e: Error) => {
-        setCandidates((prev) =>
-          prev.map((cur) =>
-            cur.id === c.id ? { ...cur, matchStatus: 'error', error: e.message } : cur,
-          ),
-        )
-      })
-  }
-
-  // Send the user's turn to the AI and apply whatever actions it
-  // chose. Streams: text deltas append to the assistant chat message
-  // as the model types; each tool_use becomes an applied action plus
-  // a 🤖 system message the moment its JSON arrives. The final
-  // SuggestResponse still lands on `data` so we get debug payloads
-  // and the model's full prose reply (used as a fallback if the
-  // stream produced no text).
-  //
-  // `autoRefresh` distinguishes two call paths:
-  //   - manual Send (default): user typed something, criteria becomes
-  //     the user turn in the chat log, then clears.
-  //   - auto-refresh (debounced after rejects): no user typed input,
-  //     a system marker takes the place of the user turn so the chat
-  //     log shows the AI is reacting on its own, and criteria stays
-  //     intact so the user's next manual draft isn't clobbered.
-  async function handleSuggest(opts?: { autoRefresh?: boolean }) {
-    const autoRefresh = opts?.autoRefresh === true
-    if (!theme.trim() || generating) return
-    // Cancel any pending auto-refine — this turn covers it.
-    if (autoRefineTimer.current) {
-      clearTimeout(autoRefineTimer.current)
-      autoRefineTimer.current = null
-    }
-    setGenerating(true)
-    setGenerateError(null)
-    patchCachedTheme(serviceTypeId, planId, theme)
-    void savePlanTheme({ planId, theme }).catch(() => {})
-    patchCachedNotes(serviceTypeId, planId, notesText)
-    void savePlanNotes({ planId, notes: notesText }).catch(() => {})
-
-    // Snapshot the typed input. Manual sends clear it (so the user can
-    // start composing the next turn while the model streams);
-    // auto-refresh leaves it alone (the user didn't initiate, don't
-    // wipe their in-progress draft).
-    const turnUserMessage = autoRefresh ? '' : criteria
-    if (!autoRefresh) setCriteria('')
-
-    // Hoisted so the catch block can find the placeholder it inserted
-    // (when something goes wrong before the stream produces text) and
-    // replace its content with an inline error notice.
-    let assistantMsgId: string | null = null
-
-    try {
-      const songSlotItems = (items ?? []).filter(isSongSlot)
-      const totalSongSlots = songSlotItems.length
-      // Map PCO item id ↔ 1-based position among song slots. Both
-      // directions: we send positions to the AI and translate
-      // reassign actions back to item ids.
-      const slotIndexByItemId = new Map<string, number>()
-      const itemIdBySlotIndex = new Map<number, string>()
-      songSlotItems.forEach((it, idx) => {
-        slotIndexByItemId.set(it.id, idx + 1)
-        itemIdBySlotIndex.set(idx + 1, it.id)
-      })
-
-      // Compact the candidates payload: candidates the AI already saw
-      // on the previous turn drop their chorusSnippet (the only large
-      // stable field). Title + author still go on every turn so the
-      // AI can disambiguate songs that share a title. Mutable fields
-      // (decision, committed, assignedSlot) always sent.
-      const knownCandidateIds = lastSentCandidateIdsRef.current
-      const aiCandidates: AiCandidate[] = candidates.map((c) => {
-        const slotIndex = c.assignedSlotItemId
-          ? slotIndexByItemId.get(c.assignedSlotItemId)
-          : undefined
-        const isKnownToAi = knownCandidateIds.has(c.id)
-        return {
-          id: c.id,
-          title: c.suggestion.title,
-          author: c.suggestion.author,
-          chorusSnippet: isKnownToAi ? undefined : c.suggestion.chorusSnippet,
-          slots:
-            c.suggestion.slots && c.suggestion.slots.length > 0
-              ? c.suggestion.slots
-              : undefined,
-          decision: c.decision,
-          assignedSlot:
-            slotIndex !== undefined && totalSongSlots > 0
-              ? { index: slotIndex, total: totalSongSlots }
-              : undefined,
-          committed: c.committedAt != null,
-          inLibrary: c.matchStatus === 'matched',
-        }
-      })
-
-      const committedSongIds = new Set(
-        candidates
-          .filter((c) => c.committedAt != null && c.song?.id)
-          .map((c) => c.song!.id),
-      )
-      const alreadyInPlan = (items ?? [])
-        .filter(
-          (it) => it.songId && it.songTitle && !committedSongIds.has(it.songId),
-        )
-        .map((it) => it.songTitle!)
-
-      const serviceOrder = buildServiceOrderText(items)
-      const history: ConversationTurn[] = buildAiHistory(messages)
-
-      // Pre-allocate an id for the placeholder assistant message so
-      // stream chunks can find it to append into. Manual sends also
-      // prepend a user message; auto-refresh prepends a system
-      // marker instead so the chat log shows the AI is reacting on
-      // its own rather than to a (nonexistent) typed turn.
-      const newAssistantMsgId = newCandidateId()
-      assistantMsgId = newAssistantMsgId
-      const turnTs = Date.now()
-      const turnPrefix: SessionMessage = autoRefresh
-        ? {
-            id: newCandidateId(),
-            role: 'system',
-            content: '↻ Auto-refining after recent activity',
-            timestamp: turnTs,
-          }
-        : {
-            id: newCandidateId(),
-            role: 'user',
-            content: turnUserMessage.trim() || '(initial request)',
-            timestamp: turnTs,
-          }
-      setMessages((prev) => [
-        ...prev,
-        turnPrefix,
-        {
-          id: newAssistantMsgId,
-          role: 'assistant',
-          content: '',
-          timestamp: turnTs + 1,
-        },
-      ])
-
-      // Per-turn dedupe set used while applying propose actions —
-      // case-insensitive against existing candidates + alreadyInPlan,
-      // also dedupes within the same turn.
-      const existingTitlesLower = new Set<string>([
-        ...candidates.map((c) => c.suggestion.title.toLowerCase()),
-        ...alreadyInPlan.map((t) => t.toLowerCase()),
-      ])
-      // Title lookup for system messages on remove/reassign actions.
-      // Built once from the pre-turn candidate list; new candidates
-      // proposed in this same turn get folded in as they arrive.
-      const titleById = new Map(
-        candidates.map((c): [string, string] => [c.id, c.suggestion.title]),
-      )
-      let streamedText = ''
-      // Per-turn cumulative write flag — set by any executePlan call
-      // that fires PCO writes. Drives the single post-stream refresh.
-      let pcoWritesFired = false
-
-      // Executor deps shared with UI flows. Each set_slot_contents
-      // assignment list runs through resolvePlan + executePlan;
-      // executePlan does optimistic state, PCO calls, chat messages,
-      // and rollback. deferRefresh=true on the AI side so we refresh
-      // once at the end of the stream rather than after every AI
-      // tool call (UI flows refresh per-call).
-      const executorDeps = executorDepsForCurrent()
-
-      const applyAction = async (action: AiAction) => {
-        const now = Date.now()
-        if (action.kind === 'propose') {
-          const minted: CandidateMatch[] = []
-          for (const s of action.suggestions) {
-            const key = s.title.toLowerCase()
-            if (existingTitlesLower.has(key)) continue
-            existingTitlesLower.add(key)
-            const c: CandidateMatch = {
-              id: newCandidateId(),
-              suggestion: s,
-              matchStatus: 'checking',
-              decision: 'pending',
-              addedAt: now,
-              assignedSlotItemId: null,
-              committedAt: null,
-              priorSlotTitle: null,
-              commitPending: false,
-            }
-            minted.push(c)
-            titleById.set(c.id, c.suggestion.title)
-          }
-          if (minted.length > 0) {
-            setCandidates((prev) => [...prev, ...minted])
-            minted.forEach(searchAndAttachSong)
-            // Newly-proposed candidates count as "AI has seen these"
-            // for the next turn's payload-compaction check — the AI
-            // just emitted them with full data, no need to send them
-            // back with the chorus snippet attached again next time.
-            for (const c of minted) {
-              lastSentCandidateIdsRef.current.add(c.id)
-            }
-            appendSystemMessage(
-              `🤖 AI proposed ${minted.length} new song${minted.length === 1 ? '' : 's'}`,
-            )
-          }
-        } else if (action.kind === 'remove') {
-          // Same path as user-driven reject — applyDecisionChange
-          // skips committed/already-rejected entries silently and
-          // emits the chat message only when something actually
-          // changed. AI rejects don't bump the auto-refine signal
-          // (AI rejecting things shouldn't trigger another AI turn).
-          const result = applyDecisionChange(
-            { ids: action.ids, decision: 'reject' },
-            'ai',
-            decisionDeps({ withRejectSignal: false }),
-          )
-          if (result.changedIds.length > 0) setRejectedPoolOpen(true)
-        } else if (action.kind === 'set_slot_contents') {
-          // Pure resolver does all the planning; executor applies it
-          // (optimistic state + PCO calls + chat messages + rollback).
-          // deferRefresh=true means we do a single items refresh after
-          // the whole stream finishes rather than per-action.
-          const plan = resolvePlan(
-            action.assignments,
-            { items: items ?? [], candidates, slotPlaceholders },
-            { autoRefresh },
-          )
-          const result = await executePlan(plan, executorDeps, {
-            source: 'ai',
-            deferRefresh: true,
-          })
-          if (result.pcoWritesFired) pcoWritesFired = true
-        } else if (action.kind === 'unreject') {
-          applyDecisionChange(
-            { ids: action.ids, decision: 'pending' },
-            'ai',
-            decisionDeps({ withRejectSignal: false }),
-          )
-        }
-      }
-
-      const { stream, data } = await suggestSongs.stream({
-        theme,
-        userMessage: turnUserMessage,
-        planId,
-        serviceOrder,
-        planNotes: notesText,
-        history,
-        candidates: aiCandidates,
-        alreadyInPlan,
-        autoRefresh,
-      })
-
-      // Mark all candidates we just sent as "AI has seen these" so
-      // subsequent turns can compact their payload (drop the chorus
-      // snippet). The stream below will append new candidates via
-      // propose actions; we add their ids to this set as they arrive
-      // so the NEXT turn knows about them too. Update here at send
-      // time rather than after the stream so a mid-stream error
-      // still records what was sent.
-      lastSentCandidateIdsRef.current = new Set(
-        aiCandidates.map((c) => c.id),
-      )
-
-      for await (const chunk of stream) {
-        if (chunk.kind === 'text') {
-          streamedText += chunk.delta
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === newAssistantMsgId
-                ? { ...m, content: m.content + chunk.delta }
-                : m,
-            ),
-          )
-        } else if (chunk.kind === 'action') {
-          await applyAction(chunk.action)
-        }
-      }
-
-      const final = await data
-      // If streaming produced no text but the callable's fallback
-      // synthesized a status line, drop it into the placeholder so the
-      // chat log isn't blank. Also handles the unlikely case where the
-      // client used the stream but never got any text deltas.
-      if (!streamedText.trim() && final.message) {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === newAssistantMsgId ? { ...m, content: final.message } : m,
-          ),
-        )
-      }
-      // executePlan calls fired PCO writes per-set_slot_contents-action
-      // with deferRefresh=true; do the single items refresh now that
-      // the whole stream has finished. setItems lands before the
-      // commitPending cleanup so the reconciliation effect sees both
-      // updates together (per CLAUDE.md: setItems before setCandidates).
-      if (pcoWritesFired) {
-        try {
-          await refreshPlanState()
-          setCandidates((prev) =>
-            prev.map((c) =>
-              c.commitPending ? { ...c, commitPending: false } : c,
-            ),
-          )
-        } catch {
-          // Items refresh is best-effort. Leave commitPending set —
-          // if items didn't refresh, the reconciliation effect
-          // would still see stale items and wipe the commit. Better
-          // to keep the optimistic state visible than to flicker.
-        }
-      }
-    } catch (e) {
-      const errMsg = (e as Error).message
-      setGenerateError(errMsg)
-      // Replace the empty assistant placeholder with an inline error
-      // message so the chat log doesn't leave a blank AI bubble next
-      // to the error notice. Only when nothing streamed in — if
-      // partial text arrived, keep it.
-      const placeholderId = assistantMsgId
-      if (placeholderId) {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === placeholderId && !m.content.trim()
-              ? { ...m, content: `⚠ ${errMsg}` }
-              : m,
-          ),
-        )
-      }
-    } finally {
-      setGenerating(false)
-      // This turn served whatever signals had accumulated — reset
-      // the unserved-counter so the next auto-refresh threshold
-      // starts counting from zero again.
-      unservedRejectsRef.current = 0
-    }
-  }
-
-  function clearCandidates() {
-    setCandidates([])
-    setMessages([])
-    // Reset the "AI has seen these candidates" tracker so the next
-    // Suggest call re-introduces any remaining candidates with full
-    // info. Clearing the conversation effectively wipes the AI's
-    // memory of what's been said, so we need to give it full intros
-    // again.
-    lastSentCandidateIdsRef.current = new Set()
-    if (autoRefineTimer.current) {
-      clearTimeout(autoRefineTimer.current)
-      autoRefineTimer.current = null
-    }
-    unservedRejectsRef.current = 0
-  }
-
-  // 5-second debounce. Each new reject resets the timer so rapid
-  // rejections coalesce into a single auto-fire rather than each
-  // resetting a tight window. Fires only once 2+ rejects have
-  // accumulated since the last AI turn — a single click-only reject
-  // doesn't fire anything. The user can always click Send manually
-  // if they want the AI to engage on a single signal.
-  function scheduleAutoRefine() {
-    if (autoRefineTimer.current) clearTimeout(autoRefineTimer.current)
-    autoRefineTimer.current = setTimeout(() => {
-      autoRefineTimer.current = null
-      if (generatingRef.current) return
-      if (unservedRejectsRef.current < 2) return
-      void handleSuggest({ autoRefresh: true })
-    }, 5000)
-  }
-
-  function bumpRejectSignal() {
-    unservedRejectsRef.current += 1
-    scheduleAutoRefine()
-  }
-
-  function appendSystemMessage(content: string) {
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: newCandidateId(),
-        role: 'system',
-        content,
-        timestamp: Date.now(),
-      },
-    ])
-  }
-
-  // Build deps for the decision-change layer (shared between UI
-  // and AI). UI passes onRejectsLanded so user clicks bump the
-  // auto-refine threshold; the AI flow omits it since AI rejects
-  // shouldn't trigger another AI turn.
-  function decisionDeps(opts: { withRejectSignal: boolean }): ApplyDecisionDeps {
-    return {
-      setCandidates: (update) =>
-        setCandidates((prev) => update(prev) as CandidateMatch[]),
-      appendSystemMessage,
-      onRejectsLanded: opts.withRejectSignal
-        ? (n) => {
-            for (let i = 0; i < n; i++) bumpRejectSignal()
-          }
-        : undefined,
-    }
-  }
-
-  function setDecision(id: string, next: Decision) {
-    const target = candidates.find((c) => c.id === id)
-    if (!target) return
-    // The button toggles: clicking 'reject' on an already-rejected
-    // candidate flips it back to pending (unreject).
-    const decision: Decision =
-      target.decision === next ? 'pending' : next
-    applyDecisionChange(
-      { ids: [id], decision: decision === 'reject' ? 'reject' : 'pending' },
-      'user',
-      decisionDeps({ withRejectSignal: true }),
-    )
-  }
-
-  // Build the deps object the executor needs. Used by both the AI
-  // flow (handleSuggest builds its own with deferRefresh=true so it
-  // can refresh once at end of stream) and UI-driven flows (which
-  // run one assignment-set at a time, refresh per-call). Same shape
-  // for both — the only difference is the executePlan options.
-  function executorDepsForCurrent(): ExecutorDeps {
-    return {
-      serviceTypeId,
-      planId,
-      pco: { placeSongInSlot, clearSongFromSlot },
-      setCandidates: (update) =>
-        setCandidates((prev) => update(prev) as CandidateMatch[]),
-      appendSystemMessage,
-      refreshPlanState,
-    }
-  }
-
-  // The single UI entry point for slot-state changes. Compiles
-  // happen at the call site (small, scenario-specific functions in
-  // src/lib/planActions/compile); resolver + executor are shared
-  // with the AI flow so a bug in either lands the same way for
-  // both sources. See docs/unification-plan.md.
-  async function performUiAction(assignments: Assignment[]): Promise<void> {
-    if (assignments.length === 0) return
-    const plan = resolvePlan(assignments, {
-      items: items ?? [],
-      candidates,
-      slotPlaceholders,
-    })
-    await executePlan(plan, executorDepsForCurrent(), { source: 'user' })
-  }
-
-
-  // Thin wrapper binding the pure helper to this component's `items`
-  // closure. Used by the PCO-direct fallback in reorderSlotItem to
-  // build a human-friendly destination label and the move-source
-  // restore title; the unified resolver+executor flow doesn't need
-  // it (the resolver builds its own internally).
-  function fallbackSlotTitle(itemId: string): string {
-    return fallbackSlotTitleHelper(itemId, items)
-  }
 
   // Drag-and-drop state. Two distinct drag modes:
   //   - 'candidate': dragging an AI suggestion onto an empty service-
@@ -963,72 +168,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     } catch {
       // Ignored — falls back to the browser default. We have the
       // floating ghost too, so the user still sees something.
-    }
-  }
-
-
-  // Drop handler for a song slot dragged onto another song slot.
-  // The compileSlotToSlot helper figures out the right intent
-  // (move / swap / no-op) based on which sides are filled and emits
-  // assignments — those flow through the same resolver+executor as
-  // the AI's set_slot_contents tool calls. The PCO-direct fallback
-  // below catches the one shape compileSlotToSlot can't represent:
-  // a filled slot whose song was linked via PCO directly (no
-  // candidate record), so there's no candidateId to put in the
-  // assignment.
-  async function reorderSlotItem(draggedId: string, targetId: string) {
-    if (draggedId === targetId) return
-    const draggedSlot = (items ?? []).find((it) => it.id === draggedId)
-    const targetSlot = (items ?? []).find((it) => it.id === targetId)
-    if (!draggedSlot || !targetSlot) return
-
-    const assignments = compileSlotToSlot(
-      draggedSlot,
-      targetSlot,
-      candidates,
-      items ?? [],
-    )
-    if (assignments.length > 0) {
-      await performUiAction(assignments)
-      return
-    }
-
-    // PCO-direct outlier: one slot has a song that's not tracked as
-    // a candidate (linked through PCO web UI before songpicker saw
-    // the plan, perhaps). Both-empty also lands here and no-ops.
-    const sourceFilled = !!draggedSlot.songId
-    const targetFilled = !!targetSlot.songId
-    if (!sourceFilled && !targetFilled) return
-    const movingSlot = sourceFilled ? draggedSlot : targetSlot
-    const destSlot = sourceFilled ? targetSlot : draggedSlot
-    if (!movingSlot.songId || !movingSlot.songTitle) {
-      setGenerateError(
-        `Can't move "${movingSlot.songTitle ?? movingSlot.title}" — missing song info on the source slot.`,
-      )
-      return
-    }
-    const sourceRestoreTitle = resolveRestoreTitle({
-      slotItemId: movingSlot.id,
-      slotPlaceholders,
-      fallbackForSlot: fallbackSlotTitle,
-    })
-    const songTitle = movingSlot.songTitle
-    const destLabel =
-      destSlot.title?.trim() || fallbackSlotTitle(destSlot.id)
-    try {
-      await placeSongInSlot({
-        serviceTypeId,
-        planId,
-        slotItemId: destSlot.id,
-        songId: movingSlot.songId,
-        songTitle,
-        fromSlotItemId: movingSlot.id,
-        fromSlotRestoreTitle: sourceRestoreTitle,
-      })
-      await refreshPlanState()
-      appendSystemMessage(`↕ Moved "${songTitle}" → ${destLabel}`)
-    } catch (e) {
-      setGenerateError((e as Error).message)
     }
   }
 
@@ -1380,11 +519,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                 <button
                   type="button"
                   className="reset-btn"
-                  onClick={() => {
-                    setTheme(themeSource)
-                    patchCachedTheme(serviceTypeId, planId, '')
-                    void savePlanTheme({ planId, theme: '' }).catch(() => {})
-                  }}
+                  onClick={resetTheme}
                   title="Reset to the Planning Center value (clears your saved override)"
                 >
                   ↺ reset
@@ -1395,10 +530,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           <input
             type="text"
             value={theme}
-            onChange={(e) => {
-              userTouchedTheme.current = true
-              setTheme(e.target.value)
-            }}
+            onChange={(e) => setTheme(e.target.value)}
             placeholder="What is the service about?"
           />
         </label>
@@ -1423,11 +555,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                 <button
                   type="button"
                   className="reset-btn"
-                  onClick={() => {
-                    setNotesText(notesSource)
-                    patchCachedNotes(serviceTypeId, planId, '')
-                    void savePlanNotes({ planId, notes: '' }).catch(() => {})
-                  }}
+                  onClick={resetNotes}
                   title="Reset to the Planning Center value (clears your saved override)"
                 >
                   ↺ reset
@@ -1438,10 +566,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           <textarea
             rows={Math.min(8, Math.max(3, notesText.split('\n').length + 1))}
             value={notesText}
-            onChange={(e) => {
-              userTouchedNotes.current = true
-              setNotesText(e.target.value)
-            }}
+            onChange={(e) => setNotesText(e.target.value)}
             placeholder="Sermon theme, scripture, anything else worth flagging to the AI."
           />
         </label>
@@ -1856,142 +981,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   )
 }
 
-
-// Render Planning Center plan notes as the editable seed text. Plain
-// newline-separated note content — no category labels (noise) and no
-// bullet markers (awkward for single notes, the AI handles either way).
-function formatNotesSource(notes: PlanNote[] | null): string {
-  if (!notes || notes.length === 0) return ''
-  return notes
-    .filter((n) => n.content && n.content.trim())
-    .map((n) => n.content.trim())
-    .join('\n\n')
-}
-
-// Cap on how many user/assistant prose turn-pairs we keep verbatim
-// in the AI's history. Older prose turns drop entirely; older
-// `[event]` system markers get collapsed into a single counts-only
-// summary at the top of the history. 8 prose messages ≈ 4 turn-pairs.
-const HISTORY_PROSE_CAP = 8
-
-// Convert a SessionMessage[] into the ConversationTurn[] shape the AI
-// receives, with two-tier pruning so a long-running session doesn't
-// blow up the per-turn token count. Recent prose + recent events go
-// verbatim; older content collapses into a `[summary]` line.
-function buildAiHistory(messages: SessionMessage[]): ConversationTurn[] {
-  const proseCount = messages.filter((m) => m.role !== 'system').length
-  if (proseCount <= HISTORY_PROSE_CAP) {
-    return foldMessagesToHistory(messages)
-  }
-  // Find the cutoff: the earliest message we keep verbatim. Walk
-  // back from the end, counting prose turns, until we've gathered
-  // HISTORY_PROSE_CAP of them. Everything before that is "old".
-  let proseFound = 0
-  let cutoff = 0
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role !== 'system') proseFound += 1
-    if (proseFound >= HISTORY_PROSE_CAP) {
-      cutoff = i
-      break
-    }
-  }
-  const oldMessages = messages.slice(0, cutoff)
-  const recentMessages = messages.slice(cutoff)
-  const out = foldMessagesToHistory(recentMessages)
-  const summary = summarizeOldEvents(oldMessages)
-  if (summary) {
-    out.unshift({ role: 'user', content: `[summary] ${summary}` })
-  }
-  return out
-}
-
-function foldMessagesToHistory(
-  messages: SessionMessage[],
-): ConversationTurn[] {
-  return messages.map((m) =>
-    m.role === 'system'
-      ? { role: 'user' as const, content: `[event] ${m.content}` }
-      : { role: m.role, content: m.content },
-  )
-}
-
-// Compress a slice of old messages into a single counts-only line.
-// Pattern-matches the system message prefixes we emit (✗ Rejected,
-// 🤖 AI committed, ↗ Committed, etc.) so the categories stay stable
-// across user/AI/reconciliation event sources. Specifics
-// (which songs, which slots, exact reasons) are deliberately dropped —
-// the current candidates block + service order already convey the
-// state that matters; this summary is just orientation for the AI
-// that "stuff happened earlier" without re-sending every event.
-function summarizeOldEvents(messages: SessionMessage[]): string {
-  const events = messages.filter((m) => m.role === 'system')
-  if (events.length === 0) return ''
-  let rejected = 0
-  let unrejected = 0
-  let committed = 0
-  let moved = 0
-  let swapped = 0
-  let cleared = 0
-  let proposed = 0
-  for (const e of events) {
-    const c = e.content
-    if (/^✗ Rejected:/.test(c) || /AI rejected/.test(c)) rejected += 1
-    else if (/^↩ Unrejected:/.test(c) || /AI restored/.test(c)) unrejected += 1
-    else if (/AI committed|^↗ Committed/.test(c)) committed += 1
-    else if (/AI moved|^↕ Moved/.test(c)) moved += 1
-    else if (/AI swapped|^↔ Swapped/.test(c)) swapped += 1
-    else if (/AI cleared|^↶ Cleared/.test(c)) cleared += 1
-    else if (/AI proposed/.test(c)) {
-      const match = /AI proposed (\d+)/.exec(c)
-      proposed += match ? parseInt(match[1], 10) : 1
-    }
-  }
-  const parts: string[] = []
-  if (proposed) parts.push(`${proposed} song${proposed === 1 ? '' : 's'} proposed`)
-  if (rejected) parts.push(`${rejected} rejected`)
-  if (unrejected) parts.push(`${unrejected} restored`)
-  if (committed) parts.push(`${committed} committed to slot${committed === 1 ? '' : 's'}`)
-  if (moved) parts.push(`${moved} moved`)
-  if (swapped) parts.push(`${swapped} swap${swapped === 1 ? '' : 's'}`)
-  if (cleared) parts.push(`${cleared} slot${cleared === 1 ? '' : 's'} cleared`)
-  if (parts.length === 0) return ''
-  return `Earlier in this session: ${parts.join(', ')}.`
-}
-
-// Render the plan's items as a human-readable list for the AI prompt.
-// Song slots get replaced with a meta position tag "[song slot N of M]"
-// rather than their literal PCO title ("Song 1", "Closing song", etc.) so
-// the model doesn't mistake those titles for slot names — slot names
-// belong to the structure prompt's conceptual roles (opener, mid-service,
-// closer). Position info (N of M) is preserved so the model can still
-// map each position to a structure role by sequence.
-function buildServiceOrderText(items: PlanItem[] | null): string {
-  if (!items || items.length === 0) return ''
-  const totalSongSlots = items.filter(isSongSlot).length
-  let songIdx = 0
-  return items
-    .map((it) => {
-      if (!isSongSlot(it)) {
-        return `${it.sequence}. ${it.title || '(no title)'}`
-      }
-      songIdx += 1
-      const positionTag = `[song slot ${songIdx} of ${totalSongSlots}]`
-      const base = `${it.sequence}. ${positionTag}`
-      if (it.songId) {
-        const disamb = formatSongDisamb(it)
-        return `${base} — picked: ${it.songTitle ?? '(song)'}${disamb ? ` ${disamb}` : ''}`
-      }
-      return `${base} — (empty, needs a pick)`
-    })
-    .join('\n')
-}
-
-function formatSongDisamb(it: PlanItem): string {
-  const parts: string[] = []
-  if (it.songAuthor) parts.push(`by ${it.songAuthor}`)
-  if (it.songCcli) parts.push(`CCLI ${it.songCcli}`)
-  return parts.length > 0 ? `(${parts.join(', ')})` : ''
-}
 
 // True iff `iso` parses to a date within the last `days` days. Used to
 // flag "recently played" candidates so the user can avoid repeating
