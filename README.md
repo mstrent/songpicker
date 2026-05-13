@@ -249,3 +249,16 @@ firebase functions:secrets:access ANTHROPIC_API_KEY   # paste into the file
 ```bash
 npm run deploy                       # builds SPA + deploys hosting + functions + firestore rules
 ```
+
+## Tests
+
+```bash
+npm test                             # vitest, in-process, fast
+```
+
+Pure helpers, the slot-state resolver, the executor (with mocked
+callables), and the `usePlanState` hook are the unit-tested
+surface. We don't render-test PlanDetail for state correctness —
+that conflates render bugs with logic bugs and slows the loop. See
+`CLAUDE.md` and `docs/unification-plan.md` for the architecture +
+testing philosophy.
