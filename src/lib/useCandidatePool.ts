@@ -16,11 +16,11 @@ import {
   type SongSuggestion,
 } from './api'
 import { isSongSlot } from './songSlots'
+import { translateAiAssignments } from './planActions/aiTranslate'
 import {
   applyDecisionChange,
   type ApplyDecisionDeps,
 } from './planActions/decisions'
-import type { Assignment } from './planActions/resolver'
 import type { PlanDataApi } from './usePlanData'
 
 // Songpicker's candidate pool — AI-suggested songs the user is
@@ -568,33 +568,14 @@ export function useCandidatePool(
         } else if (action.kind === 'set_slot_contents') {
           // Translate AI's candidate-id assignments into the
           // song-ref shape the unified path expects, then forward
-          // to planData.performIntent.
-          const candById = new Map(candidates.map((c) => [c.id, c]))
-          const translated: Assignment[] = []
-          for (const a of action.assignments) {
-            if (a.candidateId == null) {
-              translated.push({ slotIndex: a.slotIndex, song: null })
-              continue
-            }
-            const c = candById.get(a.candidateId)
-            if (!c) {
-              appendSystemMessage(
-                `⚠ AI referenced an unknown candidate (${a.candidateId}) — skipped`,
-              )
-              continue
-            }
-            if (!c.song?.id) {
-              appendSystemMessage(
-                `⚠ AI tried to commit "${c.suggestion.title}" but it isn't matched to a song in your Planning Center library — skipped`,
-              )
-              continue
-            }
-            translated.push({
-              slotIndex: a.slotIndex,
-              song: { id: c.song.id, title: c.suggestion.title },
-            })
-          }
-          const result = await planData.performIntent(translated, {
+          // to planData.performIntent. See planActions/aiTranslate
+          // for the rules + tests.
+          const { assignments, warnings } = translateAiAssignments(
+            action.assignments,
+            candidates,
+          )
+          for (const w of warnings) appendSystemMessage(`⚠ ${w}`)
+          const result = await planData.performIntent(assignments, {
             source: 'ai',
             deferRefresh: true,
             autoRefresh,
