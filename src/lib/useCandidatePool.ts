@@ -353,6 +353,7 @@ export function useCandidatePool(
     withRejectSignal: boolean
   }): ApplyDecisionDeps {
     return {
+      candidates,
       setCandidates: (update) =>
         setCandidates((prev) => update(prev) as CandidateMatch[]),
       appendSystemMessage,
