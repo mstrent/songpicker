@@ -1,5 +1,55 @@
 # Songpicker — Claude conventions
 
+## Architecture philosophy
+
+- **Prefer breaking both paths with the same bug.** When the AI flow
+  and the UI flow do the same thing (commit a song, clear a slot,
+  swap two slots, reject a candidate), they should share the same
+  code, not parallel implementations. Two implementations always
+  drift — we've already lived this with eviction logic, restore-title
+  resolution, and swap-vs-reorder placeholder handling. If you find
+  yourself adding a feature to one path, look for the matching path
+  and either refactor first or extend both at the same time.
+- **Slot-state changes flow through one vocabulary**: an
+  `assignments[]` array (the `set_slot_contents` shape).
+  `assignments[].slotIndex` is 1-based among song slots;
+  `assignments[].candidateId` is null for "empty this slot."
+  Both AI tool calls and UI events (DnD drops, button clicks)
+  compile to this shape. A pure resolver turns assignments into a
+  Plan (PCO ops + state diffs + chat message); a single executor
+  applies the Plan. **Don't add a new "shortcut" function that
+  performs a slot-state change without going through the resolver +
+  executor** — that's how parallel paths grow.
+- **Pure functions for state transitions; side effects in the
+  executor.** Helpers like `resolveRestoreTitle`,
+  `findEvictionTarget`, `placeholderForSlot`, `detectSwapPairs`,
+  `resolvePlan` are pure: inputs in, outputs out, no I/O. The
+  executor is the only place that calls Cloud Function callables,
+  mutates SPA state, or appends chat messages. Pure-function tests
+  cover the resolver exhaustively; the executor is tested with
+  mocked callables.
+- **Stateful orchestration lives in `usePlanState`**, not
+  `PlanDetail.tsx`. The component is presentational; the hook owns
+  state + actions. Hook tests drive realistic flows (load → commit
+  → clear → swap → reject → suggest) by feeding mock callable
+  responses and asserting on returned state. **Don't put
+  state-transition logic inline in the component** — extract to the
+  hook or a helper.
+- **Test the seam, not the rendering.** Pure helpers, the resolver,
+  the executor with mocked deps, and the hook are the testable
+  surface. The rendered DOM is not a substitute for unit tests on
+  state logic — testing through React Testing Library conflates
+  rendering bugs with logic bugs and slows the loop. Render tests
+  (when we add them) stay focused on render concerns.
+- **Asymmetries are deliberate, not accidental.**
+  `propose_songs` is AI-only because manual candidate entry has no
+  product fit yet. Auto-refine signaling fires only on UI rejects
+  because AI rejects shouldn't trigger another AI turn.
+  Document such asymmetries explicitly so the next person doesn't
+  "fix" them.
+- See `docs/unification-plan.md` for the active refactor toward this
+  architecture and which phase we're in.
+
 ## User-facing language
 
 - **Never use the acronym "PCO" in any user-visible string** — labels,
