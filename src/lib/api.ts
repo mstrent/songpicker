@@ -107,6 +107,14 @@ export const getPlanContext = httpsCallable<
   }
 >(functions, 'getPlanContext')
 
+/** Lean refresh used after slot-state writes — fetches just the
+ *  fields that can change on a slot mutation. See refreshSlotState
+ *  in functions/src/index.ts. */
+export const refreshSlotState = httpsCallable<
+  { serviceTypeId: string; planId: string },
+  { items: PlanItem[]; slotPlaceholders: Record<string, string> }
+>(functions, 'refreshSlotState')
+
 export const savePlanTheme = httpsCallable<
   { planId: string; theme: string },
   { ok: boolean }

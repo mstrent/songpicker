@@ -221,6 +221,26 @@ export const getPlanContext = onCall(async (req) => {
   return { plan, notes, items, userTheme, userNotes, slotPlaceholders }
 })
 
+// Lean refresh used after slot-state writes — same items +
+// slotPlaceholders shape that `getPlanContext` returns, but skips
+// the plan + notes + userTheme + userNotes fetches (none of those
+// change on a slot write). Reduces PCO chatter on the hot path.
+// Plan-switch + initial load still use the full getPlanContext.
+export const refreshSlotState = onCall(async (req) => {
+  const { uid } = await requireAllowed(req)
+  const { serviceTypeId, planId } = req.data as {
+    serviceTypeId?: string
+    planId?: string
+  }
+  if (!serviceTypeId || !planId) {
+    throw new HttpsError('invalid-argument', 'serviceTypeId and planId required')
+  }
+  const client = await pcoForUser(uid)
+  const items = await client.listPlanItems(serviceTypeId, planId)
+  const slotPlaceholders = await syncSlotPlaceholders(uid, planId, items)
+  return { items, slotPlaceholders }
+})
+
 export const savePlanTheme = onCall(async (req) => {
   const { uid } = await requireAllowed(req)
   const { planId, theme } = req.data as { planId?: string; theme?: string }

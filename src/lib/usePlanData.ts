@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   clearSongFromSlot,
   placeSongInSlot,
+  refreshSlotState as refreshSlotStateCallable,
   savePlanNotes,
   savePlanTheme,
   type Plan,
@@ -9,9 +10,9 @@ import {
   type PlanNote,
 } from './api'
 import {
-  invalidatePlanContext,
   loadPlanContext,
   patchCachedNotes,
+  patchCachedSlotState,
   patchCachedTheme,
 } from './cache'
 import {
@@ -226,10 +227,16 @@ export function usePlanData(
   }, [notesTextRaw, notesSource, serviceTypeId, planId])
 
   async function refreshPlanState(): Promise<void> {
-    invalidatePlanContext(serviceTypeId, planId)
-    const fresh = await loadPlanContext(serviceTypeId, planId)
-    setItems(fresh.items)
-    setSlotPlaceholders(fresh.slotPlaceholders)
+    // Lean refresh — fetches just items + slotPlaceholders (the
+    // only fields that change on a slot write). Saves the
+    // plan/notes/userTheme/userNotes round-trip vs. the original
+    // loadPlanContext path. The session cache gets patched in
+    // place so future plan-load doesn't re-fetch the full thing.
+    const sr = await refreshSlotStateCallable({ serviceTypeId, planId })
+    const { items: freshItems, slotPlaceholders: freshPlaceholders } = sr.data
+    setItems(freshItems)
+    setSlotPlaceholders(freshPlaceholders)
+    patchCachedSlotState(serviceTypeId, planId, freshItems, freshPlaceholders)
   }
 
   function fallbackSlotTitle(itemId: string): string {

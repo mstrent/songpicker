@@ -78,3 +78,24 @@ export function patchCachedNotes(
     pending.then((ctx) => ({ ...ctx, userNotes: notes })),
   )
 }
+
+/** Patches cached items + slotPlaceholders after a slot-state
+ *  write. Used by usePlanData.refreshPlanState which fetches fresh
+ *  via the lean refreshSlotState callable; keeping the cache in
+ *  sync means subsequent loadPlanContext calls (e.g., navigating
+ *  back to this plan) see the post-write state without an extra
+ *  PCO round-trip. */
+export function patchCachedSlotState(
+  serviceTypeId: string,
+  planId: string,
+  items: PlanItem[],
+  slotPlaceholders: Record<string, string>,
+): void {
+  const k = key(serviceTypeId, planId)
+  const pending = contextCache.get(k)
+  if (!pending) return
+  contextCache.set(
+    k,
+    pending.then((ctx) => ({ ...ctx, items, slotPlaceholders })),
+  )
+}
