@@ -2019,6 +2019,100 @@ textarea {
   cursor: not-allowed;
 }
 
+/* Access lists (admin-managed allowed/admin email rosters). Two
+   columns: env break-glass entries on the left (read-only, dimmed) and
+   Firestore-stored entries on the right with add/remove controls. */
+.access-list-editor {
+  margin-top: 1rem;
+}
+.access-list-editor h4 {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+}
+.access-list-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+@media (max-width: 640px) {
+  .access-list-columns {
+    grid-template-columns: 1fr;
+  }
+}
+.access-list-col-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+}
+.access-entry-list {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+.access-entry {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.6rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+.access-entry.env {
+  opacity: 0.7;
+  background: var(--bg);
+}
+.access-entry-text {
+  font-family: var(--font-mono, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.access-entry-remove {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+}
+.access-entry-remove:hover {
+  color: var(--error);
+  background: var(--error-soft);
+}
+.access-entry-remove:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.access-add {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+.access-add input {
+  font: inherit;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+}
+.access-add input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 /* AI persona / service-flow prompt pills. Always live in the
    .suggest-header row alongside the heading. The open pill switches to
    a filled-accent style as a clear "I'm expanded" indicator; the body

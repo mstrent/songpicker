@@ -2,6 +2,14 @@ import { initializeApp } from 'firebase-admin/app'
 import { setGlobalOptions } from 'firebase-functions/v2'
 import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/https'
 
+import {
+  addAccessEntry as addAccessEntryInternal,
+  emailMatchesEntries,
+  entryIsValid,
+  getAccess,
+  removeAccessEntry as removeAccessEntryInternal,
+  type AccessList,
+} from './access'
 import { getAiProvider } from './ai'
 import type { AiCandidate, StreamChunk } from './ai/types'
 import { PcoClient } from './pco/client'
@@ -51,31 +59,54 @@ import {
 initializeApp()
 setGlobalOptions({ region: 'us-central1', maxInstances: 10 })
 
-function isAdminEmail(email: string): boolean {
-  const admins = ADMIN_EMAILS.value()
+// Parse a comma-separated env value into validated allowlist entries.
+// Entries are either exact emails ("matt@thetrents.org") or domain
+// wildcards starting with "@" ("@thetrents.org").
+function parseEnvEntries(envValue: string): string[] {
+  return envValue
     .split(',')
     .map((s) => s.trim().toLowerCase())
-    .filter(Boolean)
-  return admins.length > 0 && admins.includes(email.toLowerCase())
+    .filter((s) => entryIsValid(s))
 }
 
-function requireAdmin(req: CallableRequest<unknown>): { uid: string; email: string } {
-  const auth = requireAllowed(req)
-  if (!isAdminEmail(auth.email)) {
+// Resolved entry list = env (break-glass root, immutable from UI) ∪
+// Firestore-stored entries (managed via the Admin UI). Caching of the
+// Firestore read happens inside getAccess().
+async function resolveEntries(list: AccessList): Promise<string[]> {
+  const env =
+    list === 'allowed'
+      ? parseEnvEntries(ALLOWED_EMAIL.value())
+      : parseEnvEntries(ADMIN_EMAILS.value())
+  const stored = await getAccess()
+  const storedEntries =
+    list === 'allowed' ? stored.allowedEmails : stored.adminEmails
+  // Dedupe in case an entry exists in both. Order doesn't matter for matching.
+  return Array.from(new Set([...env, ...storedEntries]))
+}
+
+async function isAdminEmail(email: string): Promise<boolean> {
+  return emailMatchesEntries(await resolveEntries('admin'), email)
+}
+
+async function requireAdmin(
+  req: CallableRequest<unknown>,
+): Promise<{ uid: string; email: string }> {
+  const auth = await requireAllowed(req)
+  if (!(await isAdminEmail(auth.email))) {
     throw new HttpsError('permission-denied', 'Admin only')
   }
   return auth
 }
 
-function requireAllowed(req: CallableRequest<unknown>): { uid: string; email: string } {
+async function requireAllowed(
+  req: CallableRequest<unknown>,
+): Promise<{ uid: string; email: string }> {
   const email = req.auth?.token?.email
   const uid = req.auth?.uid
   if (!email || !uid) throw new HttpsError('unauthenticated', 'Sign in required')
-  const allowed = ALLOWED_EMAIL.value()
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean)
-  if (allowed.length > 0 && !allowed.includes(email.toLowerCase())) {
+  // Fail closed: empty union → no match → denied. Missing env var +
+  // empty Firestore doc can't silently open the gate.
+  if (!emailMatchesEntries(await resolveEntries('allowed'), email)) {
     throw new HttpsError('permission-denied', `Not authorized: ${email}`)
   }
   return { uid, email }
@@ -84,7 +115,7 @@ function requireAllowed(req: CallableRequest<unknown>): { uid: string; email: st
 // Returns whether the calling user has saved their PCO PAT. SPA uses this
 // to decide whether to show the setup screen or the main app.
 export const getPcoStatus = onCall(async (req) => {
-  const { uid } = requireAllowed(req)
+  const { uid } = await requireAllowed(req)
   return { hasCredentials: await hasPcoCredentials(uid) }
 })
 
@@ -92,7 +123,7 @@ export const getPcoStatus = onCall(async (req) => {
 // store it in Firestore. Bad creds bubble back to the SPA so the user
 // retries instead of silently saving a wrong key.
 export const savePcoCredentials = onCall(async (req) => {
-  const { uid } = requireAllowed(req)
+  const { uid } = await requireAllowed(req)
   const { appId, secret } = req.data as { appId?: unknown; secret?: unknown }
   if (typeof appId !== 'string' || typeof secret !== 'string' || !appId.trim() || !secret.trim()) {
     throw new HttpsError('invalid-argument', 'appId and secret required')
@@ -111,7 +142,7 @@ export const savePcoCredentials = onCall(async (req) => {
 })
 
 export const listPlans = onCall(async (req) => {
-  const { uid } = requireAllowed(req)
+  const { uid } = await requireAllowed(req)
   const allowed = INCLUDED_SERVICE_TYPES.value()
     .split(',')
     .map((s) => s.trim())
@@ -168,7 +199,7 @@ export const listPlans = onCall(async (req) => {
 })
 
 export const getPlanContext = onCall(async (req) => {
-  const { uid } = requireAllowed(req)
+  const { uid } = await requireAllowed(req)
   const { serviceTypeId, planId } = req.data as {
     serviceTypeId?: string
     planId?: string
@@ -188,7 +219,7 @@ export const getPlanContext = onCall(async (req) => {
 })
 
 export const savePlanTheme = onCall(async (req) => {
-  const { uid } = requireAllowed(req)
+  const { uid } = await requireAllowed(req)
   const { planId, theme } = req.data as { planId?: string; theme?: string }
   if (!planId) throw new HttpsError('invalid-argument', 'planId required')
   if (typeof theme !== 'string') {
@@ -199,7 +230,7 @@ export const savePlanTheme = onCall(async (req) => {
 })
 
 export const savePlanNotes = onCall(async (req) => {
-  const { uid } = requireAllowed(req)
+  const { uid } = await requireAllowed(req)
   const { planId, notes } = req.data as { planId?: string; notes?: string }
   if (!planId) throw new HttpsError('invalid-argument', 'planId required')
   if (typeof notes !== 'string') {
@@ -210,7 +241,7 @@ export const savePlanNotes = onCall(async (req) => {
 })
 
 export const searchSongs = onCall(async (req) => {
-  const { uid } = requireAllowed(req)
+  const { uid } = await requireAllowed(req)
   const { query } = req.data as { query?: string }
   if (!query) throw new HttpsError('invalid-argument', 'query required')
   const client = await pcoForUser(uid)
@@ -229,7 +260,7 @@ export const suggestSongs = onCall<
 >(
   { secrets: [ANTHROPIC_API_KEY] },
   async (req, res) => {
-    const { uid } = requireAllowed(req)
+    const { uid } = await requireAllowed(req)
     const {
       theme,
       userMessage,
@@ -311,14 +342,14 @@ function parseType(raw: unknown): PromptType {
 }
 
 export const getPromptConfig = onCall(async (req) => {
-  const { uid } = requireAllowed(req)
+  const { uid } = await requireAllowed(req)
   const { type: rawType, planId } = req.data as { type?: unknown; planId?: string }
   const type = parseType(rawType)
   return await loadResolved(uid, type, planId)
 })
 
 export const savePromptConfig = onCall(async (req) => {
-  const { uid } = requireAllowed(req)
+  const { uid } = await requireAllowed(req)
   const {
     type: rawType,
     scope,
@@ -351,12 +382,12 @@ export const savePromptConfig = onCall(async (req) => {
 })
 
 export const getAdminStatus = onCall(async (req) => {
-  const { email } = requireAllowed(req)
-  return { isAdmin: isAdminEmail(email) }
+  const { email } = await requireAllowed(req)
+  return { isAdmin: await isAdminEmail(email) }
 })
 
 export const getAdminPromptConfig = onCall(async (req) => {
-  requireAdmin(req)
+  await requireAdmin(req)
   const admin = await loadAdminDefaults()
   return {
     structure: {
@@ -372,7 +403,7 @@ export const getAdminPromptConfig = onCall(async (req) => {
 })
 
 export const saveAdminPromptConfig = onCall(async (req) => {
-  requireAdmin(req)
+  await requireAdmin(req)
   const { type: rawType, value } = req.data as { type?: unknown; value?: unknown }
   const type = parseType(rawType)
   if (typeof value !== 'string') {
@@ -383,14 +414,14 @@ export const saveAdminPromptConfig = onCall(async (req) => {
 })
 
 export const loadSession = onCall(async (req) => {
-  const { uid } = requireAllowed(req)
+  const { uid } = await requireAllowed(req)
   const { planId } = req.data as { planId?: string }
   if (!planId) throw new HttpsError('invalid-argument', 'planId required')
   return await loadPickerSession(uid, planId)
 })
 
 export const saveSession = onCall(async (req) => {
-  const { uid } = requireAllowed(req)
+  const { uid } = await requireAllowed(req)
   const { planId, session } = req.data as {
     planId?: string
     session?: PickerSession
@@ -408,7 +439,7 @@ export const saveSession = onCall(async (req) => {
 // commits those alongside the song id so the slot lands fully
 // populated, mirroring what the PCO web UI does on song-pick.
 export const placeSongInSlot = onCall(async (req) => {
-  const { uid } = requireAllowed(req)
+  const { uid } = await requireAllowed(req)
   const {
     serviceTypeId,
     planId,
@@ -475,7 +506,7 @@ export const placeSongInSlot = onCall(async (req) => {
 // Intent-shaped clear endpoint: "this slot should be empty." Renames
 // the older clearSlot for consistency with placeSongInSlot.
 export const clearSongFromSlot = onCall(async (req) => {
-  const { uid } = requireAllowed(req)
+  const { uid } = await requireAllowed(req)
   const { serviceTypeId, planId, slotItemId, restoreTitle } = req.data as {
     serviceTypeId?: string
     planId?: string
@@ -494,7 +525,7 @@ export const clearSongFromSlot = onCall(async (req) => {
 })
 
 export const reorderItems = onCall(async (req) => {
-  const { uid } = requireAllowed(req)
+  const { uid } = await requireAllowed(req)
   const { serviceTypeId, planId, orderedItemIds } = req.data as {
     serviceTypeId?: string
     planId?: string
@@ -517,7 +548,7 @@ export const reorderItems = onCall(async (req) => {
 })
 
 export const listSongArrangements = onCall(async (req) => {
-  const { uid } = requireAllowed(req)
+  const { uid } = await requireAllowed(req)
   const { songId } = req.data as { songId?: string }
   if (!songId) {
     throw new HttpsError('invalid-argument', 'songId required')
@@ -528,7 +559,7 @@ export const listSongArrangements = onCall(async (req) => {
 })
 
 export const setSlotArrangementKey = onCall(async (req) => {
-  const { uid } = requireAllowed(req)
+  const { uid } = await requireAllowed(req)
   const { serviceTypeId, planId, itemId, arrangementId, keyId } = req.data as {
     serviceTypeId?: string
     planId?: string
@@ -551,7 +582,7 @@ export const setSlotArrangementKey = onCall(async (req) => {
 })
 
 export const commitPlanItems = onCall(async (req) => {
-  const { uid } = requireAllowed(req)
+  const { uid } = await requireAllowed(req)
   const { serviceTypeId, planId, items } = req.data as {
     serviceTypeId?: string
     planId?: string
@@ -576,7 +607,7 @@ export const commitPlanItems = onCall(async (req) => {
 // authenticated allowed user can add/remove chips. The SPA surfaces
 // these as one-tap reasons on rejected candidate cards.
 export const getRejectionReasons = onCall(async (req) => {
-  requireAllowed(req)
+  await requireAllowed(req)
   const doc = await listRejectionReasons()
   return publicRejectionReasonsShape(doc)
 })
@@ -586,7 +617,7 @@ export const getRejectionReasons = onCall(async (req) => {
 export const recordRejectReason = onCall(
   { secrets: [ANTHROPIC_API_KEY] },
   async (req) => {
-    requireAllowed(req)
+    await requireAllowed(req)
     const { reason } = req.data as { reason?: string }
     if (!reason || typeof reason !== 'string' || !reason.trim()) {
       throw new HttpsError('invalid-argument', 'reason (non-empty string) required')
@@ -609,7 +640,7 @@ export const recordRejectReason = onCall(
 )
 
 export const removeCommonReason = onCall(async (req) => {
-  requireAllowed(req)
+  await requireAllowed(req)
   const { text } = req.data as { text?: string }
   if (!text || typeof text !== 'string' || !text.trim()) {
     throw new HttpsError('invalid-argument', 'text (non-empty string) required')
@@ -624,7 +655,7 @@ export const removeCommonReason = onCall(async (req) => {
 // optional collisionWith when the new text would merge into another
 // chip — callers surface that as an inline error.
 export const renameCommonReason = onCall(async (req) => {
-  requireAdmin(req)
+  await requireAdmin(req)
   const { oldText, newText } = req.data as {
     oldText?: string
     newText?: string
@@ -640,4 +671,56 @@ export const renameCommonReason = onCall(async (req) => {
     ...publicRejectionReasonsShape(doc),
     collisionWith: collisionWith ?? null,
   }
+})
+
+// Allowed/admin email management. Env-based entries are the break-glass
+// root (read-only here); the Firestore lists are what the admin can
+// edit at runtime. Final auth uses the union, so env entries always
+// keep at least one operator able to log in.
+export const getAccessConfig = onCall(async (req) => {
+  await requireAdmin(req)
+  const stored = await getAccess()
+  return {
+    env: {
+      allowedEmails: parseEnvEntries(ALLOWED_EMAIL.value()),
+      adminEmails: parseEnvEntries(ADMIN_EMAILS.value()),
+    },
+    stored: {
+      allowedEmails: stored.allowedEmails,
+      adminEmails: stored.adminEmails,
+    },
+  }
+})
+
+function parseAccessList(raw: unknown): AccessList {
+  if (raw === 'allowed' || raw === 'admin') return raw
+  throw new HttpsError('invalid-argument', 'list must be "allowed" or "admin"')
+}
+
+export const addAccessEntry = onCall(async (req) => {
+  await requireAdmin(req)
+  const { list, entry } = req.data as { list?: unknown; entry?: unknown }
+  const which = parseAccessList(list)
+  if (typeof entry !== 'string' || !entry.trim()) {
+    throw new HttpsError('invalid-argument', 'entry (non-empty string) required')
+  }
+  try {
+    const stored = await addAccessEntryInternal(which, entry)
+    return { stored }
+  } catch (e) {
+    // entryIsValid failures surface as invalid-argument so the UI can
+    // show the message inline instead of an INTERNAL toast.
+    throw new HttpsError('invalid-argument', (e as Error).message)
+  }
+})
+
+export const removeAccessEntry = onCall(async (req) => {
+  await requireAdmin(req)
+  const { list, entry } = req.data as { list?: unknown; entry?: unknown }
+  const which = parseAccessList(list)
+  if (typeof entry !== 'string' || !entry.trim()) {
+    throw new HttpsError('invalid-argument', 'entry (non-empty string) required')
+  }
+  const stored = await removeAccessEntryInternal(which, entry)
+  return { stored }
 })

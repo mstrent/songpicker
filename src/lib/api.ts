@@ -429,3 +429,30 @@ export const renameCommonReason = httpsCallable<
   { oldText: string; newText: string },
   RenameCommonReasonResponse
 >(functions, 'renameCommonReason')
+
+/** Access-list management. The `env` lists come from ALLOWED_EMAIL /
+ *  ADMIN_EMAILS in functions/.env and are read-only break-glass roots
+ *  — surfaced for transparency, not editable. The `stored` lists live
+ *  in Firestore and are what the admin manages from the UI. The
+ *  effective allowlist is `env ∪ stored`. */
+export type AccessList = 'allowed' | 'admin'
+
+export interface AccessConfig {
+  env: { allowedEmails: string[]; adminEmails: string[] }
+  stored: { allowedEmails: string[]; adminEmails: string[] }
+}
+
+export const getAccessConfig = httpsCallable<void, AccessConfig>(
+  functions,
+  'getAccessConfig',
+)
+
+export const addAccessEntry = httpsCallable<
+  { list: AccessList; entry: string },
+  { stored: { allowedEmails: string[]; adminEmails: string[] } }
+>(functions, 'addAccessEntry')
+
+export const removeAccessEntry = httpsCallable<
+  { list: AccessList; entry: string },
+  { stored: { allowedEmails: string[]; adminEmails: string[] } }
+>(functions, 'removeAccessEntry')
