@@ -255,6 +255,35 @@ export const searchSongs = onCall(async (req) => {
   return { songs }
 })
 
+// Batched library lookup. AI propose actions can mint several
+// candidates at once; sending one Cloud Function call instead of N
+// halves the round-trip overhead. PCO requests fan out under the
+// existing pMap concurrency cap (5 parallel; same rate-limit
+// behaviour as the singular callable would have under burst).
+//
+// Empty/blank queries get a `null` result entry so the caller can
+// pair results with input candidates by index.
+export const searchSongsBatch = onCall(async (req) => {
+  const { uid } = await requireAllowed(req)
+  const { queries } = req.data as {
+    queries?: Array<{ query?: string; author?: string }>
+  }
+  if (!Array.isArray(queries) || queries.length === 0) {
+    throw new HttpsError('invalid-argument', 'queries (non-empty array) required')
+  }
+  const client = await pcoForUser(uid)
+  const results = await pMap(queries, async (q) => {
+    const query = typeof q.query === 'string' ? q.query.trim() : ''
+    if (!query) return null
+    const author =
+      typeof q.author === 'string' && q.author.trim()
+        ? { author: q.author.trim() }
+        : {}
+    return client.searchSongs(query, author)
+  })
+  return { results }
+})
+
 // Streaming callable: streams text deltas and tool actions as the AI
 // produces them, and resolves with the full SuggestResult for callers
 // that prefer the non-streaming shape (or for the final state the SPA
