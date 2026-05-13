@@ -639,10 +639,66 @@ export function usePlanState(
       return
     }
 
-    // PCO-direct outlier: see PlanDetail history for the rationale.
+    // PCO-direct outlier: at least one slot has a song that's not
+    // tracked as a candidate (linked via PCO web UI before
+    // songpicker observed it, or the candidate record drifted out
+    // of sync). Both-empty also lands here and no-ops.
     const sourceFilled = !!draggedSlot.songId
     const targetFilled = !!targetSlot.songId
     if (!sourceFilled && !targetFilled) return
+
+    if (sourceFilled && targetFilled) {
+      // Both filled — swap songs without losing either. Two PCO
+      // PATCHes, like the unified executor would do for a
+      // candidate-tracked swap, but issued directly because the
+      // assignments[] path can't represent a swap without
+      // candidateIds on both sides.
+      if (
+        !draggedSlot.songId ||
+        !draggedSlot.songTitle ||
+        !targetSlot.songId ||
+        !targetSlot.songTitle
+      ) {
+        setGenerateError("Can't swap — missing song info on one of the slots.")
+        return
+      }
+      console.warn(
+        '[songpicker] reorderSlotItem fallback (both filled): one or both slots lacks a candidate record. Going through paired PCO PATCHes. See compileSlotToSlot for the unified path.',
+      )
+      const draggedSongId = draggedSlot.songId
+      const draggedSongTitle = draggedSlot.songTitle
+      const targetSongId = targetSlot.songId
+      const targetSongTitle = targetSlot.songTitle
+      try {
+        // Paired PATCHes: each slot gets the other's song. Items
+        // stay at their positions (no reorder), titles + songIds
+        // swap. Order doesn't matter because both are independent
+        // PATCH calls — no source-clear needed.
+        await placeSongInSlot({
+          serviceTypeId,
+          planId,
+          slotItemId: draggedSlot.id,
+          songId: targetSongId,
+          songTitle: targetSongTitle,
+        })
+        await placeSongInSlot({
+          serviceTypeId,
+          planId,
+          slotItemId: targetSlot.id,
+          songId: draggedSongId,
+          songTitle: draggedSongTitle,
+        })
+        await refreshPlanState()
+        appendSystemMessage(
+          `↔ Swapped "${draggedSongTitle}" with "${targetSongTitle}"`,
+        )
+      } catch (e) {
+        setGenerateError((e as Error).message)
+      }
+      return
+    }
+
+    // Exactly one filled — move that song into the empty slot.
     const movingSlot = sourceFilled ? draggedSlot : targetSlot
     const destSlot = sourceFilled ? targetSlot : draggedSlot
     if (!movingSlot.songId || !movingSlot.songTitle) {
