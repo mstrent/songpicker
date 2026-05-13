@@ -73,30 +73,8 @@ export async function syncSlotPlaceholders(
   return next
 }
 
-// Trade two items' captured placeholders. Called after a both-filled
-// reorder/swap so the placeholder→position binding survives — the
-// item that ends up at position 5 inherits whatever placeholder was
-// previously associated with position 5's old occupant. No-op if
-// neither item has a captured placeholder. Returns the post-swap
-// map for the caller to ship back in the response.
-export async function swapPlaceholderEntries(
-  uid: string,
-  planId: string,
-  itemIdA: string,
-  itemIdB: string,
-): Promise<Record<string, string>> {
-  const existing = await loadSlotPlaceholders(uid, planId)
-  const valA = existing[itemIdA]
-  const valB = existing[itemIdB]
-  if (valA === undefined && valB === undefined) return existing
-  const next: Record<string, string> = { ...existing }
-  if (valB !== undefined) next[itemIdA] = valB
-  else delete next[itemIdA]
-  if (valA !== undefined) next[itemIdB] = valA
-  else delete next[itemIdB]
-  await docRef(uid, planId).set(
-    { titles: next, updatedAt: new Date() },
-    { merge: false },
-  )
-  return next
-}
+// (Phase 6 made the standalone swap-placeholder function obsolete:
+// the new swap path uses paired PCO PATCHes that leave items in
+// place, so placeholders never need to be swapped between item
+// IDs. The Cloud Function callable that wrapped this was deleted
+// in Phase 5a.)
