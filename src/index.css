@@ -187,6 +187,139 @@ textarea {
   text-align: center;
 }
 
+/* Sign-in screen: ambient AI-gradient aura behind the wordmark, animated
+   gradient title, sparkle decorations, and a gradient sign-in button.
+   Sells the AI value prop on first impression. */
+.signin {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  overflow: hidden;
+}
+.signin-aura {
+  position: absolute;
+  inset: -10%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(closest-side, rgba(90, 59, 255, 0.32), transparent 70%) 28% 30% / 55% 55% no-repeat,
+    radial-gradient(closest-side, rgba(236, 72, 153, 0.26), transparent 70%) 72% 62% / 50% 50% no-repeat,
+    radial-gradient(closest-side, rgba(147, 51, 234, 0.28), transparent 70%) 50% 80% / 55% 55% no-repeat;
+  filter: blur(48px);
+  opacity: 0.85;
+  animation: signin-aura-drift 18s ease-in-out infinite alternate;
+}
+@media (prefers-color-scheme: dark) {
+  .signin-aura {
+    opacity: 0.55;
+  }
+}
+@keyframes signin-aura-drift {
+  0%   { transform: translate3d(-3%, -2%, 0) scale(1); }
+  100% { transform: translate3d(3%, 2%, 0) scale(1.06); }
+}
+.signin-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.1rem;
+  padding: 2rem 1.5rem;
+  max-width: 32rem;
+}
+.signin-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+.signin-title {
+  margin: 0;
+  /* padding-bottom gives descenders ("g", "p") room — webkit's
+     background-clip:text on the .accent span clips strictly to the
+     line box, so a tight line-height cuts the bottom of descenders. */
+  padding: 0 0.05em 0.1em;
+  font-size: clamp(2.75rem, 9vw, 4.75rem);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+  color: var(--fg);
+}
+.signin-title .accent {
+  background: linear-gradient(90deg, #5a3bff 0%, #9333ea 35%, #ec4899 70%, #9333ea 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: signin-title-shift 9s ease-in-out infinite;
+}
+@media (prefers-color-scheme: dark) {
+  .signin-title .accent {
+    background: linear-gradient(90deg, #b09bff 0%, #c084fc 35%, #f472b6 70%, #c084fc 100%);
+    background-size: 250% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+  }
+}
+@keyframes signin-title-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+.signin-spark {
+  font-size: 1.5rem;
+  color: var(--ai-pink);
+  animation: sparkle-twinkle 2.4s ease-in-out infinite;
+  text-shadow: 0 0 18px rgba(236, 72, 153, 0.45);
+}
+.signin-spark-r {
+  animation-delay: 1.2s;
+}
+.signin-tagline {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  line-height: 1.4;
+}
+.signin-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 0.4rem;
+  padding: 0.75rem 1.6rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, #5a3bff 0%, #9333ea 50%, #ec4899 100%);
+  background-size: 200% 200%;
+  border: 0;
+  border-radius: 999px;
+  box-shadow:
+    0 12px 28px -12px rgba(147, 51, 234, 0.55),
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  animation: signin-title-shift 9s ease-in-out infinite;
+  transition: transform 0.12s ease, filter 0.12s ease, box-shadow 0.12s ease;
+}
+.signin-btn:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+  box-shadow:
+    0 16px 32px -12px rgba(147, 51, 234, 0.7),
+    0 0 0 1px rgba(255, 255, 255, 0.12) inset;
+}
+.signin-foot {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  opacity: 0.85;
+}
+
 .app {
   max-width: 920px;
   margin: 0 auto;

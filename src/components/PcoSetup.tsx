@@ -36,16 +36,18 @@ export function PcoSetup({ onSaved }: Props) {
       </p>
       <ol className="instructions">
         <li>
-          Open{' '}
+          Open your{' '}
           <a
             className="icon-text"
             href="https://api.planningcenteronline.com/oauth/applications"
             target="_blank"
             rel="noopener noreferrer"
+            title="api.planningcenteronline.com/oauth/applications"
           >
-            api.planningcenteronline.com/oauth/applications
+            Planning Center applications page
             <Icon name="external-link" size={12} />
           </a>
+          .
         </li>
         <li>Scroll down to <strong>Personal Access Tokens</strong>.</li>
         <li>Click <strong>New Personal Access Token</strong>, name it "songpicker".</li>
