@@ -44,10 +44,7 @@ import {
   savePickerSession,
   type PickerSession,
 } from './sessions'
-import {
-  swapPlaceholderEntries,
-  syncSlotPlaceholders,
-} from './slotPlaceholders'
+import { syncSlotPlaceholders } from './slotPlaceholders'
 import {
   ADMIN_EMAILS,
   ALLOWED_EMAIL,
@@ -561,32 +558,6 @@ export const reorderItems = onCall(async (req) => {
   const client = await pcoForUser(uid)
   await client.reorderPlanItems(serviceTypeId, planId, orderedItemIds)
   return { ok: true }
-})
-
-// Trade two items' captured slot placeholders. Called by the SPA
-// after a both-filled DnD swap so the placeholder→position binding
-// survives the reorder. PCO doesn't model this — titles travel with
-// items by default — so we explicitly mirror the swap on our side.
-export const swapSlotPlaceholders = onCall(async (req) => {
-  const { uid } = await requireAllowed(req)
-  const { planId, itemIdA, itemIdB } = req.data as {
-    planId?: string
-    itemIdA?: string
-    itemIdB?: string
-  }
-  if (!planId || !itemIdA || !itemIdB) {
-    throw new HttpsError(
-      'invalid-argument',
-      'planId, itemIdA, and itemIdB required',
-    )
-  }
-  const slotPlaceholders = await swapPlaceholderEntries(
-    uid,
-    planId,
-    itemIdA,
-    itemIdB,
-  )
-  return { slotPlaceholders }
 })
 
 export const listSongArrangements = onCall(async (req) => {
