@@ -161,12 +161,10 @@ page.
   interface in `functions/src/ai/types.ts` is kept so a future
   provider can slot in, but `getAiProvider()` just returns
   `AnthropicProvider`.
-- **Ancillary calls run on Haiku 4.5.** The chip-pipeline helpers in
-  `functions/src/ai/distill.ts` (`matchFreeformToChip`,
-  `distillSingleReason`) are short classifier/short-label tasks, not
-  generative — Haiku is several-times cheaper and faster. When adding
-  another small AI utility, default to Haiku; keep Sonnet for the
-  main suggestion engine.
+- **Default any future ancillary AI calls to Haiku 4.5**, not Sonnet.
+  Keep Sonnet for the main suggestion engine; use Haiku for short
+  classifier / short-label tasks where the model isn't generating
+  substantive content. Several-times cheaper and faster.
 - `suggestSongs` returns a `debug` payload via `buildUserMessage` so
   the SPA's debug panel always reflects what was actually sent.
 - **Streaming via `messages.stream`** — the callable in
@@ -273,15 +271,14 @@ page.
     `dragover` listener that tracks the cursor.
 - **Auto-refresh after reject signals is threshold-gated.**
   `scheduleAutoRefine` debounces 5 seconds after the most recent
-  reject or reject-reason save. The timer's callback only fires the
-  AI turn if `unservedRejectsRef >= 2` OR `unservedReasonSavesRef >=
-  1` — a single click-only reject doesn't trigger a chat turn. When
-  it fires, it routes through `handleSuggest({ autoRefresh: true })`,
-  which appends a `↻ Auto-refining…` system marker (no synthetic
-  user-prose turn) and passes `autoRefresh: true` to the AI so the
-  prompt switches into terse mode (commits/clears are disallowed
-  during auto-refresh; the SPA also drops them as belt-and-
-  suspenders).
+  reject. The timer's callback only fires the AI turn if
+  `unservedRejectsRef >= 2` — a single click-only reject doesn't
+  trigger a chat turn. When it fires, it routes through
+  `handleSuggest({ autoRefresh: true })`, which appends a
+  `↻ Auto-refining…` system marker (no synthetic user-prose turn)
+  and passes `autoRefresh: true` to the AI so the prompt switches
+  into terse mode (commits/clears are disallowed during auto-refresh;
+  the SPA also drops them as belt-and-suspenders).
 - **Action layer for PCO writes.** `placeSongAction`,
   `clearSlotAction`, `swapSlotsAction` in `PlanDetail.tsx` are the
   single source of truth for slot-state changes. Both manual flows
@@ -305,33 +302,16 @@ page.
   (`'pending'`, possibly committed via `committedAt`) or rejected.
   Sessions persisted before this change collapse old `'shortlist'`
   values to `'pending'` via the sanitizer in `functions/src/sessions.ts`.
-- **Reject rationale + chip pool.** Each rejected candidate can carry
-  a `rejectReason` (typed freeform or picked from the global chip
-  list at `appConfig/rejectionReasons`). Chips are app-wide. Reasons
-  resolve through three tiers in `recordRejectReason`:
-  1. `norm()` exact match against existing chips — bumps `useCount`,
-     no AI call (covers the chip-tap case).
-  2. Haiku semantic match (`matchFreeformToChip`) — bumps `useCount`,
-     returns the canonical text. The SPA overwrites the local
-     `rejectReason` with that text so future AI turns see consistent
-     per-candidate metadata.
-  3. Genuinely novel reasons get distilled into a short 2–4 word chip
-     by `distillSingleReason` (also Haiku) and added to the pool with
-     `useCount: 1`, `source: 'ai'`. The user-facing picker shows
-     `MAX_USER_AI_CHIPS` (3) by `useCount` desc / `addedAt` desc —
-     the rest are "proto" chips visible only in the admin UI.
-     `enforceAiPoolCap` keeps total AI chips at ≤ `MAX_AI_CHIPS` (23)
-     by evicting the least-used / oldest. Seed and manual chips are
-     admin-curated and never auto-evicted.
-  No batched distillation or freeform log — each Tier-3 reason
-  produces its chip immediately. Reasons go into the AI suggestion
-  payload as part of each candidate's metadata.
-- **Admin chip management.** `renameCommonReason` (admin-gated)
-  preserves `useCount/addedAt/source`; collision detection returns
-  `collisionWith` rather than throwing so the SPA can surface an
-  inline error. The admin reject-chip manager shows useCount as a
-  badge, supports inline rename (click chip text), and flags
-  proto chips with a dimmed treatment.
+- **Reject is boolean — no per-candidate metadata.** Rejecting a song
+  flips `decision` to `'reject'` and that's it. There's no reason
+  field, no chip pool, no rationale picker. Course-correction belongs
+  in the chat input (volatile, per-turn) or per-plan notes (stable,
+  cached). Don't reintroduce reasons in any form (chips, freeform,
+  classifier output) — see `feedback_no_reject_reasons.md` for
+  the rationale: per-candidate reasons risk overgeneralizing one
+  rejection's framing onto unrelated songs. The `remove_candidates`
+  tool likewise takes only `ids`; the AI's prose reply is where it
+  explains its actions.
 - **Per-turn context compaction.** Three patterns reduce per-turn
   token count regardless of cache state: (1) candidates the AI saw
   on a prior turn drop their `chorusSnippet` from subsequent payloads
@@ -339,12 +319,12 @@ page.
   `functions/src/ai/userMessage.ts` stratifies output by decision —
   committed candidates render as just `id, title, author, →slot N`
   (the service order already shows everything else about them);
-  rejected as `id, title, author, rejected, reason`; only pending
-  candidates get the full render (inLibrary flag, slot tags, chorus,
-  earmark); (3) chat history beyond `HISTORY_PROSE_CAP` (8 prose
-  messages) drops old prose entirely and collapses old `[event]`
-  system messages into one `[summary]` line of category counts at
-  the top of history. See `buildAiHistory` and `summarizeOldEvents`.
+  rejected as `id, title, author, rejected`; only pending candidates
+  get the full render (inLibrary flag, slot tags, chorus, earmark);
+  (3) chat history beyond `HISTORY_PROSE_CAP` (8 prose messages)
+  drops old prose entirely and collapses old `[event]` system
+  messages into one `[summary]` line of category counts at the top
+  of history. See `buildAiHistory` and `summarizeOldEvents`.
   **`author` always goes through on every candidate** regardless of
   decision or known-to-AI status — worship song titles are often
   ambiguous and the disambiguator is load-bearing.

@@ -1,5 +1,14 @@
 # Conversational AI refactor — plan
 
+> **Historical note (May 2026):** Layer 2 (reject rationale + chip
+> pool) was ripped out. Reject is boolean now — no reason field, no
+> chip pool, no rationale picker, no `recordRejectReason` /
+> `getRejectionReasons` callables, no `distill.ts`. See
+> `feedback_no_reject_reasons.md` in agent memory for the rationale
+> (per-candidate reasons risk overgeneralizing one rejection's framing
+> onto unrelated songs). The Layer 2 sections below are kept as
+> historical record of the refactor, not as current architecture.
+
 Goal: turn the Suggest/Refine loop into an actual chat. Today every
 turn is a stateless "give me more songs that aren't on this blacklist"
 re-prompt. We want the AI to see the full state of the page (current

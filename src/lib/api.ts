@@ -139,14 +139,6 @@ export interface PersistedCandidate {
    *  uncommitted candidates and on candidates persisted before this
    *  field existed. */
   priorSlotTitle: string | null
-  /** Free-text reason the user gave when rejecting this candidate.
-   *  Null on un-rejected candidates and on rejected ones with no
-   *  reason provided. Surfaced to the AI on the next suggest call. */
-  rejectReason: string | null
-  /** True iff the user clicked Skip on the rationale picker. Used
-   *  only for SPA layout — dismissed cards live in the collapsed
-   *  rejected pool alongside with-reason ones. */
-  rejectPickerDismissed: boolean
 }
 
 export interface SessionMessage {
@@ -261,7 +253,6 @@ export interface AiCandidate {
   chorusSnippet?: string
   slots?: string[]
   decision: Decision
-  rejectReason?: string
   assignedSlot?: { index: number; total: number }
   committed?: boolean
   /** True iff the candidate has a matched song in the user's
@@ -280,7 +271,6 @@ export interface ProposeAction {
 export interface RemoveAction {
   kind: 'remove'
   ids: string[]
-  reason: string
 }
 export interface SlotAssignment {
   slotIndex: number
@@ -356,6 +346,14 @@ export interface AdminPromptConfig {
   structure: { admin: string; hardcoded: string }
   role: { admin: string; hardcoded: string }
   technical: string
+  /** Hardcoded prompt content the admin can't edit but should be able
+   *  to inspect: the four tool descriptions sent to the model on every
+   *  turn, plus the per-turn nudge appended when an auto-refresh fires
+   *  (no typed user input). All read-only. */
+  tooling: {
+    tools: { name: string; description: string }[]
+    autoRefreshNudge: string
+  }
 }
 
 export const getAdminStatus = httpsCallable<void, { isAdmin: boolean }>(
@@ -377,58 +375,6 @@ export const commitPlanItems = httpsCallable<
   { serviceTypeId: string; planId: string; items: CommitItem[] },
   { created: number }
 >(functions, 'commitPlanItems')
-
-/** A reason chip in the global rejection-reasons list. `source` tracks
- *  where the chip came from: 'seed' (baked-in defaults), 'manual'
- *  (typed by a user), 'ai' (distilled from freeform reasons).
- *  `useCount` is the running tally of times this chip has been used
- *  (via chip-tap, exact-text freeform, or AI-semantic match). */
-export interface CommonReason {
-  text: string
-  addedAt: number
-  source: 'manual' | 'ai' | 'seed'
-  useCount: number
-}
-
-export interface RejectionReasonsView {
-  common: CommonReason[]
-}
-
-/** Response shape for recordRejectReason. `matchedChipText` is set when
- *  the saved reason matched an existing chip (either via exact text or
- *  AI-semantic match) — callers should overwrite their local
- *  candidate's rejectReason with this value so future AI turns see
- *  consistent canonical metadata. */
-export interface RecordRejectReasonResponse extends RejectionReasonsView {
-  matchedChipText: string | null
-}
-
-/** Response shape for renameCommonReason. `collisionWith` is set when
- *  the new text would normalize to the same key as a different
- *  existing chip — surfaced inline so the admin can resolve manually. */
-export interface RenameCommonReasonResponse extends RejectionReasonsView {
-  collisionWith: string | null
-}
-
-export const getRejectionReasons = httpsCallable<void, RejectionReasonsView>(
-  functions,
-  'getRejectionReasons',
-)
-
-export const recordRejectReason = httpsCallable<
-  { reason: string },
-  RecordRejectReasonResponse
->(functions, 'recordRejectReason')
-
-export const removeCommonReason = httpsCallable<
-  { text: string },
-  RejectionReasonsView
->(functions, 'removeCommonReason')
-
-export const renameCommonReason = httpsCallable<
-  { oldText: string; newText: string },
-  RenameCommonReasonResponse
->(functions, 'renameCommonReason')
 
 /** Access-list management. The `env` lists come from ALLOWED_EMAIL /
  *  ADMIN_EMAILS in functions/.env and are read-only break-glass roots

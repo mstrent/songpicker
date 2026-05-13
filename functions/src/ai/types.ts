@@ -28,9 +28,6 @@ export interface AiCandidate {
    *  time (e.g. "opener", "closer"). */
   slots?: string[]
   decision: AiCandidateDecision
-  /** Free-text reason the user gave on reject. Populated once Layer 2
-   *  ships the rationale UI; safe to be missing in the meantime. */
-  rejectReason?: string
   /** Position info for the service-order slot this candidate is
    *  earmarked for (1-based among song slots). Set whenever the
    *  candidate has an assigned slot, committed or not. The AI can
@@ -79,10 +76,10 @@ export interface SuggestRequest {
    *  server and appended to this history. */
   history?: ConversationTurn[]
   /** True when this call was fired automatically by the SPA after the
-   *  user adjusted state (rejected songs, saved reasons) without
-   *  typing anything. Switches the user-message builder into a terse
-   *  mode that nudges the model toward silent tool calls and a
-   *  one-sentence-max reply, since the user didn't ask for a chat. */
+   *  user adjusted state (rejected songs) without typing anything.
+   *  Switches the user-message builder into a terse mode that nudges
+   *  the model toward silent tool calls and a one-sentence-max reply,
+   *  since the user didn't ask for a chat. */
   autoRefresh?: boolean
 }
 
@@ -94,13 +91,12 @@ export interface ProposeAction {
   suggestions: SongSuggestion[]
 }
 
-/** Mark existing candidates as rejected with a reason. Same downstream
- *  effect as the user clicking Reject and saving a freeform reason,
- *  except the system message tags the move as AI-driven. */
+/** Mark existing candidates as rejected. Same downstream effect as the
+ *  user clicking Reject, except the system message tags the move as
+ *  AI-driven. */
 export interface RemoveAction {
   kind: 'remove'
   ids: string[]
-  reason: string
 }
 
 /** A single slot assignment: "this slot should contain this candidate"

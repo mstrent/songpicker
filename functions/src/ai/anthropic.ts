@@ -25,10 +25,11 @@ const MODEL = 'claude-sonnet-4-6'
 const CACHE_1H = { type: 'ephemeral' as const, ttl: '1h' } as unknown as
   Anthropic.CacheControlEphemeral
 
-// Three tools the model can invoke per turn (any combination, in any
-// order, or none). Schemas are intentionally permissive on optional
-// fields so the model isn't forced to fabricate values it doesn't have.
-const TOOLS: Anthropic.Tool[] = [
+// Tools the model can invoke per turn (any combination, in any order,
+// or none). Schemas are intentionally permissive on optional fields so
+// the model isn't forced to fabricate values it doesn't have. Exported
+// so the admin endpoint can surface the descriptions read-only.
+export const TOOLS: Anthropic.Tool[] = [
   {
     name: 'propose_songs',
     description:
@@ -65,7 +66,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'remove_candidates',
     description:
-      "Mark one or more existing candidates as rejected. Use this when context (user feedback, theme shift, role saturation) makes a prior suggestion obviously wrong. The reason is shown to the user in the rejected pool.",
+      "Mark one or more existing candidates as rejected. Use this when context (user feedback, theme shift, role saturation) makes a prior suggestion obviously wrong. If you want to explain why, do it in your prose reply alongside this tool call — the rejection itself doesn't carry a per-candidate reason.",
     input_schema: {
       type: 'object',
       properties: {
@@ -75,13 +76,8 @@ const TOOLS: Anthropic.Tool[] = [
           description:
             'Candidate ids drawn from the "Current candidates" block in the user message.',
         },
-        reason: {
-          type: 'string',
-          description:
-            'Short, user-facing reason. Phrase from the AI\'s perspective ("doesn\'t fit the new theme"), not the user\'s.',
-        },
       },
-      required: ['ids', 'reason'],
+      required: ['ids'],
     },
   },
   {
@@ -376,11 +372,7 @@ function parseRemove(obj: Record<string, unknown>): RemoveAction | null {
     (i): i is string => typeof i === 'string' && i.length > 0,
   )
   if (ids.length === 0) return null
-  const reason =
-    typeof obj.reason === 'string' && obj.reason.trim()
-      ? obj.reason.trim()
-      : 'no longer fits'
-  return { kind: 'remove', ids, reason }
+  return { kind: 'remove', ids }
 }
 
 function parseSetSlotContents(

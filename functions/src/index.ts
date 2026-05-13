@@ -11,6 +11,8 @@ import {
   type AccessList,
 } from './access'
 import { getAiProvider } from './ai'
+import { TOOLS } from './ai/anthropic'
+import { AUTO_REFRESH_NUDGE } from './ai/userMessage'
 import type { AiCandidate, StreamChunk } from './ai/types'
 import { PcoClient } from './pco/client'
 import { pMap } from './pco/concurrency'
@@ -37,13 +39,6 @@ import {
   saveUserTheme,
   type PromptType,
 } from './prompts'
-import {
-  listRejectionReasons,
-  publicShape as publicRejectionReasonsShape,
-  recordRejectReason as recordRejectReasonInternal,
-  removeCommonReason as removeCommonReasonInternal,
-  renameCommonReason as renameCommonReasonInternal,
-} from './rejectionReasons'
 import {
   loadPickerSession,
   savePickerSession,
@@ -399,6 +394,13 @@ export const getAdminPromptConfig = onCall(async (req) => {
       hardcoded: hardcodedDefaultFor('role'),
     },
     technical: TECHNICAL_REQUIREMENTS,
+    tooling: {
+      tools: TOOLS.map((t) => ({
+        name: t.name,
+        description: t.description ?? '',
+      })),
+      autoRefreshNudge: AUTO_REFRESH_NUDGE,
+    },
   }
 })
 
@@ -601,76 +603,6 @@ export const commitPlanItems = onCall(async (req) => {
     created += 1
   }
   return { created }
-})
-
-// Reject-rationale chip pool. Single global list across all users; any
-// authenticated allowed user can add/remove chips. The SPA surfaces
-// these as one-tap reasons on rejected candidate cards.
-export const getRejectionReasons = onCall(async (req) => {
-  await requireAllowed(req)
-  const doc = await listRejectionReasons()
-  return publicRejectionReasonsShape(doc)
-})
-
-// Bound the secret here too so the inline match + distillation
-// (Tier 2 / Tier 3 in recordRejectReason) can reach Claude.
-export const recordRejectReason = onCall(
-  { secrets: [ANTHROPIC_API_KEY] },
-  async (req) => {
-    await requireAllowed(req)
-    const { reason } = req.data as { reason?: string }
-    if (!reason || typeof reason !== 'string' || !reason.trim()) {
-      throw new HttpsError('invalid-argument', 'reason (non-empty string) required')
-    }
-    // Best-effort: if the secret isn't actually wired the inline call
-    // still records the reason and skips distillation silently.
-    const apiKey = (() => {
-      try {
-        return ANTHROPIC_API_KEY.value()
-      } catch {
-        return null
-      }
-    })()
-    const { doc, matchedChipText } = await recordRejectReasonInternal(reason, apiKey)
-    return {
-      ...publicRejectionReasonsShape(doc),
-      matchedChipText,
-    }
-  },
-)
-
-export const removeCommonReason = onCall(async (req) => {
-  await requireAllowed(req)
-  const { text } = req.data as { text?: string }
-  if (!text || typeof text !== 'string' || !text.trim()) {
-    throw new HttpsError('invalid-argument', 'text (non-empty string) required')
-  }
-  await removeCommonReasonInternal(text)
-  const doc = await listRejectionReasons()
-  return publicRejectionReasonsShape(doc)
-})
-
-// Admin-only rename of an existing reject-reason chip. Preserves
-// useCount/source. Returns the updated chip list along with an
-// optional collisionWith when the new text would merge into another
-// chip — callers surface that as an inline error.
-export const renameCommonReason = onCall(async (req) => {
-  await requireAdmin(req)
-  const { oldText, newText } = req.data as {
-    oldText?: string
-    newText?: string
-  }
-  if (!oldText || typeof oldText !== 'string' || !oldText.trim()) {
-    throw new HttpsError('invalid-argument', 'oldText (non-empty string) required')
-  }
-  if (!newText || typeof newText !== 'string' || !newText.trim()) {
-    throw new HttpsError('invalid-argument', 'newText (non-empty string) required')
-  }
-  const { doc, collisionWith } = await renameCommonReasonInternal(oldText, newText)
-  return {
-    ...publicRejectionReasonsShape(doc),
-    collisionWith: collisionWith ?? null,
-  }
 })
 
 // Allowed/admin email management. Env-based entries are the break-glass

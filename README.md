@@ -24,8 +24,7 @@ title, arrangement, and key all set in one go.
    auto-looked-up in your Planning Center song library and annotated
    with `last_scheduled_at`. Songs played within the last four weeks
    get a caution highlight.
-5. Iterate in a chat-style conversation: reject songs (with an
-   optional reason — picked from a global chip pool or freeform),
+5. Iterate in a chat-style conversation: reject songs you don't want,
    ask the AI to "give me a few slower options for the closer" or
    "swap A and B" or "commit X to slot 2", and the AI takes action
    directly. It can propose, retire, commit, clear, move, and swap
@@ -55,11 +54,10 @@ title, arrangement, and key all set in one go.
   `functions/.env`, read-only break-glass roots) ∪ Firestore
   (`appConfig/access`, runtime-editable from the Admin page). Empty
   union fails closed.
-- **AI**: Anthropic Claude Sonnet 4.6 for the main suggestion engine,
-  Haiku 4.5 for ancillary classifier/short-label calls (chip matching
-  and distillation). The `AiProvider` interface in
-  `functions/src/ai/types.ts` is kept so another provider can slot in
-  later, but only Anthropic is wired up today.
+- **AI**: Anthropic Claude Sonnet 4.6 for the main suggestion engine.
+  The `AiProvider` interface in `functions/src/ai/types.ts` is kept
+  so another provider can slot in later, but only Anthropic is wired
+  up today.
 - **Planning Center**: Services API v2 with a per-user Personal
   Access Token.
 
@@ -122,7 +120,6 @@ All hosted on Firebase free tier.
 | `clearSongFromSlot` | Clear a slot (restores a prior title) |
 | `listSongArrangements`, `setSlotArrangementKey` | Arrangement + key picker |
 | `reorderItems` | Whole-plan item reorder via the dedicated PCO action endpoint |
-| `getRejectionReasons`, `recordRejectReason`, `removeCommonReason`, `renameCommonReason` | Global reject-rationale chip pool: three-tier resolution (norm match → Haiku semantic match → Haiku per-reason distill into a new chip) |
 | `commitPlanItems` | Bulk insert (used by the older candidate-list flow) |
 
 ## Planning Center API touchpoints

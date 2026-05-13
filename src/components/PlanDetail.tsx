@@ -1,11 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react'
 import {
   clearSongFromSlot,
-  getRejectionReasons,
   loadSession,
   placeSongInSlot,
-  recordRejectReason,
-  removeCommonReason,
   reorderItems as reorderItemsCall,
   saveSession,
   savePlanNotes,
@@ -14,7 +11,6 @@ import {
   suggestSongs,
   type AiAction,
   type AiCandidate,
-  type CommonReason,
   type ConversationTurn,
   type Decision,
   type MatchStatus,
@@ -33,7 +29,6 @@ import {
   patchCachedTheme,
 } from '../lib/cache'
 import { isSongSlot } from '../lib/songSlots'
-import { pickerVisibleChips } from '../lib/chipRanking'
 import { usePromptConfig } from '../lib/usePromptConfig'
 import { ArrangementKeyEditor } from './ArrangementKeyEditor'
 import { PromptBody } from './PromptBody'
@@ -69,15 +64,6 @@ interface CandidateMatch {
    *  by clearPickedSlot to restore that title in PCO instead of leaving
    *  the song name behind. */
   priorSlotTitle: string | null
-  /** Free-text reason for rejecting. Drives the AI's "use the reject
-   *  reasons to understand direction" behavior. Null on unrejected
-   *  candidates, or rejected ones the user didn't bother annotating. */
-  rejectReason: string | null
-  /** True once the user has clicked Skip on the rationale picker for
-   *  this rejected candidate. SPA-only state, used to decide whether
-   *  the card lives in the "needs reason" stack or the collapsed
-   *  done pool. Resets on un-reject. */
-  rejectPickerDismissed: boolean
   /** Transient SPA-only flag set true the moment we optimistically
    *  flip committedAt during an AI commit, and cleared once the
    *  post-PCO items refresh lands. The reconciliation effect skips
@@ -118,8 +104,6 @@ function toPersisted(c: CandidateMatch): PersistedCandidate {
     assignedSlotItemId: c.assignedSlotItemId,
     committedAt: c.committedAt,
     priorSlotTitle: c.priorSlotTitle,
-    rejectReason: c.rejectReason,
-    rejectPickerDismissed: c.rejectPickerDismissed,
   }
 }
 
@@ -151,8 +135,6 @@ function fromPersisted(p: PersistedCandidate): CandidateMatch {
     assignedSlotItemId: p.assignedSlotItemId,
     committedAt: p.committedAt,
     priorSlotTitle: p.priorSlotTitle ?? null,
-    rejectReason: p.rejectReason ?? null,
-    rejectPickerDismissed: p.rejectPickerDismissed ?? false,
     commitPending: false,
   }
 }
@@ -178,20 +160,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   const [candidates, setCandidates] = useState<CandidateMatch[]>([])
   const [messages, setMessages] = useState<SessionMessage[]>([])
   const [sessionLoaded, setSessionLoaded] = useState(false)
-  // Global one-tap reason chips for the reject-rationale UI. Loaded
-  // once per plan view and refreshed after every chip-list mutation
-  // (record/remove). Empty until the callable returns.
-  const [reasonChips, setReasonChips] = useState<CommonReason[]>([])
-  // When set, the rationale picker panel renders at the top of the
-  // rejected pool, scoped to this candidate. Cleared on submit or
-  // when the candidate is no longer in the reject state.
-  const [rationaleFocusId, setRationaleFocusId] = useState<string | null>(null)
-  // Per-candidate draft text for the freeform textarea. Keyed by
-  // candidate id so multiple drafts coexist across re-focusing.
-  const [reasonDrafts, setReasonDrafts] = useState<Record<string, string>>({})
   // Whether the rejected-pool <details> is open. Defaults closed; we
-  // flip to true the first time anything gets rejected so the user
-  // sees the rationale UI without an extra click.
+  // flip to true the first time the AI rejects something so the user
+  // sees what just got removed without an extra click.
   const [rejectedPoolOpen, setRejectedPoolOpen] = useState(false)
 
   // Which candidate's "Commit to slot" menu is currently open (if any).
@@ -237,10 +208,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   // Tally of fresh rejects since the last AI turn fired. Cluster
   // threshold is 2 — a single reject alone does nothing.
   const unservedRejectsRef = useRef(0)
-  // Tally of reject-reason saves (chip click OR freeform text)
-  // since the last AI turn. ANY reason save fires the refresh,
-  // because reasons are higher-signal context the model can act on.
-  const unservedReasonSavesRef = useRef(0)
   // generating mirrored as a ref so the debounced timer reads the
   // current value when it fires, not the value captured at schedule
   // time (which would skip the firing once a slow manual Send is
@@ -273,10 +240,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setMessages([])
     setSessionLoaded(false)
 
-    // Reset rationale UI state when switching plans so stale draft text
-    // or focus from a different plan doesn't leak over.
-    setRationaleFocusId(null)
-    setReasonDrafts({})
     setRejectedPoolOpen(false)
     // Cancel any pending auto-refine carried over from a prior plan.
     if (autoRefineTimer.current) {
@@ -284,7 +247,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       autoRefineTimer.current = null
     }
     unservedRejectsRef.current = 0
-    unservedReasonSavesRef.current = 0
     lastSentCandidateIdsRef.current = new Set()
 
     // Load the persisted candidate pool + future chat history for this plan.
@@ -326,24 +288,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     }
   }, [serviceTypeId, planId])
 
-  // Load the global reject-reason chip pool. App-wide list, so we fetch
-  // once on mount and refresh in place after any add/remove call.
-  useEffect(() => {
-    let cancelled = false
-    getRejectionReasons()
-      .then((res) => {
-        if (cancelled) return
-        setReasonChips(res.data.common)
-      })
-      .catch(() => {
-        // Non-fatal: chip row is empty until the user wires a successful
-        // call. The freeform textarea still works.
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
   // Pin the chat log to the bottom whenever messages change so
   // streaming text + new turns stay in view. Cheap — only fires on
   // messages array updates, which is the same trigger as new content.
@@ -357,17 +301,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   useEffect(() => {
     generatingRef.current = generating
   }, [generating])
-
-  // If the focused candidate is no longer rejected (un-rejected, cleared,
-  // etc.), drop the focus so the rationale picker doesn't dangle on a
-  // candidate that's no longer in the reject state.
-  useEffect(() => {
-    if (!rationaleFocusId) return
-    const c = candidates.find((x) => x.id === rationaleFocusId)
-    if (!c || c.decision !== 'reject') {
-      setRationaleFocusId(null)
-    }
-  }, [candidates, rationaleFocusId])
 
   // Debounced auto-save: persists candidate pool + messages ~700ms after
   // the latest change. Only fires once the session has finished loading
@@ -527,7 +460,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       // on the previous turn drop their chorusSnippet (the only large
       // stable field). Title + author still go on every turn so the
       // AI can disambiguate songs that share a title. Mutable fields
-      // (decision, committed, assignedSlot, rejectReason) always sent.
+      // (decision, committed, assignedSlot) always sent.
       const knownCandidateIds = lastSentCandidateIdsRef.current
       const aiCandidates: AiCandidate[] = candidates.map((c) => {
         const slotIndex = c.assignedSlotItemId
@@ -544,7 +477,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
               ? c.suggestion.slots
               : undefined,
           decision: c.decision,
-          rejectReason: c.rejectReason ?? undefined,
           assignedSlot:
             slotIndex !== undefined && totalSongSlots > 0
               ? { index: slotIndex, total: totalSongSlots }
@@ -673,8 +605,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
               assignedSlotItemId: null,
               committedAt: null,
               priorSlotTitle: null,
-              rejectReason: null,
-              rejectPickerDismissed: false,
               commitPending: false,
             }
             minted.push(c)
@@ -709,7 +639,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                 c.decision !== 'reject'
               ) {
                 actuallyRejectedIds.push(c.id)
-                return { ...c, decision: 'reject', rejectReason: action.reason }
+                return { ...c, decision: 'reject' }
               }
               return c
             }),
@@ -718,9 +648,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             const titles = actuallyRejectedIds
               .map((id) => titleById.get(id) ?? `(unknown ${id})`)
               .join(', ')
-            appendSystemMessage(
-              `🤖 AI rejected ${titles} — reason: "${action.reason}"`,
-            )
+            appendSystemMessage(`🤖 AI rejected ${titles}`)
             setRejectedPoolOpen(true)
           }
           // If none of the targets were eligible, stay silent — don't
@@ -1091,12 +1019,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           setCandidates((prev) =>
             prev.map((c) =>
               action.ids.includes(c.id) && c.decision === 'reject'
-                ? {
-                    ...c,
-                    decision: 'pending',
-                    rejectReason: null,
-                    rejectPickerDismissed: false,
-                  }
+                ? { ...c, decision: 'pending' }
                 : c,
             ),
           )
@@ -1253,10 +1176,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     } finally {
       setGenerating(false)
       // This turn served whatever signals had accumulated — reset
-      // the unserved-counters so the next auto-refresh threshold
+      // the unserved-counter so the next auto-refresh threshold
       // starts counting from zero again.
       unservedRejectsRef.current = 0
-      unservedReasonSavesRef.current = 0
     }
   }
 
@@ -1274,41 +1196,26 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       autoRefineTimer.current = null
     }
     unservedRejectsRef.current = 0
-    unservedReasonSavesRef.current = 0
   }
 
-  // 5-second debounce. Each new signal resets the timer so rapid
+  // 5-second debounce. Each new reject resets the timer so rapid
   // rejections coalesce into a single auto-fire rather than each
-  // resetting a tight window. At fire time the timer re-checks the
-  // gating thresholds (counters are captured by ref so the check
-  // sees latest values, not the values at schedule time).
-  //
-  // Gating:
-  //   - 2+ fresh rejects since the last AI turn (a cluster), OR
-  //   - 1+ reject-reason saves since the last AI turn (high signal —
-  //     the user gave the AI new information about what to avoid)
-  //
-  // A single click-only reject doesn't fire anything. The user can
-  // always click Send manually if they want the AI to engage.
+  // resetting a tight window. Fires only once 2+ rejects have
+  // accumulated since the last AI turn — a single click-only reject
+  // doesn't fire anything. The user can always click Send manually
+  // if they want the AI to engage on a single signal.
   function scheduleAutoRefine() {
     if (autoRefineTimer.current) clearTimeout(autoRefineTimer.current)
     autoRefineTimer.current = setTimeout(() => {
       autoRefineTimer.current = null
       if (generatingRef.current) return
-      const enoughRejects = unservedRejectsRef.current >= 2
-      const anyReasonSaves = unservedReasonSavesRef.current >= 1
-      if (!enoughRejects && !anyReasonSaves) return
+      if (unservedRejectsRef.current < 2) return
       void handleSuggest({ autoRefresh: true })
     }, 5000)
   }
 
   function bumpRejectSignal() {
     unservedRejectsRef.current += 1
-    scheduleAutoRefine()
-  }
-
-  function bumpReasonSignal() {
-    unservedReasonSavesRef.current += 1
     scheduleAutoRefine()
   }
 
@@ -1331,21 +1238,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     const newDecision: Decision = oldDecision === next ? 'pending' : next
 
     setCandidates((prev) =>
-      prev.map((c) => {
-        if (c.id !== id) return c
-        // Un-rejection wipes any stored reason AND any "Skip dismissed"
-        // flag — the candidate is back in play, both bits of reject
-        // state no longer apply. Committed candidates keep their
-        // assignedSlotItemId (that's the live PCO commit) regardless
-        // of decision flips.
-        const clearReject = newDecision !== 'reject'
-        return {
-          ...c,
-          decision: newDecision,
-          rejectReason: clearReject ? null : c.rejectReason,
-          rejectPickerDismissed: clearReject ? false : c.rejectPickerDismissed,
-        }
-      }),
+      prev.map((c) =>
+        c.id === id ? { ...c, decision: newDecision } : c,
+      ),
     )
 
     // Surface decision changes in the chat log so the conversation
@@ -1353,138 +1248,12 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     // typed refinements.
     if (newDecision === 'reject' && oldDecision !== 'reject') {
       appendSystemMessage(`✗ Rejected: ${target.suggestion.title}`)
-      // Newly-rejected cards land in the needs-attention stack
-      // (always visible) with the picker pre-rendered — no focus
-      // state needed. The done pool stays however the user left it.
       // Count this toward the reject-cluster threshold. A single
       // click-only reject doesn't auto-fire the AI on its own; we
-      // only trigger once the user's adjustments cross a threshold
-      // (see scheduleAutoRefine).
+      // only trigger once 2+ rejects accumulate (see scheduleAutoRefine).
       bumpRejectSignal()
     } else if (oldDecision === 'reject' && newDecision !== 'reject') {
       appendSystemMessage(`↩ Unrejected: ${target.suggestion.title}`)
-    }
-  }
-
-  // Set a candidate's reject reason locally (no server call). Used by
-  // chip clicks where the global list already knows about the reason.
-  function setCandidateReason(candidateId: string, reason: string | null) {
-    const trimmed = reason ? reason.trim() : null
-    setCandidates((prev) =>
-      prev.map((c) =>
-        c.id === candidateId && c.decision === 'reject'
-          ? { ...c, rejectReason: trimmed && trimmed.length > 0 ? trimmed : null }
-          : c,
-      ),
-    )
-    // Clear any draft text now that we've committed a reason.
-    setReasonDrafts((prev) => {
-      if (!(candidateId in prev)) return prev
-      const next = { ...prev }
-      delete next[candidateId]
-      return next
-    })
-    setRationaleFocusId(null)
-  }
-
-  // Save a freeform-typed reason. Same as setCandidateReason plus a
-  // server-side call so the global log + distillation trigger see the
-  // new text. Refreshes chips from the response. If the backend
-  // matched the freeform text to an existing chip (exact or AI
-  // semantic), we overwrite the local rejectReason with the canonical
-  // chip text so future AI turns see uniform metadata across users.
-  async function saveFreeformReason(candidateId: string, reason: string) {
-    const trimmed = reason.trim()
-    if (!trimmed) {
-      setCandidateReason(candidateId, null)
-      return
-    }
-    setCandidateReason(candidateId, trimmed)
-    // High-signal context the AI hasn't seen yet. Counts as a
-    // reason-save in the auto-refine gating.
-    bumpReasonSignal()
-    try {
-      const res = await recordRejectReason({ reason: trimmed })
-      setReasonChips(res.data.common)
-      if (res.data.matchedChipText && res.data.matchedChipText !== trimmed) {
-        setCandidateReason(candidateId, res.data.matchedChipText)
-      }
-    } catch {
-      // Recording is best-effort — local reason is already saved. The
-      // global chip pool just won't grow this time.
-    }
-  }
-
-  // Skip the rationale picker for a needs-attention card — moves it
-  // to the collapsed done pool without saving a reason. If a focused
-  // edit was in progress on this card, exit that too.
-  function dismissRejectPicker(id: string) {
-    setCandidates((prev) =>
-      prev.map((c) =>
-        c.id === id ? { ...c, rejectPickerDismissed: true } : c,
-      ),
-    )
-    if (rationaleFocusId === id) setRationaleFocusId(null)
-    setReasonDrafts((prev) => {
-      if (!(id in prev)) return prev
-      const next = { ...prev }
-      delete next[id]
-      return next
-    })
-  }
-
-  // Click "+ add reason" on a dismissed card in the done pool: clears
-  // the dismissed flag so the card reappears in the needs-attention
-  // stack with its picker open.
-  function undismissRejectPicker(id: string) {
-    setCandidates((prev) =>
-      prev.map((c) =>
-        c.id === id ? { ...c, rejectPickerDismissed: false } : c,
-      ),
-    )
-  }
-
-  // Click "edit" on a with-reason card in the done pool: enters edit
-  // mode for that specific card (the picker renders inline within
-  // the done card via rationaleFocusId), with the existing reason
-  // pre-filled as the textarea draft so the user can tweak rather
-  // than retype.
-  function startEditingReason(id: string) {
-    const candidate = candidates.find((c) => c.id === id)
-    if (!candidate || candidate.decision !== 'reject') return
-    setReasonDrafts((prev) => ({
-      ...prev,
-      [id]: candidate.rejectReason ?? '',
-    }))
-    setRationaleFocusId(id)
-  }
-
-  // Skip during edit-of-existing-reason: exit edit mode without
-  // changing anything. Done from a focused done card.
-  function cancelEditingReason(id: string) {
-    if (rationaleFocusId === id) setRationaleFocusId(null)
-    setReasonDrafts((prev) => {
-      if (!(id in prev)) return prev
-      const next = { ...prev }
-      delete next[id]
-      return next
-    })
-  }
-
-  async function removeReasonChip(text: string) {
-    // Optimistic local update so the chip disappears immediately.
-    setReasonChips((prev) => prev.filter((c) => c.text !== text))
-    try {
-      const res = await removeCommonReason({ text })
-      setReasonChips(res.data.common)
-    } catch {
-      // Restore by refetching if the call failed.
-      try {
-        const res = await getRejectionReasons()
-        setReasonChips(res.data.common)
-      } catch {
-        // Give up; user can refresh.
-      }
     }
   }
 
@@ -2446,224 +2215,42 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       {(() => {
         const rejected = candidates.filter((c) => c.decision === 'reject')
         if (rejected.length === 0) return null
-        // needsAttention: rejected, no reason saved, picker not
-        // dismissed → render with picker visible, in a stack so the
-        // user can address them in any order.
-        // done: rejected with a saved reason OR explicitly dismissed
-        // → collapsed pool below.
-        const needsAttention = rejected.filter(
-          (c) => !c.rejectReason && !c.rejectPickerDismissed,
-        )
-        const done = rejected.filter(
-          (c) => c.rejectReason || c.rejectPickerDismissed,
-        )
-
-        // Shared rationale-picker render. `mode` distinguishes the
-        // two contexts: 'fresh' is a needs-attention card (Skip
-        // dismisses to done); 'edit' is a done card being modified
-        // (Skip cancels edit, leaving any existing reason intact).
-        const renderPicker = (
-          c: CandidateMatch,
-          mode: 'fresh' | 'edit',
-        ) => (
-          <div className="rationale-picker">
-            <div className="rationale-header">
-              <span className="rationale-question">
-                Why did you reject this?
-              </span>
-              <button
-                type="button"
-                className="rationale-skip"
-                onClick={() =>
-                  mode === 'fresh'
-                    ? dismissRejectPicker(c.id)
-                    : cancelEditingReason(c.id)
-                }
-                title={
-                  mode === 'fresh'
-                    ? 'Hide this picker — moves the card to the rejected pool below without saving a reason'
-                    : 'Cancel edit — leaves the saved reason unchanged'
-                }
-              >
-                Skip
-              </button>
-            </div>
-            {(() => {
-              const visible = pickerVisibleChips(reasonChips)
-              if (visible.length === 0) return null
-              return (
-              <div className="rationale-chips">
-                {visible.map((chip) => (
-                  <span key={chip.text} className="rationale-chip">
-                    <button
-                      type="button"
-                      className="rationale-chip-text"
-                      onClick={() => {
-                        setCandidateReason(c.id, chip.text)
-                        bumpReasonSignal()
-                      }}
-                      title="Use this reason"
-                    >
-                      {chip.text}
-                    </button>
-                    <button
-                      type="button"
-                      className="rationale-chip-remove"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        void removeReasonChip(chip.text)
-                      }}
-                      title="Remove this chip from the global list"
-                      aria-label={`Remove "${chip.text}" from common reasons`}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-              </div>
-              )
-            })()}
-            <div className="rationale-freeform">
-              <textarea
-                className="rationale-input"
-                placeholder="Or type your own reason… (the AI will use it on the next suggestion)"
-                rows={2}
-                value={reasonDrafts[c.id] ?? ''}
-                onChange={(e) =>
-                  setReasonDrafts((prev) => ({
-                    ...prev,
-                    [c.id]: e.target.value,
-                  }))
-                }
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault()
-                    const draft = reasonDrafts[c.id] ?? ''
-                    void saveFreeformReason(c.id, draft)
-                  }
-                }}
-              />
-              <button
-                type="button"
-                className="rationale-save"
-                onClick={() => {
-                  const draft = reasonDrafts[c.id] ?? ''
-                  void saveFreeformReason(c.id, draft)
-                }}
-                disabled={!(reasonDrafts[c.id] ?? '').trim()}
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        )
-
         return (
-          <>
-            {needsAttention.length > 0 && (
-              <ul className="rejected-needs-reason-list">
-                {needsAttention.map((c) => (
-                  <li
-                    key={c.id}
-                    className="rejected-card rejected-needs-reason"
-                  >
-                    <div className="rejected-title">
-                      “{c.suggestion.title}”
-                      {c.suggestion.author && (
-                        <span className="author"> — {c.suggestion.author}</span>
-                      )}
-                    </div>
-                    {c.suggestion.chorusSnippet && (
-                      <div className="rejected-snippet">
-                        “{c.suggestion.chorusSnippet}”
-                      </div>
+          <details
+            className="rejected-pool"
+            open={rejectedPoolOpen}
+            onToggle={(e) => setRejectedPoolOpen(e.currentTarget.open)}
+          >
+            <summary>
+              <span className="chevron" aria-hidden>▸</span>
+              <span>{rejected.length} rejected</span>
+            </summary>
+            <ul className="rejected-list">
+              {rejected.map((c) => (
+                <li key={c.id} className="rejected-card">
+                  <div className="rejected-title">
+                    {c.suggestion.title}
+                    {c.suggestion.author && (
+                      <span className="author"> — {c.suggestion.author}</span>
                     )}
-                    {renderPicker(c, 'fresh')}
-                    <button
-                      type="button"
-                      className="decision-btn"
-                      onClick={() => setDecision(c.id, 'reject')}
-                      title="Bring this candidate back to the active pool"
-                    >
-                      ↶ Unreject
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {done.length > 0 && (
-              <details
-                className="rejected-pool"
-                open={rejectedPoolOpen}
-                onToggle={(e) => setRejectedPoolOpen(e.currentTarget.open)}
-              >
-                <summary>
-                  <span className="chevron" aria-hidden>▸</span>
-                  <span>{done.length} rejected</span>
-                </summary>
-                <ul className="rejected-list">
-                  {done.map((c) => {
-                    const isEditing = rationaleFocusId === c.id
-                    return (
-                      <li key={c.id} className="rejected-card">
-                        <div className="rejected-title">
-                          {c.suggestion.title}
-                          {c.suggestion.author && (
-                            <span className="author">
-                              {' '}
-                              — {c.suggestion.author}
-                            </span>
-                          )}
-                        </div>
-                        {c.suggestion.chorusSnippet && (
-                          <div className="rejected-snippet">
-                            “{c.suggestion.chorusSnippet}”
-                          </div>
-                        )}
-                        {isEditing ? (
-                          renderPicker(c, 'edit')
-                        ) : c.rejectReason ? (
-                          <div className="rejected-reason">
-                            <span className="rejected-reason-label">
-                              Reason:
-                            </span>{' '}
-                            <span className="rejected-reason-text">
-                              “{c.rejectReason}”
-                            </span>
-                            <button
-                              type="button"
-                              className="rejected-reason-edit"
-                              onClick={() => startEditingReason(c.id)}
-                              title="Edit this reason"
-                            >
-                              edit
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            className="rejected-reason-add"
-                            onClick={() => undismissRejectPicker(c.id)}
-                            title="Tell the AI why you rejected this — moves the card back up to the needs-reason stack"
-                          >
-                            + add reason
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="decision-btn"
-                          onClick={() => setDecision(c.id, 'reject')}
-                          title="Bring this candidate back to the active pool"
-                        >
-                          ↶ Unreject
-                        </button>
-                      </li>
-                    )
-                  })}
-                </ul>
-              </details>
-            )}
-          </>
+                  </div>
+                  {c.suggestion.chorusSnippet && (
+                    <div className="rejected-snippet">
+                      “{c.suggestion.chorusSnippet}”
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="decision-btn"
+                    onClick={() => setDecision(c.id, 'reject')}
+                    title="Bring this candidate back to the active pool"
+                  >
+                    ↶ Unreject
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </details>
         )
       })()}
 

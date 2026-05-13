@@ -11,6 +11,15 @@ export interface BuiltUserMessage {
   volatile: string
 }
 
+/** Appended to the volatile half when the SPA fires a turn
+ *  automatically (no typed user input). Overrides the system prompt's
+ *  default "be conversational" guidance so an auto-refresh doesn't
+ *  interrupt the user with a paragraph after every reject. Exported so
+ *  the admin endpoint can surface it read-only alongside the tool
+ *  descriptions. */
+export const AUTO_REFRESH_NUDGE =
+  "[auto-refresh] This turn was fired automatically after the user adjusted state without asking anything. Be terse: at most ONE short sentence in your text reply, or none at all — let the action markers speak. Don't summarise what you did. Only call propose_songs if a still-unfilled role's options have actually dropped below 2; otherwise prefer doing nothing."
+
 // Single source of truth for the user-side text the AI sees on the
 // current turn. The chat history (prior user/assistant turns) carries
 // the user's typed inputs and the AI's prose replies; this function
@@ -39,14 +48,7 @@ export function buildUserMessage(req: SuggestRequest): BuiltUserMessage {
   }
   volatileParts.push(`User request: ${req.userMessage || '(none)'}`)
   if (req.autoRefresh) {
-    // Override the system prompt's "make it short, conversational,
-    // and explanatory" guidance for this specific turn. The user
-    // adjusted state but didn't ask anything — chat output should
-    // be minimal so they aren't interrupted by a paragraph after
-    // every reject.
-    volatileParts.push(
-      "[auto-refresh] This turn was fired automatically after the user adjusted state without asking anything. Be terse: at most ONE short sentence in your text reply, or none at all — let the action markers speak. Don't summarise what you did. Only call propose_songs if a still-unfilled role's options have actually dropped below 2; otherwise prefer doing nothing.",
-    )
+    volatileParts.push(AUTO_REFRESH_NUDGE)
   }
 
   return {
@@ -59,7 +61,7 @@ export function buildUserMessage(req: SuggestRequest): BuiltUserMessage {
 // block small in long sessions:
 //   committed → id, title, author, "— committed→slot N" (service order
 //     already shows everything else about this song)
-//   rejected  → id, title, author, "— rejected", reason if any
+//   rejected  → id, title, author, "— rejected"
 //   pending   → full content (the AI is actively reasoning here)
 // `author` always goes through regardless of decision — worship song
 // titles are often ambiguous ("Way Maker", "How Great Is Our God") and
@@ -83,7 +85,6 @@ function renderCandidate(c: AiCandidate): string {
 
   if (c.decision === 'reject') {
     parts.push('— rejected')
-    if (c.rejectReason) parts.push(`— reason: "${c.rejectReason}"`)
     return parts.join(' ')
   }
 
