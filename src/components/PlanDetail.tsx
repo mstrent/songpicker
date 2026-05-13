@@ -43,6 +43,10 @@ import {
   compileDropCandidateOnSlot,
   compileSlotToSlot,
 } from '../lib/planActions/compile'
+import {
+  applyDecisionChange,
+  type ApplyDecisionDeps,
+} from '../lib/planActions/decisions'
 import { usePromptConfig } from '../lib/usePromptConfig'
 import { ArrangementKeyEditor } from './ArrangementKeyEditor'
 import { PromptBody } from './PromptBody'
@@ -635,36 +639,17 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             )
           }
         } else if (action.kind === 'remove') {
-          // Filter to candidates we'll actually reject: not committed
-          // (committed songs can't be rejected without first clearing
-          // the slot, and rejecting a song the AI is about to displace
-          // is almost always a "replace" misinterpretation anyway) and
-          // not already rejected.
-          const actuallyRejectedIds: string[] = []
-          setCandidates((prev) =>
-            prev.map((c) => {
-              if (
-                action.ids.includes(c.id) &&
-                !c.committedAt &&
-                c.decision !== 'reject'
-              ) {
-                actuallyRejectedIds.push(c.id)
-                return { ...c, decision: 'reject' }
-              }
-              return c
-            }),
+          // Same path as user-driven reject — applyDecisionChange
+          // skips committed/already-rejected entries silently and
+          // emits the chat message only when something actually
+          // changed. AI rejects don't bump the auto-refine signal
+          // (AI rejecting things shouldn't trigger another AI turn).
+          const result = applyDecisionChange(
+            { ids: action.ids, decision: 'reject' },
+            'ai',
+            decisionDeps({ withRejectSignal: false }),
           )
-          if (actuallyRejectedIds.length > 0) {
-            const titles = actuallyRejectedIds
-              .map((id) => titleById.get(id) ?? `(unknown ${id})`)
-              .join(', ')
-            appendSystemMessage(`🤖 AI rejected ${titles}`)
-            setRejectedPoolOpen(true)
-          }
-          // If none of the targets were eligible, stay silent — don't
-          // emit a "rejected" message that didn't actually happen.
-          // This is typically the AI misreading "remove X, replace
-          // with Y" as a rejection + commit (it's just displacement).
+          if (result.changedIds.length > 0) setRejectedPoolOpen(true)
         } else if (action.kind === 'set_slot_contents') {
           // Pure resolver does all the planning; executor applies it
           // (optimistic state + PCO calls + chat messages + rollback).
@@ -681,18 +666,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           })
           if (result.pcoWritesFired) pcoWritesFired = true
         } else if (action.kind === 'unreject') {
-          setCandidates((prev) =>
-            prev.map((c) =>
-              action.ids.includes(c.id) && c.decision === 'reject'
-                ? { ...c, decision: 'pending' }
-                : c,
-            ),
-          )
-          const titles = action.ids
-            .map((id) => titleById.get(id) ?? `(unknown ${id})`)
-            .join(', ')
-          appendSystemMessage(
-            `🤖 AI restored ${titles} to the candidate pool`,
+          applyDecisionChange(
+            { ids: action.ids, decision: 'pending' },
+            'ai',
+            decisionDeps({ withRejectSignal: false }),
           )
         }
       }
@@ -842,30 +819,35 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     ])
   }
 
+  // Build deps for the decision-change layer (shared between UI
+  // and AI). UI passes onRejectsLanded so user clicks bump the
+  // auto-refine threshold; the AI flow omits it since AI rejects
+  // shouldn't trigger another AI turn.
+  function decisionDeps(opts: { withRejectSignal: boolean }): ApplyDecisionDeps {
+    return {
+      setCandidates: (update) =>
+        setCandidates((prev) => update(prev) as CandidateMatch[]),
+      appendSystemMessage,
+      onRejectsLanded: opts.withRejectSignal
+        ? (n) => {
+            for (let i = 0; i < n; i++) bumpRejectSignal()
+          }
+        : undefined,
+    }
+  }
+
   function setDecision(id: string, next: Decision) {
     const target = candidates.find((c) => c.id === id)
     if (!target) return
-    const oldDecision = target.decision
-    const newDecision: Decision = oldDecision === next ? 'pending' : next
-
-    setCandidates((prev) =>
-      prev.map((c) =>
-        c.id === id ? { ...c, decision: newDecision } : c,
-      ),
+    // The button toggles: clicking 'reject' on an already-rejected
+    // candidate flips it back to pending (unreject).
+    const decision: Decision =
+      target.decision === next ? 'pending' : next
+    applyDecisionChange(
+      { ids: [id], decision: decision === 'reject' ? 'reject' : 'pending' },
+      'user',
+      decisionDeps({ withRejectSignal: true }),
     )
-
-    // Surface decision changes in the chat log so the conversation
-    // captures everything that shapes future suggestions, not just
-    // typed refinements.
-    if (newDecision === 'reject' && oldDecision !== 'reject') {
-      appendSystemMessage(`✗ Rejected: ${target.suggestion.title}`)
-      // Count this toward the reject-cluster threshold. A single
-      // click-only reject doesn't auto-fire the AI on its own; we
-      // only trigger once 2+ rejects accumulate (see scheduleAutoRefine).
-      bumpRejectSignal()
-    } else if (oldDecision === 'reject' && newDecision !== 'reject') {
-      appendSystemMessage(`↩ Unrejected: ${target.suggestion.title}`)
-    }
   }
 
   // Build the deps object the executor needs. Used by both the AI
