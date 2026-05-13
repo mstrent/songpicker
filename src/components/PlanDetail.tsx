@@ -35,9 +35,9 @@ import {
   fallbackSlotTitle as fallbackSlotTitleHelper,
   findEvictionTarget,
   placeholderForSlot as placeholderForSlotHelper,
-  preTurnSlotPlaceholders as preTurnSlotPlaceholdersHelper,
   resolveRestoreTitle,
 } from '../lib/planActions/helpers'
+import { resolvePlan } from '../lib/planActions/resolver'
 import { usePromptConfig } from '../lib/usePromptConfig'
 import { ArrangementKeyEditor } from './ArrangementKeyEditor'
 import { PromptBody } from './PromptBody'
@@ -580,12 +580,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       const titleById = new Map(
         candidates.map((c): [string, string] => [c.id, c.suggestion.title]),
       )
-      // Pre-turn candidate lookup by id (for AI write actions that
-      // need full candidate data: matched PCO song id, etc).
-      const preTurnCandidatesById = new Map(
-        candidates.map((c): [string, CandidateMatch] => [c.id, c]),
-      )
-
       let streamedText = ''
       // Per-turn PCO write plan. We BUFFER commits and clears here
       // instead of firing them per-action — that lets a swap (two
@@ -611,16 +605,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           rollback: () => void
         }
       >()
-      // Live tracker: where each committed candidate currently is,
-      // including in-flight optimistic updates from earlier actions
-      // in this same turn. Used so action N+1 sees the effect of
-      // action N when deciding isMove / source / eviction.
-      const liveCommittedSlot = new Map<string, string>()
-      candidates.forEach((c) => {
-        if (c.committedAt && c.assignedSlotItemId) {
-          liveCommittedSlot.set(c.id, c.assignedSlotItemId)
-        }
-      })
       let pcoWritesFired = false
 
       const applyAction = (action: AiAction) => {
@@ -691,130 +675,28 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           // This is typically the AI misreading "remove X, replace
           // with Y" as a rejection + commit (it's just displacement).
         } else if (action.kind === 'set_slot_contents') {
-          if (autoRefresh) {
-            appendSystemMessage(
-              `⚠ AI tried to change song slots during auto-refresh — skipped (Planning Center writes require explicit direction)`,
-            )
-            return
-          }
-          // Taint detection + pre-turn snapshot — see
-          // src/lib/planActions/helpers.ts for the full rationale.
-          const knownSongTitlesLower = buildKnownSongTitles(candidates, items)
-          const preTurnSlotPlaceholders = preTurnSlotPlaceholdersHelper(
-            candidates,
-            knownSongTitlesLower,
+          // Pure resolver does all the planning: validates assignments,
+          // computes restore titles, eviction targets, swap pairs,
+          // priorSlotTitle inheritance, and the move source clears.
+          // The executor below just applies the Plan — optimistic
+          // state, plannedClears/Commits maps, chat messages.
+          // See src/lib/planActions/resolver.ts.
+          const plan = resolvePlan(
+            action.assignments,
+            { items: items ?? [], candidates, slotPlaceholders },
+            { autoRefresh },
           )
-          // Validate + resolve each assignment up front. Invalid ones
-          // get a ⚠ marker and drop out of the plan.
-          type ResolvedCommit = {
-            kind: 'commit'
-            slotItemId: string
-            slotIndex: number
-            slotItem: PlanItem
-            candidate: CandidateMatch
-            songId: string
-            songTitle: string
+          for (const w of plan.warnings) {
+            appendSystemMessage(`⚠ ${w}`)
           }
-          type ResolvedClear = {
-            kind: 'clear'
-            slotItemId: string
-            slotIndex: number
-            slotItem: PlanItem
-          }
-          const resolved: Array<ResolvedCommit | ResolvedClear> = []
-          for (const a of action.assignments) {
-            const slotItemId = itemIdBySlotIndex.get(a.slotIndex)
-            if (!slotItemId) {
-              appendSystemMessage(
-                `⚠ AI tried to set song slot ${a.slotIndex}, but no such slot exists — skipped`,
-              )
-              continue
-            }
-            const slotItem = (items ?? []).find((it) => it.id === slotItemId)
-            if (!slotItem) continue
-            if (a.candidateId == null) {
-              resolved.push({
-                kind: 'clear',
-                slotItemId,
-                slotIndex: a.slotIndex,
-                slotItem,
-              })
-              continue
-            }
-            const candidate = preTurnCandidatesById.get(a.candidateId)
-            if (!candidate) {
-              appendSystemMessage(
-                `⚠ AI referenced an unknown candidate (${a.candidateId}) — skipped`,
-              )
-              continue
-            }
-            if (!candidate.song?.id) {
-              appendSystemMessage(
-                `⚠ AI tried to place "${candidate.suggestion.title}" but it isn't matched to a song in your Planning Center library — skipped`,
-              )
-              continue
-            }
-            resolved.push({
-              kind: 'commit',
-              slotItemId,
-              slotIndex: a.slotIndex,
-              slotItem,
-              candidate,
-              songId: candidate.song.id,
-              songTitle: candidate.suggestion.title,
-            })
-          }
-          if (resolved.length === 0) return
+          if (plan.resolved.length === 0) return
 
-          // Detect swap pairs across the resolved commits: assignment X
-          // puts A in slot α while another assignment Y puts B in slot
-          // β AND A was currently at β AND B was currently at α. We
-          // emit one combined "swapped" system message per pair rather
-          // than two "moved" lines.
-          const swapPartnerIndex = new Map<number, number>()
-          for (let i = 0; i < resolved.length; i++) {
-            if (swapPartnerIndex.has(i)) continue
-            const ri = resolved[i]
-            if (ri.kind !== 'commit') continue
-            const iCurrent = liveCommittedSlot.get(ri.candidate.id)
-            if (iCurrent === undefined || iCurrent === ri.slotItemId) continue
-            for (let j = i + 1; j < resolved.length; j++) {
-              if (swapPartnerIndex.has(j)) continue
-              const rj = resolved[j]
-              if (rj.kind !== 'commit') continue
-              const jCurrent = liveCommittedSlot.get(rj.candidate.id)
-              if (jCurrent === undefined || jCurrent === rj.slotItemId) continue
-              if (jCurrent === ri.slotItemId && iCurrent === rj.slotItemId) {
-                swapPartnerIndex.set(i, j)
-                swapPartnerIndex.set(j, i)
-                break
-              }
-            }
-          }
-
-          // Apply each resolved entry: optimistic state + plan PCO ops
-          // + emit a system message (one combined per swap pair).
           const emittedSwapMessageFor = new Set<number>()
-          for (let i = 0; i < resolved.length; i++) {
-            const r = resolved[i]
+          for (let i = 0; i < plan.resolved.length; i++) {
+            const r = plan.resolved[i]
             if (r.kind === 'clear') {
-              // Snapshot for rollback: any committed candidate at this
-              // slot we're about to evict.
-              const occupant = candidates.find(
-                (c) =>
-                  c.assignedSlotItemId === r.slotItemId && c.committedAt != null,
-              )
-              // Restore title via the shared resolver — same
-              // priority order as clearSlotAction.
-              const restoreTitle = resolveRestoreTitle({
-                slotItemId: r.slotItemId,
-                slotPlaceholders,
-                candidatePriorSlotTitle: occupant?.priorSlotTitle,
-                knownSongTitles: knownSongTitlesLower,
-                fallbackForSlot: fallbackSlotTitle,
-              })
               const songTitle =
-                occupant?.suggestion.title ?? r.slotItem.songTitle ?? 'song'
+                r.occupant?.suggestion.title ?? r.slotItem.songTitle ?? 'song'
               setCandidates((prev) =>
                 prev.map((c) =>
                   c.assignedSlotItemId === r.slotItemId
@@ -827,12 +709,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     : c,
                 ),
               )
-              for (const [id, slot] of [...liveCommittedSlot.entries()]) {
-                if (slot === r.slotItemId) liveCommittedSlot.delete(id)
-              }
               plannedClears.set(r.slotItemId, {
                 slotItem: r.slotItem,
-                restoreTitle,
+                restoreTitle: r.restoreTitle,
               })
               pcoWritesFired = true
               appendSystemMessage(
@@ -841,23 +720,14 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
               continue
             }
             // Commit (fresh / move / overwrite / swap-half)
-            const candidate = r.candidate
-            const targetItemId = r.slotItemId
-            const songId = r.songId
-            const songTitle = r.songTitle
-            const currentSlot = liveCommittedSlot.get(candidate.id)
-            const isMove =
-              currentSlot !== undefined && currentSlot !== targetItemId
-            const fromSlotIndex =
-              isMove && currentSlot
-                ? slotIndexByItemId.get(currentSlot) ?? null
-                : null
-            // Rollback snapshots for both this candidate and any
-            // evicted previous occupant of the target slot.
+            const candidateId = r.candidate.id
+            // Rollback snapshots — captured from CURRENT state at the
+            // moment of optimistic update, so a failed PCO call can
+            // restore exactly what we displaced.
             let rollbackForCandidate:
               | {
                   id: string
-                  decision: typeof candidate.decision
+                  decision: 'pending' | 'reject'
                   committedAt: number | null
                   assignedSlotItemId: string | null
                   priorSlotTitle: string | null
@@ -872,7 +742,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                 }
               | null = null
             setCandidates((prev) => {
-              const me = prev.find((c) => c.id === candidate.id)
+              const me = prev.find((c) => c.id === candidateId)
               if (me) {
                 rollbackForCandidate = {
                   id: me.id,
@@ -882,45 +752,31 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                   priorSlotTitle: me.priorSlotTitle,
                 }
               }
-              const evicted = findEvictionTarget(
-                targetItemId,
-                prev,
-                candidate.id,
-              )
-              if (evicted) {
-                evictedRollback = {
-                  id: evicted.id,
-                  committedAt: evicted.committedAt,
-                  assignedSlotItemId: evicted.assignedSlotItemId,
-                  priorSlotTitle: evicted.priorSlotTitle,
+              if (r.evicted) {
+                const evictedNow = prev.find((c) => c.id === r.evicted!.id)
+                if (evictedNow) {
+                  evictedRollback = {
+                    id: evictedNow.id,
+                    committedAt: evictedNow.committedAt,
+                    assignedSlotItemId: evictedNow.assignedSlotItemId,
+                    priorSlotTitle: evictedNow.priorSlotTitle,
+                  }
                 }
               }
-              // Inherit the slot's original placeholder from the
-              // pre-turn snapshot if we have one. Fall back to the
-              // slot's current title only when there was no prior
-              // committed candidate (i.e., fresh commit to a slot
-              // whose title still IS the placeholder) — and even then
-              // route through placeholderForSlot so we don't capture
-              // a song name from a slot that was committed via PCO
-              // directly (e.g., the user placed a song through PCO
-              // before songpicker started).
-              const newPriorSlotTitle =
-                preTurnSlotPlaceholders.get(targetItemId) ??
-                placeholderForSlot(r.slotItem)
               return prev.map((c) => {
-                if (c.id === candidate.id) {
+                if (c.id === candidateId) {
                   return {
                     ...c,
                     committedAt: now,
-                    assignedSlotItemId: targetItemId,
-                    priorSlotTitle: newPriorSlotTitle,
+                    assignedSlotItemId: r.slotItemId,
+                    priorSlotTitle: r.newPriorSlotTitle,
                     commitPending: true,
                   }
                 }
                 if (
-                  c.assignedSlotItemId === targetItemId &&
+                  c.assignedSlotItemId === r.slotItemId &&
                   c.committedAt != null &&
-                  c.id !== candidate.id
+                  c.id !== candidateId
                 ) {
                   return {
                     ...c,
@@ -932,27 +788,16 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                 return c
               })
             })
-            if (isMove && currentSlot) {
-              const restoreTitle = resolveRestoreTitle({
-                slotItemId: currentSlot,
-                slotPlaceholders,
-                candidatePriorSlotTitle: candidate.priorSlotTitle,
-                fallbackForSlot: fallbackSlotTitle,
+            if (r.isMove && r.fromSlotItem && r.fromSlotRestoreTitle) {
+              plannedClears.set(r.fromSlotItem.id, {
+                slotItem: r.fromSlotItem,
+                restoreTitle: r.fromSlotRestoreTitle,
               })
-              const slotItemForClear = (items ?? []).find(
-                (it) => it.id === currentSlot,
-              )
-              if (slotItemForClear) {
-                plannedClears.set(currentSlot, {
-                  slotItem: slotItemForClear,
-                  restoreTitle,
-                })
-              }
             }
-            plannedCommits.set(targetItemId, {
-              candidateId: candidate.id,
-              songId,
-              songTitle,
+            plannedCommits.set(r.slotItemId, {
+              candidateId,
+              songId: r.songId,
+              songTitle: r.songTitle,
               rollback: () => {
                 setCandidates((prev) =>
                   prev.map((c) => {
@@ -983,23 +828,17 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                 )
               },
             })
-            for (const [id, slot] of [...liveCommittedSlot.entries()]) {
-              if (slot === targetItemId && id !== candidate.id) {
-                liveCommittedSlot.delete(id)
-              }
-            }
-            liveCommittedSlot.set(candidate.id, targetItemId)
             pcoWritesFired = true
 
             // System message: one combined "swapped" for swap pairs,
             // otherwise per-assignment commit / move.
-            const partner = swapPartnerIndex.get(i)
+            const partner = plan.swapPairs.get(i)
             if (partner !== undefined) {
               if (!emittedSwapMessageFor.has(i)) {
-                const other = resolved[partner]
+                const other = plan.resolved[partner]
                 if (other.kind === 'commit') {
                   appendSystemMessage(
-                    `🤖 AI swapped "${songTitle}" and "${other.songTitle}"`,
+                    `🤖 AI swapped "${r.songTitle}" and "${other.songTitle}"`,
                   )
                   emittedSwapMessageFor.add(i)
                   emittedSwapMessageFor.add(partner)
@@ -1007,9 +846,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
               }
             } else {
               appendSystemMessage(
-                isMove
-                  ? `🤖 AI moved "${songTitle}" from song slot ${fromSlotIndex ?? '?'} to song slot ${r.slotIndex}`
-                  : `🤖 AI committed "${songTitle}" to song slot ${r.slotIndex}`,
+                r.isMove
+                  ? `🤖 AI moved "${r.songTitle}" from song slot ${r.fromSlotIndex ?? '?'} to song slot ${r.slotIndex}`
+                  : `🤖 AI committed "${r.songTitle}" to song slot ${r.slotIndex}`,
               )
             }
           }
