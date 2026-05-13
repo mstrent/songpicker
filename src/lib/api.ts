@@ -97,6 +97,13 @@ export const getPlanContext = httpsCallable<
     items: PlanItem[]
     userTheme: string
     userNotes: string
+    /** Per-plan map of song-slot itemId → the placeholder title PCO
+     *  had on that slot the last time we observed it empty. Server
+     *  reconciles on every plan load so the SPA always sees the
+     *  freshest captured value. Empty for slots we've never seen
+     *  empty (e.g., the slot was filled in PCO before songpicker
+     *  first opened the plan) — those fall back to "Song N". */
+    slotPlaceholders: Record<string, string>
   }
 >(functions, 'getPlanContext')
 

@@ -148,6 +148,15 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   const [plan, setPlan] = useState<Plan | null>(null)
   const [notes, setNotes] = useState<PlanNote[] | null>(null)
   const [items, setItems] = useState<PlanItem[] | null>(null)
+  // Persisted per-plan map of empty-slot placeholders observed in
+  // PCO. Server reconciles this on every plan load (see
+  // syncSlotPlaceholders), so this state is always the freshest
+  // capture. Used as the highest-priority source for "what should
+  // we restore the slot title to on clear?" — beats the candidate's
+  // priorSlotTitle and the position-based "Song N" fallback.
+  const [slotPlaceholders, setSlotPlaceholders] = useState<
+    Record<string, string>
+  >({})
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const [theme, setTheme] = useState('')
@@ -266,6 +275,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         setPlan(ctx.plan)
         setNotes(ctx.notes)
         setItems(ctx.items)
+        setSlotPlaceholders(ctx.slotPlaceholders)
         const themeSrc = ctx.plan.seriesTitle ?? ctx.plan.title ?? ''
         setThemeSource(themeSrc)
         const notesSrc = formatNotesSource(ctx.notes)
@@ -812,15 +822,15 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                 (c) =>
                   c.assignedSlotItemId === r.slotItemId && c.committedAt != null,
               )
-              // Restore title: prefer the occupant's stored prior
-              // (preserves any user-customized slot name like
-              // "Communion song"). Fall back to the position-based
-              // "Song N" if the stored prior is missing OR if it
-              // matches ANY known song title — that means a previous
-              // commit/move/swap tainted the prior, in which case
-              // "Song N" is at least correct rather than wrong.
+              // Restore title: same priority order as clearSlotAction —
+              //   1. server-persisted slotPlaceholders[itemId]
+              //   2. occupant's stored prior, if not tainted
+              //   3. position-based "Song N"
+              const persistedPlaceholder =
+                slotPlaceholders[r.slotItemId]?.trim() || null
               const storedPrior = occupant?.priorSlotTitle?.trim()
               const restoreTitle =
+                persistedPlaceholder ||
                 (!isTaintedTitle(storedPrior) && storedPrior) ||
                 fallbackSlotTitle(r.slotItemId)
               const songTitle =
@@ -945,6 +955,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             })
             if (isMove && currentSlot) {
               const restoreTitle =
+                slotPlaceholders[currentSlot]?.trim() ||
                 candidate.priorSlotTitle?.trim() ||
                 fallbackSlotTitle(currentSlot)
               const slotItemForClear = (items ?? []).find(
@@ -1150,6 +1161,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         try {
           const fresh = await loadPlanContext(serviceTypeId, planId)
           setItems(fresh.items)
+          setSlotPlaceholders(fresh.slotPlaceholders)
           setCandidates((prev) =>
             prev.map((c) =>
               c.commitPending ? { ...c, commitPending: false } : c,
@@ -1300,7 +1312,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     const fromSlotItemId = isMove ? candidate.assignedSlotItemId : undefined
     const fromSlotRestoreTitle =
       isMove && fromSlotItemId
-        ? candidate.priorSlotTitle?.trim() || fallbackSlotTitle(fromSlotItemId)
+        ? slotPlaceholders[fromSlotItemId]?.trim() ||
+          candidate.priorSlotTitle?.trim() ||
+          fallbackSlotTitle(fromSlotItemId)
         : undefined
     const fromSlotIndex =
       isMove && fromSlotItemId
@@ -1361,6 +1375,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         invalidatePlanContext(serviceTypeId, planId)
         const fresh = await loadPlanContext(serviceTypeId, planId)
         setItems(fresh.items)
+        setSlotPlaceholders(fresh.slotPlaceholders)
         setCandidates((prev) =>
           prev.map((c) =>
             c.id === candidate.id ? { ...c, commitPending: false } : c,
@@ -1401,14 +1416,19 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     if (!slotItem.songId) return
     const slotIndex =
       (items ?? []).filter(isSongSlot).findIndex((it) => it.id === slotItem.id) + 1
-    // Prefer the title captured at commit time; fall back to the
-    // "Song N" convention so the slot label doesn't keep the song
-    // name after clearing. Reject the stored prior when it matches
-    // ANY known song title (the slot's stored "prior" was tainted by
-    // a previous move/swap and would restore to a song name).
+    // Restore-title resolution, in priority order:
+    //   1. Server-persisted slotPlaceholder for this itemId — captured
+    //      the last time we observed the slot empty in PCO. Most
+    //      reliable; survives sessions and pre-songpicker PCO state
+    //      changes (subject to ever having seen the slot empty).
+    //   2. Title captured on the committed candidate at commit time
+    //      (priorSlotTitle), as long as it isn't tainted (matches a
+    //      currently-known song title from candidates or items).
+    //   3. Position-based "Song N" fallback.
     const committedCandidate = candidates.find(
       (c) => c.assignedSlotItemId === slotItem.id && c.committedAt != null,
     )
+    const persistedPlaceholder = slotPlaceholders[slotItem.id]?.trim() || null
     const knownSongTitlesLower = new Set<string>()
     for (const c of candidates) {
       const t = c.suggestion.title.trim().toLowerCase()
@@ -1424,7 +1444,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     const priorIsTainted =
       !!(storedPrior && knownSongTitlesLower.has(storedPrior.toLowerCase()))
     const restoreTitle =
-      (!priorIsTainted && storedPrior) || fallbackSlotTitle(slotItem.id)
+      persistedPlaceholder ||
+      (!priorIsTainted && storedPrior) ||
+      fallbackSlotTitle(slotItem.id)
     const songTitle =
       committedCandidate?.suggestion.title ?? slotItem.songTitle ?? '(song)'
     const rollbackByCandidate = new Map(
@@ -1471,6 +1493,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         invalidatePlanContext(serviceTypeId, planId)
         const fresh = await loadPlanContext(serviceTypeId, planId)
         setItems(fresh.items)
+        setSlotPlaceholders(fresh.slotPlaceholders)
       }
     } catch (e) {
       const err = e as Error
@@ -1589,7 +1612,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     if (!title) return null
     const songTitle = slotItem.songTitle?.trim()
     if (songTitle && songTitle.toLowerCase() === title.toLowerCase()) {
-      return fallbackSlotTitle(slotItem.id)
+      // Title was rewritten by a previous song link — prefer the
+      // server-persisted placeholder if we have one (captured the last
+      // time we observed this slot empty), otherwise fall through to
+      // the position-based "Song N".
+      return slotPlaceholders[slotItem.id] ?? fallbackSlotTitle(slotItem.id)
     }
     return title
   }
@@ -1709,8 +1736,15 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           )
           return
         }
+        // The dragged slot has no committed candidate in our state
+        // (e.g., the song was linked via PCO directly before
+        // songpicker started). Its current title is the song name —
+        // not a placeholder — so prefer the server-persisted
+        // placeholder over `.title` here, falling back to "Song N"
+        // if we've never seen this slot empty.
         const sourceRestoreTitle =
-          draggedSlot.title?.trim() || fallbackSlotTitle(draggedSlot.id)
+          slotPlaceholders[draggedSlot.id]?.trim() ||
+          fallbackSlotTitle(draggedSlot.id)
         const songTitle = draggedSlot.songTitle
         const destLabel =
           targetSlot.title?.trim() || fallbackSlotTitle(targetSlot.id)
@@ -1727,6 +1761,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           invalidatePlanContext(serviceTypeId, planId)
           const fresh = await loadPlanContext(serviceTypeId, planId)
           setItems(fresh.items)
+          setSlotPlaceholders(fresh.slotPlaceholders)
           appendSystemMessage(`↕ Moved "${songTitle}" → ${destLabel}`)
         } catch (e) {
           setGenerateError((e as Error).message)
@@ -2015,6 +2050,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                             invalidatePlanContext(serviceTypeId, planId)
                             const fresh = await loadPlanContext(serviceTypeId, planId)
                             setItems(fresh.items)
+                            setSlotPlaceholders(fresh.slotPlaceholders)
                           }}
                         />
                       )}

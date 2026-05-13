@@ -46,6 +46,15 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Per-user-per-plan map of song-slot itemId → empty-slot
+    // placeholder title observed in PCO. Reconciled server-side on
+    // every plan load (syncSlotPlaceholders) so a future clear can
+    // restore the original slot name even when the slot was filled
+    // before songpicker first observed it.
+    match /slotPlaceholders/{uid}/plans/{planId} {
+      allow read, write: if false;
+    }
+
     match /sessions/{sessionId} {
       allow read: if signedIn() && ownsExisting();
       allow create: if signedIn() && ownsIncoming();

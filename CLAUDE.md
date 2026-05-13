@@ -114,6 +114,23 @@ These are non-obvious things we've burned time on; don't relearn them.
 - `appConfig/access` — admin-owned `{ allowedEmails, adminEmails,
   updatedAt }`. Runtime-editable email rosters. Auth resolves through
   env ∪ Firestore (see access-list resolution below).
+- `slotPlaceholders/{uid}/plans/{planId}` — `{ titles: { [itemId]:
+  string }, updatedAt }`. Per-plan map of song-slot itemId → the
+  placeholder title PCO had on that slot the last time we observed
+  it empty (`!songId`). Server reconciles inside `getPlanContext`
+  via `syncSlotPlaceholders` — only writes when an empty slot's
+  title diverged from the captured value (or is brand new), so most
+  loads are no-ops. Used by clear/move restore paths in PlanDetail
+  as the highest-priority source for "what should the slot title
+  go back to?", beating the candidate's `priorSlotTitle` and the
+  position-based "Song N" fallback. The reconcile-on-load flow is
+  the cache-invalidation: every commit/clear invalidates the SPA's
+  per-session plan cache, every reload triggers a fresh
+  `getPlanContext`, every fresh load re-syncs the map. So renaming
+  an empty slot in PCO between songpicker visits is picked up on
+  the next load. Slots that were already filled the first time
+  songpicker observed them have no captured placeholder — those
+  fall back to "Song N" on clear (the original is unrecoverable).
 
 ## Access lists (allowed users / admins)
 

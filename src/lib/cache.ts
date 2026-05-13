@@ -11,6 +11,7 @@ interface PlanContext {
   items: PlanItem[]
   userTheme: string
   userNotes: string
+  slotPlaceholders: Record<string, string>
 }
 
 // Session-scoped cache for getPlanContext. Keyed by serviceTypeId/planId.

@@ -44,6 +44,7 @@ import {
   savePickerSession,
   type PickerSession,
 } from './sessions'
+import { syncSlotPlaceholders } from './slotPlaceholders'
 import {
   ADMIN_EMAILS,
   ALLOWED_EMAIL,
@@ -210,7 +211,14 @@ export const getPlanContext = onCall(async (req) => {
     loadUserTheme(uid, planId),
     loadUserNotes(uid, planId),
   ])
-  return { plan, notes, items, userTheme, userNotes }
+  // Reconcile persisted slot placeholders with current PCO state. The
+  // sync only writes to Firestore when an empty slot's title diverged
+  // from what we'd captured (or is brand new), so most loads are no-
+  // ops. Returned to the SPA in the same response so the clear paths
+  // can use a real placeholder rather than falling back to "Song N"
+  // for slots that were filled before songpicker first observed them.
+  const slotPlaceholders = await syncSlotPlaceholders(uid, planId, items)
+  return { plan, notes, items, userTheme, userNotes, slotPlaceholders }
 })
 
 export const savePlanTheme = onCall(async (req) => {
