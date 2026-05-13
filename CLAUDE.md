@@ -102,8 +102,39 @@ These are non-obvious things we've burned time on; don't relearn them.
   and `notes` are `{ [planId]: string }`. Read/write via the typed
   callables; clients can't touch directly.
 - `appConfig/global` — admin-owned `{ structure, role }`. Edited
-  through the Admin page, gated by `ADMIN_EMAILS` in
-  `functions/.env`.
+  through the Admin page, gated by admin check (see access lists
+  below).
+- `appConfig/access` — admin-owned `{ allowedEmails, adminEmails,
+  updatedAt }`. Runtime-editable email rosters. Auth resolves through
+  env ∪ Firestore (see access-list resolution below).
+
+## Access lists (allowed users / admins)
+
+`requireAllowed` and `isAdminEmail` resolve from the **union** of two
+sources:
+
+1. Env values `ALLOWED_EMAIL` and `ADMIN_EMAILS` in `functions/.env`.
+   These are read-only at runtime and act as **break-glass roots** —
+   never removable from the Admin UI, always honored. Their job is
+   to guarantee an operator can always log in even if the Firestore
+   doc is wiped or wrong.
+2. Firestore `appConfig/access` arrays. Managed at runtime through
+   the Admin page's "Access lists" section. Cached in-memory per
+   function instance with a 60s TTL (`functions/src/access.ts`).
+   Writes invalidate the writer's local cache; other instances pick
+   up the change on next TTL expiry.
+
+Entry shape (env or Firestore): either an exact email
+(`name@example.com`) or a domain wildcard (`@example.com`) that
+matches any address at that domain. A bare `@` is rejected so a typo
+can't open the gate. **Empty union fails closed** — a missing env var
+plus an empty Firestore doc denies every caller; an empty env var is
+never an "allow all" mode.
+
+Admin-only callables for managing the Firestore lists:
+`getAccessConfig`, `addAccessEntry`, `removeAccessEntry`. The Admin
+page is hidden from non-admins via `getAdminStatus`, but server-side
+`requireAdmin` is the real gate.
 
 ## Prompt-tier resolution
 

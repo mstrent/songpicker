@@ -50,9 +50,11 @@ title, arrangement, and key all set in one go.
 - **Database**: Firestore — per-user PCO credentials, per-user prompt
   config (defaults + per-plan overrides), admin-global prompt
   defaults, and per-plan candidate sessions.
-- **Auth**: Firebase Auth — Google sign-in with single-email allowlist
-  enforced both client-side (Firestore rules) and server-side
-  (`ALLOWED_EMAIL` param in Cloud Functions).
+- **Auth**: Firebase Auth — Google sign-in with an email/domain
+  allowlist resolved as env (`ALLOWED_EMAIL` / `ADMIN_EMAILS` in
+  `functions/.env`, read-only break-glass roots) ∪ Firestore
+  (`appConfig/access`, runtime-editable from the Admin page). Empty
+  union fails closed.
 - **AI**: Anthropic Claude Sonnet 4.6 for the main suggestion engine,
   Haiku 4.5 for ancillary classifier/short-label calls (chip matching
   and distillation). The `AiProvider` interface in
@@ -114,6 +116,7 @@ All hosted on Firebase free tier.
 | `suggestSongs` | Streaming AI turn (Claude Sonnet 4.6 + tool use); SPA calls via `.stream()` |
 | `getPromptConfig`, `savePromptConfig` | Per-user persona + service-flow prompts |
 | `getAdminStatus`, `getAdminPromptConfig`, `saveAdminPromptConfig` | Admin global defaults |
+| `getAccessConfig`, `addAccessEntry`, `removeAccessEntry` | Admin-managed allowed/admin email lists (Firestore source of truth + env break-glass) |
 | `loadSession`, `saveSession` | Per-plan candidate pool + AI turn log |
 | `placeSongInSlot` | Commit a song to a slot (handles fresh, move, and overwrite atomically) |
 | `clearSongFromSlot` | Clear a slot (restores a prior title) |
@@ -173,10 +176,24 @@ cp .env.example .env.local
 Set the non-secret params for the Functions runtime in `functions/.env`:
 
 ```
-ALLOWED_EMAIL=you@example.com
-ADMIN_EMAILS=you@example.com           # comma-separated; empty disables /#admin
+ALLOWED_EMAIL=you@example.com          # who can sign in (break-glass root)
+ADMIN_EMAILS=you@example.com           # who can edit system-wide config + access lists (break-glass root)
 INCLUDED_SERVICE_TYPES=Sunday Services # comma-separated; empty = include all
 ```
+
+`ALLOWED_EMAIL` and `ADMIN_EMAILS` are comma-separated. Entries can be
+exact emails (`name@example.com`) or domain wildcards (`@example.com`)
+that match any address at the domain. The env values are the
+**break-glass roots** — they're read-only at runtime and can never be
+removed from the UI, so an empty Firestore access doc can't lock the
+operator out. Additional emails are managed at runtime from the Admin
+page (no redeploy needed) and live in Firestore at `appConfig/access`.
+
+**Empty union fails closed**: if the env vars are empty and the
+Firestore doc is empty, every callable denies. Make sure at least your
+own email is in `ALLOWED_EMAIL` and `ADMIN_EMAILS` before the first
+deploy, otherwise you'll have nobody able to bootstrap the Firestore
+list.
 
 Set the Anthropic API key:
 
