@@ -2577,11 +2577,11 @@ a.chip-link:focus-visible {
 .metrics-table td {
   text-align: left;
   padding: 6px 10px;
-  border-bottom: 1px solid var(--border, #2a2a2a);
+  border-bottom: 1px solid var(--border);
 }
 .metrics-table th {
   font-weight: 600;
-  color: var(--muted, #888);
+  color: var(--muted);
 }
 .metrics-table td {
   vertical-align: top;

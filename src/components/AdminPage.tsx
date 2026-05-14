@@ -241,7 +241,7 @@ function MetricsSection() {
 function formatRelative(iso: string | null): string {
   if (!iso) return '—'
   const then = new Date(iso).getTime()
-  if (!Number.isFinite(then)) return iso
+  if (!Number.isFinite(then)) return '—'
   const diffMs = Date.now() - then
   if (diffMs < 0) return 'just now'
   const sec = Math.floor(diffMs / 1000)
