@@ -681,8 +681,18 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     )}
                   </div>
                   {c.suggestion.chorusSnippet && (
-                    <div className="rejected-snippet">
+                    <div
+                      className="rejected-snippet"
+                      title="AI-sourced lyrics. May be inaccurate."
+                    >
                       “{c.suggestion.chorusSnippet}”
+                      <span
+                        className="chip chip-ai"
+                        aria-label="AI-sourced lyrics. May be inaccurate."
+                      >
+                        <Icon name="sparkle" size={10} />
+                        AI
+                      </span>
                     </div>
                   )}
                   <button
@@ -897,10 +907,18 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       </>
                     )}
                     {c.matchStatus === 'unmatched' && (
-                      <span className="chip chip-unmatched">
+                      <a
+                        className="chip chip-unmatched chip-link"
+                        href="https://services.planningcenteronline.com/songs/"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Open your Planning Center song library in a new tab to add this song"
+                        draggable={false}
+                      >
                         <Icon name="alert-triangle" size={12} />
-                        not in library
-                      </span>
+                        not in library, add
+                        <Icon name="external-link" size={11} />
+                      </a>
                     )}
                     {c.matchStatus === 'error' && (
                       <span
@@ -912,10 +930,20 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     )}
                   </div>
                   {c.suggestion.chorusSnippet && (
-                    <div className="chorus-snippet">
+                    <div
+                      className="chorus-snippet"
+                      title="AI-sourced lyrics. May be inaccurate."
+                    >
                       <span className="snippet-quote" aria-hidden>“</span>
                       {c.suggestion.chorusSnippet}
                       <span className="snippet-quote" aria-hidden>”</span>
+                      <span
+                        className="chip chip-ai"
+                        aria-label="AI-sourced lyrics. May be inaccurate."
+                      >
+                        <Icon name="sparkle" size={10} />
+                        AI
+                      </span>
                     </div>
                   )}
                   <div className="decision-row">
