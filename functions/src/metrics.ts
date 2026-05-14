@@ -55,10 +55,12 @@ export interface UserMetricsView {
   slotClears: number
 }
 
-// Fire-and-forget on the calling side. Wrapped in try/catch so a
-// flaky Firestore write never propagates into the user-facing
-// callable. Logs a warning so failures aren't silent in function
-// logs.
+// Errors are swallowed (logged but not thrown) so a flaky metric
+// write never breaks the user-facing callable. The read-then-write
+// for firstSeenAt has a benign race: two concurrent first-time calls
+// for the same uid can both observe doc-missing and both set
+// firstSeenAt; last-write-wins. Acceptable for diagnostic data at
+// our scale — not worth a transaction.
 export async function recordMetric(
   uid: string,
   email: string,
@@ -75,9 +77,6 @@ export async function recordMetric(
   }
 }
 
-// Admin-page read. Sorted by lastSeenAt descending so the most
-// recently active user is at the top. Missing fields default to
-// 0 / null so the SPA can render a uniform table.
 export async function loadAllMetrics(): Promise<UserMetricsView[]> {
   const db = getFirestore()
   const snap = await db.collection('metrics').get()
