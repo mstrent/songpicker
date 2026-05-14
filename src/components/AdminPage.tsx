@@ -3,12 +3,14 @@ import {
   addAccessEntry,
   getAccessConfig,
   getAdminPromptConfig,
+  getMetrics,
   removeAccessEntry,
   saveAdminPromptConfig,
   type AccessConfig,
   type AccessList,
   type AdminPromptConfig,
   type PromptType,
+  type UserMetricsView,
 } from '../lib/api'
 import { Icon } from './Icon'
 
@@ -65,6 +67,8 @@ export function AdminPage() {
         ← Back
       </a>
       <h2>Admin</h2>
+
+      <MetricsSection />
 
       <AccessSection />
 
@@ -167,6 +171,88 @@ export function AdminPage() {
       </section>
     </div>
   )
+}
+
+function MetricsSection() {
+  const [users, setUsers] = useState<UserMetricsView[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  // Mount fetch via .then() to keep setState off the synchronous effect
+  // path (react-hooks/set-state-in-effect) — same shape AccessSection uses.
+  useEffect(() => {
+    let cancelled = false
+    getMetrics()
+      .then((res) => {
+        if (!cancelled) setUsers(res.data.users)
+      })
+      .catch((e) => {
+        if (!cancelled) setError((e as Error).message)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  return (
+    <section className="admin-section">
+      <h3>Usage</h3>
+      {error && <div className="error">{error}</div>}
+      {users === null ? (
+        <p className="muted">Loading…</p>
+      ) : users.length === 0 ? (
+        <p className="muted">No activity recorded yet.</p>
+      ) : (
+        <table className="metrics-table">
+          <thead>
+            <tr>
+              <th>Email</th>
+              <th>Sign-ins</th>
+              <th>Plans opened</th>
+              <th>AI suggestions</th>
+              <th>Commits</th>
+              <th>Clears</th>
+              <th>First seen</th>
+              <th>Last seen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((u) => (
+              <tr key={u.uid}>
+                <td>{u.email}</td>
+                <td>{u.signIns}</td>
+                <td>{u.plansOpened}</td>
+                <td>{u.aiSuggestions}</td>
+                <td>{u.slotCommits}</td>
+                <td>{u.slotClears}</td>
+                <td title={u.firstSeenAt ?? ''}>{formatRelative(u.firstSeenAt)}</td>
+                <td title={u.lastSeenAt ?? ''}>{formatRelative(u.lastSeenAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  )
+}
+
+// Compact relative-time formatter for the metrics table. Returns
+// short forms ("2h ago", "3d ago") for recent times and a date
+// stamp for anything older than ~30 days. ISO input → display string.
+function formatRelative(iso: string | null): string {
+  if (!iso) return '—'
+  const then = new Date(iso).getTime()
+  if (!Number.isFinite(then)) return iso
+  const diffMs = Date.now() - then
+  if (diffMs < 0) return 'just now'
+  const sec = Math.floor(diffMs / 1000)
+  if (sec < 60) return 'just now'
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}m ago`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}h ago`
+  const day = Math.floor(hr / 24)
+  if (day < 30) return `${day}d ago`
+  return new Date(iso).toISOString().slice(0, 10)
 }
 
 // Entry-format validator mirroring functions/src/access.ts:entryIsValid.
