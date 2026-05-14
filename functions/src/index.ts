@@ -11,8 +11,13 @@ import {
   type AccessList,
 } from './access'
 import { getAiProvider } from './ai'
-import { TOOLS } from './ai/anthropic'
-import { AUTO_REFRESH_NUDGE } from './ai/userMessage'
+import {
+  CHORUS_SNIPPET_GUIDANCE,
+  CLASSIFY_SONG_SYSTEM,
+  CLASSIFY_SONG_TOOL,
+  TOOLS,
+} from './ai/anthropic'
+import { AUTO_REFRESH_NUDGE, buildSampleUserMessage } from './ai/userMessage'
 import type { AiCandidate, StreamChunk } from './ai/types'
 import { PcoClient } from './pco/client'
 import { pMap } from './pco/concurrency'
@@ -275,6 +280,21 @@ export const searchSongs = onCall(async (req) => {
   return { songs }
 })
 
+// Single-song fetch by PCO id. Used by the SPA when a song gets
+// evicted from the plan and minted as a candidate — PlanItem doesn't
+// carry lastScheduledAt, so the candidate card would otherwise lie
+// about "never played." One direct PCO GET, no fuzzy matching.
+export const getSong = onCall(async (req) => {
+  const { uid } = await requireAllowed(req)
+  const { songId } = req.data as { songId?: string }
+  if (!songId || typeof songId !== 'string') {
+    throw new HttpsError('invalid-argument', 'songId required')
+  }
+  const client = await pcoForUser(uid)
+  const song = await client.getSongById(songId)
+  return { song }
+})
+
 // Batched library lookup. AI propose actions can mint several
 // candidates at once; sending one Cloud Function call instead of N
 // halves the round-trip overhead. PCO requests fan out under the
@@ -391,6 +411,67 @@ export const suggestSongs = onCall<
   },
 )
 
+// Ancillary AI call — classify a single song's best-fit slot labels.
+// Used when a song is minted as a candidate via plan eviction (not
+// via AI proposal), so the candidate card can show "opener" / "closer"
+// chips alongside its library-match info. Resolves the structure
+// prompt through the same tier as suggestSongs (per-plan → user →
+// admin → hardcoded). Haiku-backed (see anthropic.ts).
+export const classifySongSlots = onCall(
+  { secrets: [ANTHROPIC_API_KEY] },
+  async (req) => {
+    const { uid } = await requireAllowed(req)
+    const {
+      planId,
+      songTitle,
+      songAuthor,
+      songCcli,
+      theme,
+      planNotes,
+      serviceOrder,
+    } = req.data as {
+      planId?: string
+      songTitle?: string
+      songAuthor?: string
+      // PCO returns ccli_number as integer per docs and historically
+      // values have leaked through as numbers despite our types
+      // claiming string. Accept both shapes and coerce on the way in.
+      songCcli?: string | number
+      theme?: string
+      planNotes?: string
+      serviceOrder?: string
+    }
+    if (!songTitle || typeof songTitle !== 'string' || !songTitle.trim()) {
+      throw new HttpsError('invalid-argument', 'songTitle required')
+    }
+    const songCcliStr =
+      songCcli != null ? String(songCcli).trim() || undefined : undefined
+    const structure = await loadResolved(uid, 'structure', planId)
+    const ai = getAiProvider(ANTHROPIC_API_KEY.value())
+    try {
+      return await ai.classifySongSlots({
+        songTitle: songTitle.trim(),
+        songAuthor: songAuthor?.trim() || undefined,
+        songCcli: songCcliStr,
+        theme: theme?.trim() || undefined,
+        planNotes: planNotes?.trim() || undefined,
+        structurePrompt: structure.effective.value,
+        serviceOrder: serviceOrder?.trim() || undefined,
+      })
+    } catch (e) {
+      const err = e as Error
+      console.error('[classifySongSlots] failed:', err)
+      // Classifier failure shouldn't break the enrichment flow on the
+      // client — surface as aborted with a useful message; the SPA
+      // patches the candidate with the data it does have.
+      throw new HttpsError(
+        'aborted',
+        err.message || 'Slot classification failed',
+      )
+    }
+  },
+)
+
 function parseType(raw: unknown): PromptType {
   if (raw === 'structure' || raw === 'role') return raw
   throw new HttpsError('invalid-argument', 'type must be "structure" or "role"')
@@ -458,8 +539,32 @@ export const getAdminPromptConfig = onCall(async (req) => {
       tools: TOOLS.map((t) => ({
         name: t.name,
         description: t.description ?? '',
+        // Full JSON Schema for each tool's input — exposes the nested
+        // field descriptions (SONG_SLOTS_FIELD, CHORUS_SNIPPET_FIELD,
+        // candidateId descriptions, etc.) that the top-level
+        // description listing doesn't show. Rendered as pretty JSON.
+        inputSchema: t.input_schema,
       })),
       autoRefreshNudge: AUTO_REFRESH_NUDGE,
+      classifier: {
+        systemPrompt: CLASSIFY_SONG_SYSTEM,
+        tool: {
+          name: CLASSIFY_SONG_TOOL.name,
+          description: CLASSIFY_SONG_TOOL.description ?? '',
+          inputSchema: CLASSIFY_SONG_TOOL.input_schema,
+        },
+      },
+      chorusSnippetGuidance: CHORUS_SNIPPET_GUIDANCE,
+      // Assembled system message admins-side preview: role + technical
+      // requirements concatenated as the model receives them. Uses the
+      // hardcoded role default; admins can substitute their own role
+      // mentally by editing the persona editor above.
+      composedSystemPromptPreview: composeSystemPrompt(hardcodedDefaultFor('role')),
+      // Sample per-turn user message — built via the same
+      // buildUserMessage path the suggester uses, with placeholder
+      // dynamic values + one candidate per decision type so admins
+      // can see the exact format the model receives every turn.
+      sampleUserMessage: buildSampleUserMessage(),
     },
   }
 })

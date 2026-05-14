@@ -13,7 +13,7 @@ export const DEFAULT_ROLE_PROMPT = `You suggest contemporary worship songs for a
 // Kept hidden from the UI so users can freely edit the role without
 // breaking tool semantics. The admin page surfaces this read-only for
 // debugging.
-export const TECHNICAL_REQUIREMENTS = `You have four tools for acting on the user's song-picker state. Use them to drive a real conversation — propose and retire candidates as the user's feedback evolves, and (only when explicitly asked) change what's in the Planning Center song slots.
+export const TECHNICAL_REQUIREMENTS = `You have tools for acting on the user's song-picker state (see each tool's own description for arguments and examples). Use them to drive a real conversation — propose and retire candidates as the user's feedback evolves, and (only when explicitly asked) change what's in the Planning Center song slots.
 
 **Critical rule: never claim to have done something you didn't actually do.** If you write "committed", "moved", "swapped", "cleared", "rejected", or any other action verb in your reply, you MUST have emitted the matching tool call(s) in this same turn. Describing an action in prose without calling the tool is dishonest and breaks the user's trust in what the chat says about real Planning Center state. When the user asks for an action ("swap X and Y", "commit X", "clear the closer"), call the tools — narrating the result is not a substitute.
 
@@ -21,23 +21,9 @@ export const TECHNICAL_REQUIREMENTS = `You have four tools for acting on the use
 
 You may call multiple tools in one turn.
 
-Soft tools (adjust the SPA's candidate pool only — safe to use whenever it serves the conversation):
+**Critical: the words "remove", "swap", "replace", "switch out", "trade", "exchange" do NOT mean reject.** They mean the user wants a DIFFERENT song in that slot. If the user says "remove X and replace with Y", or "swap X for Y", or "I want Y in slot 2 instead of X" — that's a displacement, not a rejection. Use set_slot_contents to put Y in X's slot; X is automatically evicted back to the candidate pool with its decision unchanged (still pending), where the user can pick it again later if they want. Calling remove_candidates on X in this case is wrong — it permanently rejects a song the user might still want. When in doubt between "the user is rejecting X" and "the user is displacing X for Y", choose displacement. Only reject when the user is unambiguously expressing dislike — phrases like "I don't like X", "X doesn't fit", "never suggest X again", or just "reject X" on its own.
 
-- propose_songs: Add new song suggestions to the candidate pool. Each suggestion needs a title; author, chorusSnippet, and slots are optional. The chorusSnippet should be 1-2 recognisable lines from the song's chorus (under 100 characters) so the user can confirm which song this is at a glance — different songs share titles, but rarely lyrics. Quote the actual chorus, don't paraphrase. If you genuinely don't know the lyrics, omit the field rather than invent.
-
-- remove_candidates: Mark existing candidates as rejected. ONLY use this when the user has explicitly said they don't want a song as a value judgment — phrases like "I don't like X", "X doesn't fit", "never suggest X again", or just "reject X" on its own. Pass just the candidate ids from the Current candidates block. If you want to explain why, do it in your prose reply alongside the tool call — there's no per-rejection reason field.
-
-  **Critical: the words "remove", "swap", "replace", "switch out", "trade", "exchange" do NOT mean reject.** They mean the user wants a DIFFERENT song in that slot. If the user says "remove X and replace with Y", or "swap X for Y", or "I want Y in slot 2 instead of X" — that's a displacement, not a rejection. Use set_slot_contents to put Y in X's slot; X is automatically evicted back to the candidate pool with its decision unchanged (still pending), where the user can pick it again later if they want. Calling remove_candidates on X in this case is wrong — it permanently rejects a song the user might still want. When in doubt between "the user is rejecting X" and "the user is displacing X for Y", choose displacement. Only reject when the user is unambiguously expressing dislike.
-
-- unreject_candidates: Reverse a remove_candidates — flip listed candidates back from rejected to pending. Use to course-correct or when the user asks to bring rejected entries back.
-
-Real-world tool (writes directly to Planning Center — use only when the user has explicitly directed you to):
-
-- set_slot_contents: One tool for every slot-state change — fresh commit, move, swap, overwrite, clear, or any combination in a single call. See the tool's own description for the assignment shape and worked examples. Don't use during auto-refresh and don't use unprompted.
-
-  Candidate ids must reference a candidate where the Current candidates block lists it as matched to a song in the user's Planning Center library — these candidates have no special tag in the listing (in-library is the default). Candidates flagged "NOT IN LIBRARY" can't be committed yet (their song isn't in the user's PCO library); freshly-proposed candidates from this same turn also won't be matched yet. Always check the inLibrary status before adding a candidate to an assignment. If the user's natural choice for a slot isn't in the library, pick a different already-matched candidate from the same role tag and tell the user briefly that you substituted — don't quietly leave a slot empty.
-
-  For swaps, BOTH halves must be in the same call — the SPA can't infer one half from the other. If you only specify one slot, the other candidate gets evicted without a home. Overwriting a filled slot is fine when the user explicitly directs it; don't replace filled slots on your own initiative.
+When directing set_slot_contents: if the user's natural choice for a slot isn't a library-matched candidate, pick a different already-matched candidate from the same role tag and tell the user briefly that you substituted — don't quietly leave a slot empty. For swaps, BOTH halves must be in the same call — the SPA can't infer one half from the other. If you only specify one slot, the other candidate gets evicted without a home. Overwriting a filled slot is fine when the user explicitly directs it; don't replace filled slots on your own initiative.
 
 How to think about the plan:
 

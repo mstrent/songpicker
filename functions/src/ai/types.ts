@@ -155,10 +155,39 @@ export type StreamChunk =
   | { kind: 'text'; delta: string }
   | { kind: 'action'; action: AiAction }
 
+/** One-shot per-song classification call. Used when a song lands in
+ *  the candidate pool via slot eviction (not via AI proposal) — we
+ *  have title/author from Planning Center but no AI-derived metadata
+ *  (slot tags, chorus snippet). The classifier reads the same plan
+ *  context the main suggester sees and returns:
+ *   - 1-3 short slot-position labels (vocabulary from structure prompt)
+ *   - an optional 1-2 line chorus snippet (omitted when Haiku is
+ *     uncertain rather than fabricated). */
+export interface ClassifySongRequest {
+  songTitle: string
+  songAuthor?: string
+  /** CCLI number from Planning Center, when available. Surfaced to
+   *  the model alongside title + author because single-word worship
+   *  titles ("Surrender", "Hallelujah") collide heavily across
+   *  catalogues — CCLI is the unambiguous industry identifier and
+   *  reminds the model that this is a specific licensed song. */
+  songCcli?: string
+  theme?: string
+  planNotes?: string
+  structurePrompt?: string
+  serviceOrder?: string
+}
+
+export interface ClassifySongResult {
+  slots: string[]
+  chorusSnippet?: string
+}
+
 export interface AiProvider {
   name: 'anthropic'
   suggestSongs(
     req: SuggestRequest,
     onChunk?: (chunk: StreamChunk) => void | Promise<void>,
   ): Promise<SuggestResult>
+  classifySongSlots(req: ClassifySongRequest): Promise<ClassifySongResult>
 }

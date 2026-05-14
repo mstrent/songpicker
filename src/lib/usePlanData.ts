@@ -27,8 +27,10 @@ import {
   fallbackSlotTitle as fallbackSlotTitleHelper,
 } from './planActions/helpers'
 import {
+  evictedSongs,
   resolvePlan,
   type Assignment,
+  type EvictedSong,
 } from './planActions/resolver'
 import type { MessageSource } from './planActions/messages'
 
@@ -109,6 +111,17 @@ export interface PlanDataApi {
    *  plan-level error display. The candidate pool exposes its own
    *  error setter; PlanDetail wires this. */
   setGenerateErrorHandler: (fn: (msg: string | null) => void) => void
+  /** PlanDetail wires this to candidatePool.ensureCandidate so a
+   *  song that gets cleared / displaced from the plan reappears in
+   *  the suggestions list (if it isn't there already). The
+   *  pcoSettled promise resolves AFTER the executor's PCO clear
+   *  request lands plus a short read-after-write consistency window
+   *  — the candidate pool awaits it before fetching scheduling
+   *  history, otherwise PCO returns the just-cleared plan as today's
+   *  "last scheduled" date. */
+  setOnSongEvicted: (
+    fn: (evicted: EvictedSong, pcoSettled: Promise<void>) => void,
+  ) => void
 }
 
 export function usePlanData(
@@ -138,6 +151,9 @@ export function usePlanData(
   // them doesn't trigger executor-deps recreation per render.
   const appendSystemMessageRef = useRef<(msg: string) => void>(() => {})
   const setGenerateErrorRef = useRef<(msg: string | null) => void>(() => {})
+  const onSongEvictedRef = useRef<
+    (evicted: EvictedSong, pcoSettled: Promise<void>) => void
+  >(() => {})
 
   function setTheme(value: string): void {
     userTouchedTheme.current = true
@@ -266,10 +282,47 @@ export function usePlanData(
       { items: items ?? [], slotPlaceholders },
       { autoRefresh: options.autoRefresh },
     )
-    return executePlan(plan, executorDeps(), {
+    // Eviction notification fires here (NOT inside the executor) so
+    // we can read items synchronously from this hook's closure.
+    // Inside the executor, the pre-turn items snapshot is captured
+    // via a setItems(updater) callback, but React 18 queues updater
+    // calls — by the time we'd read the snapshot, it's still null.
+    // The result was that clears appeared to drop songs into the
+    // void with no candidate created (the symptom that surfaced on
+    // smoke test). Items in this closure is the React state value
+    // for this render, which is always sync-accessible.
+    const evictees = items ? evictedSongs(plan.resolved, items) : []
+    // pcoSettled signals the candidate pool that the executor's PCO
+    // writes have landed AND PCO's read-after-write index has had a
+    // moment to catch up. ensureCandidate awaits this before fetching
+    // scheduling history; without it the song still shows as
+    // scheduled in today's plan (the one we just cleared) and the
+    // candidate card says "last played today" — a lie. Resolved
+    // below after awaiting executePlan + a short consistency window.
+    let resolvePcoSettled!: () => void
+    const pcoSettled = new Promise<void>((r) => {
+      resolvePcoSettled = r
+    })
+    for (const e of evictees) {
+      onSongEvictedRef.current(e, pcoSettled)
+    }
+    const result = await executePlan(plan, executorDeps(), {
       source: options.source ?? 'user',
       deferRefresh: options.deferRefresh,
     })
+    // PCO_CONSISTENCY_MS: empirical buffer for PCO's last_scheduled_at
+    // index to reflect the clear write. Per CLAUDE.md, PCO
+    // read-after-write isn't strongly consistent — querying
+    // immediately after a successful PATCH can return pre-write state
+    // for a beat. 1500ms is a comfortable margin without being
+    // perceptible alongside the round-trip we already spent on
+    // executePlan.
+    if (evictees.length > 0) {
+      setTimeout(() => resolvePcoSettled(), 1500)
+    } else {
+      resolvePcoSettled()
+    }
+    return result
   }
 
   async function reorderSlotItem(
@@ -312,6 +365,9 @@ export function usePlanData(
     },
     setGenerateErrorHandler: (fn) => {
       setGenerateErrorRef.current = fn
+    },
+    setOnSongEvicted: (fn) => {
+      onSongEvictedRef.current = fn
     },
   }
 }

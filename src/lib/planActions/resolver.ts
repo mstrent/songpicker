@@ -248,6 +248,62 @@ export function resolvePlan(
   return { resolved, warnings, swapPairs }
 }
 
+/** Song that was in the plan pre-turn but isn't anywhere in the
+ *  plan post-turn. The candidate pool receives these via the
+ *  executor's onSongEvicted callback so the user can drag them
+ *  back into a slot without re-running Suggest. */
+export interface EvictedSong {
+  id: string
+  title: string
+  author: string | null
+  ccli: string | null
+}
+
+/** Songs that left the plan this turn — were in `preItems` with a
+ *  songId, but aren't in any slot after the resolved plan applies.
+ *  Excludes moves (same song lands at a different slot) and swaps
+ *  (both songs are still in the plan). Deduped by song id. */
+export function evictedSongs(
+  resolved: readonly ResolvedEntry[],
+  preItems: readonly PlanItem[],
+): EvictedSong[] {
+  // Slots touched this turn — pre-turn songs in OTHER slots remain
+  // in the plan untouched.
+  const touchedSlots = new Set<string>()
+  for (const r of resolved) {
+    touchedSlots.add(r.slotItemId)
+    if (r.kind === 'commit' && r.fromSlotItemId) {
+      touchedSlots.add(r.fromSlotItemId)
+    }
+  }
+
+  const postSongIds = new Set<string>()
+  for (const it of preItems) {
+    if (it.songId && !touchedSlots.has(it.id)) {
+      postSongIds.add(it.songId)
+    }
+  }
+  for (const r of resolved) {
+    if (r.kind === 'commit') postSongIds.add(r.songId)
+  }
+
+  const out: EvictedSong[] = []
+  const seen = new Set<string>()
+  for (const it of preItems) {
+    if (!it.songId) continue
+    if (postSongIds.has(it.songId)) continue
+    if (seen.has(it.songId)) continue
+    seen.add(it.songId)
+    out.push({
+      id: it.songId,
+      title: it.songTitle ?? '',
+      author: it.songAuthor,
+      ccli: it.songCcli,
+    })
+  }
+  return out
+}
+
 // Re-export so the property `slotItemId` field shows up in the
 // fromSlotItemId optional shape — TypeScript needs it referenced
 // somewhere when the type is structural. (No-op runtime usage.)

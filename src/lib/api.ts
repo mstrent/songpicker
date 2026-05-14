@@ -248,6 +248,32 @@ export const searchSongs = httpsCallable<
   { songs: Song[] }
 >(functions, 'searchSongs')
 
+/** Single-song lookup by PCO id. Used to enrich a candidate minted
+ *  from an evicted plan song with the scheduling history fields that
+ *  PlanItem doesn't carry (`lastScheduledAt`, etc). */
+export const getSong = httpsCallable<{ songId: string }, { song: Song }>(
+  functions,
+  'getSong',
+)
+
+/** Haiku-backed per-song classification. Returns slot-position
+ *  labels (vocabulary from the structure prompt) plus an optional
+ *  chorus snippet. Haiku is instructed to OMIT the snippet when
+ *  uncertain rather than fabricate one — worship songs are easy to
+ *  hallucinate plausibly. Used for the eviction-mint enrichment path. */
+export const classifySongSlots = httpsCallable<
+  {
+    planId?: string
+    songTitle: string
+    songAuthor?: string
+    songCcli?: string
+    theme?: string
+    planNotes?: string
+    serviceOrder?: string
+  },
+  { slots: string[]; chorusSnippet?: string }
+>(functions, 'classifySongSlots')
+
 /** Bulk variant for the AI propose flow. Each input query maps to
  *  a `Song[]` (or `null` when the query was blank) at the same
  *  index in `results`. */
@@ -370,12 +396,46 @@ export interface AdminPromptConfig {
   role: { admin: string; hardcoded: string }
   technical: string
   /** Hardcoded prompt content the admin can't edit but should be able
-   *  to inspect: the four tool descriptions sent to the model on every
-   *  turn, plus the per-turn nudge appended when an auto-refresh fires
-   *  (no typed user input). All read-only. */
+   *  to inspect:
+   *   - the four suggester tool descriptions sent to the model on
+   *     every turn,
+   *   - the per-turn nudge appended when an auto-refresh fires (no
+   *     typed user input),
+   *   - the Haiku slot classifier (system prompt + its single tool
+   *     description) fired per-song when a candidate is minted from
+   *     a slot eviction.
+   *  All read-only — changes require editing the source and
+   *  redeploying. */
   tooling: {
-    tools: { name: string; description: string }[]
+    /** Each tool's name + top-level description + the full JSON
+     *  Schema for its input. The inputSchema exposes the nested
+     *  field descriptions (slots / chorusSnippet / candidateId etc.)
+     *  that the top-level description listing doesn't show. */
+    tools: {
+      name: string
+      description: string
+      inputSchema: unknown
+    }[]
     autoRefreshNudge: string
+    classifier: {
+      systemPrompt: string
+      tool: { name: string; description: string; inputSchema: unknown }
+    }
+    /** Shared chorus-snippet discipline embedded in both
+     *  propose_songs and classify_song tool field descriptions.
+     *  Surfaced separately on the admin page so admins can edit one
+     *  place and see where it lands. */
+    chorusSnippetGuidance: string
+    /** composeSystemPrompt(DEFAULT_ROLE_PROMPT) — what the suggester's
+     *  system message actually looks like when the hardcoded role
+     *  default applies. Admins can substitute their own role
+     *  mentally by reading alongside the persona editor. */
+    composedSystemPromptPreview: string
+    /** Representative per-turn user message — the exact format the
+     *  model receives every turn, with placeholder dynamic values
+     *  and one candidate per decision type. Stable half is what gets
+     *  prompt-cached; volatile half changes per turn. */
+    sampleUserMessage: { stable: string; volatile: string }
   }
 }
 

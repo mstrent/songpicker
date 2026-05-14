@@ -1091,42 +1091,33 @@ textarea {
   text-overflow: ellipsis;
 }
 
-/* Floating "drop to clear" zone — appears ONLY while a filled slot is
-   being dragged. position: fixed pins it to the viewport (sticky
-   pinned it to the plan-detail container, which scrolled out of view
-   if the user had scrolled down). --error palette signals destructive
-   intent. */
-.slot-trash {
-  position: fixed;
-  top: 1rem;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 1000;
-  min-width: min(360px, 90vw);
-  padding: 0.8rem 1.2rem;
+/* Suggestions panel becomes a drop target when a filled slot is being
+   dragged — drop to clear the slot (the song returns to candidates). */
+.plan-right.drag-target-candidates {
+  outline: 2px dashed var(--accent);
+  outline-offset: -6px;
+  border-radius: 12px;
+}
+.plan-right.drag-target-candidates.drag-over {
+  outline-style: solid;
+  background: var(--accent-soft);
+}
+.candidates-drop-hint {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.6rem;
+  gap: 0.5rem;
+  padding: 0.6rem 0.9rem;
+  margin-bottom: 0.4rem;
   font-weight: 600;
-  font-size: 0.95rem;
-  color: var(--error);
-  background: var(--bg);
-  border: 2px dashed var(--error);
-  border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-  pointer-events: auto;
+  font-size: 0.92rem;
+  color: var(--accent);
+  border: 1px dashed var(--accent);
+  border-radius: 10px;
+  background: var(--surface);
 }
-.slot-trash.drag-over {
-  background: var(--error);
-  color: #fff;
-  border-style: solid;
-}
-.slot-trash.drag-over .slot-trash-icon {
-  filter: grayscale(1) brightness(2);
-}
-.slot-trash-icon {
-  font-size: 1.2rem;
+.candidates-drop-icon {
+  font-size: 1.1rem;
 }
 
 .service-order .seq {

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  classifySongSlots,
+  getSong,
   loadSession,
   saveSession,
   searchSongsBatch,
@@ -21,6 +23,7 @@ import {
   applyDecisionChange,
   type ApplyDecisionDeps,
 } from './planActions/decisions'
+import type { EvictedSong } from './planActions/resolver'
 import type { PlanDataApi } from './usePlanData'
 
 // Songpicker's candidate pool — AI-suggested songs the user is
@@ -41,6 +44,15 @@ export interface CandidateMatch {
   error?: string
   decision: Decision
   addedAt: number
+  /** Transient flag set when a candidate was minted from a slot
+   *  eviction (not from an AI proposal). While true, the SPA is
+   *  fetching enrichment data from Planning Center (lastScheduledAt
+   *  etc.) and from Haiku (slot tags). The UI suppresses the time
+   *  chip and slot tag chips while this is true so the card doesn't
+   *  show "never played" when we just haven't loaded the data yet.
+   *  Stripped from persistence — recomputed (always false) on
+   *  session reload. */
+  enrichmentPending?: boolean
 }
 
 function newCandidateId(): string {
@@ -107,6 +119,13 @@ function fromPersisted(p: PersistedCandidate): CandidateMatch {
 }
 
 const HISTORY_PROSE_CAP = 8
+
+// How long to wait between the first getSong and the retry when the
+// first response had a null lastScheduledAt. Covers PCO's
+// last_scheduled_at index lag past the pcoSettled window. 3s is
+// empirical — long enough to clear typical post-write staleness,
+// short enough that users perceive it as "loading" not "broken."
+const PCO_RETRY_MS = 3000
 
 interface SystemEventBucket {
   proposed: number
@@ -229,6 +248,18 @@ export interface CandidatePoolApi {
   /** True iff this candidate's matched library song is currently
    *  linked to a slot in the PCO plan. Phase 6 derived state. */
   isCandidateCommitted: (candidate: { song?: { id?: string } | null }) => boolean
+  /** Ensure a song that just left the plan shows up in the active
+   *  candidate pool. PlanDetail wires this to planData.setOnSongEvicted
+   *  so a clear / DnD-to-suggestions / overwrite all surface the
+   *  displaced song as a pending candidate the user can drag back.
+   *
+   *  `pcoSettled` is a promise that resolves when the executor's PCO
+   *  clear has landed AND PCO's read-after-write consistency window
+   *  has elapsed. ensureCandidate awaits it before firing getSong so
+   *  the scheduling history we read reflects the post-clear state
+   *  (otherwise PCO returns today's plan as "last scheduled"). Tests
+   *  may omit it; production wires it through performIntent. */
+  ensureCandidate: (evicted: EvictedSong, pcoSettled?: Promise<unknown>) => void
 }
 
 export function useCandidatePool(
@@ -328,6 +359,143 @@ export function useCandidatePool(
         timestamp: Date.now(),
       },
     ])
+  }
+
+  function ensureCandidate(
+    evicted: EvictedSong,
+    pcoSettled?: Promise<unknown>,
+  ): void {
+    // If we already have a candidate for this song id, leave it alone —
+    // even if it's currently rejected. Re-promoting a rejected song
+    // would feel like a regression; the user already decided.
+    //
+    // Check the closure's candidates synchronously — using a flag set
+    // inside a setCandidates updater would race with React 18's queued
+    // updaters (we'd read the flag before the updater runs and fire
+    // the enrichment fetches unconditionally).
+    if (candidates.some((c) => c.song?.id === evicted.id)) return
+
+    const minted: CandidateMatch = {
+      id: newCandidateId(),
+      suggestion: {
+        title: evicted.title,
+        author: evicted.author ?? undefined,
+      },
+      matchStatus: 'matched',
+      song: {
+        id: evicted.id,
+        title: evicted.title,
+        author: evicted.author,
+        ccliNumber: evicted.ccli,
+        themes: null,
+        isHidden: false,
+        lastScheduledAt: null,
+        lastScheduledShortDates: null,
+      },
+      decision: 'pending',
+      addedAt: Date.now(),
+      enrichmentPending: true,
+    }
+    setCandidates((prev) => {
+      // Defensive — covers the rare case where two sibling calls fire
+      // before either has caused a re-render (the closure check above
+      // would see the stale array). Updater's prev is always live.
+      if (prev.some((c) => c.song?.id === evicted.id)) return prev
+      return [...prev, minted]
+    })
+
+    appendSystemMessage(`↩ "${evicted.title}" returned to candidates`)
+
+    // Snapshot context fields at call time so concurrent renders don't
+    // pull in stale or future values mid-fetch.
+    const ctx = {
+      theme: planData.theme,
+      planNotes: planData.notesText,
+      serviceOrder: buildServiceOrderText(planData.items),
+    }
+
+    // Patch helper — applies a partial update to the candidate matched
+    // by song.id. No-op if the candidate has been removed since we
+    // started (e.g., plan switch).
+    const patchBySongId = (
+      patch: (c: CandidateMatch) => CandidateMatch,
+    ): void => {
+      setCandidates((prev) =>
+        prev.map((c) => (c.song?.id === evicted.id ? patch(c) : c)),
+      )
+    }
+
+    // PCO fetch — fills lastScheduledAt + themes/ccli/etc.
+    //
+    // Deferred behind pcoSettled because performIntent fires us BEFORE
+    // awaiting executePlan — the PCO clear write hasn't run yet at
+    // this point. performIntent resolves pcoSettled after the executor
+    // returns (so the clear request has gone through) plus a short
+    // consistency window. Without this gating we'd always read the
+    // just-cleared plan as "last scheduled today."
+    //
+    // pcoSettled isn't enough on its own — some songs take longer to
+    // re-index than the consistency window covers, surfacing as a
+    // null lastScheduledAt for a song that DOES have prior schedule
+    // history. So we retry once after additional delay when the
+    // first response comes back null. If the retry still says null,
+    // we accept it as truth — the song genuinely has no recent
+    // scheduling (or PCO truly isn't going to tell us). The UI
+    // surfaces this as "no recent schedule" rather than a confident
+    // "never played" lie.
+    void (pcoSettled ?? Promise.resolve()).then(async () => {
+      const fetchOnce = (): Promise<Song | null> =>
+        getSong({ songId: evicted.id })
+          .then((r) => r.data.song)
+          .catch(() => null)
+
+      let song = await fetchOnce()
+      if (song && !song.lastScheduledAt) {
+        // PCO's index may not have caught up yet. Wait, then try again.
+        await new Promise((r) => setTimeout(r, PCO_RETRY_MS))
+        const retried = await fetchOnce()
+        if (retried) song = retried
+      }
+
+      // Whether we got data or not, clear the pending flag — we've
+      // done our due diligence. The UI distinguishes:
+      //   enrichmentPending=true → "loading history…"
+      //   …=false + lastScheduledAt set → "last played X ago"
+      //   …=false + lastScheduledAt null → "no recent schedule"
+      patchBySongId((c) => ({
+        ...c,
+        song: song ?? c.song,
+        enrichmentPending: false,
+      }))
+    })
+
+    // Haiku classification — adds slot labels + optional chorus
+    // snippet. Independent of getSong (no PCO state involved) so fires
+    // immediately. Haiku is prompted to OMIT the snippet rather than
+    // fabricate, so an empty chorusSnippet means "Haiku wasn't sure"
+    // not "song has no chorus."
+    classifySongSlots({
+      planId,
+      songTitle: evicted.title,
+      songAuthor: evicted.author ?? undefined,
+      songCcli: evicted.ccli ?? undefined,
+      theme: ctx.theme,
+      planNotes: ctx.planNotes,
+      serviceOrder: ctx.serviceOrder,
+    })
+      .then((r) => {
+        const { slots, chorusSnippet } = r.data
+        if (slots.length === 0 && !chorusSnippet) return
+        patchBySongId((c) => ({
+          ...c,
+          suggestion: {
+            ...c.suggestion,
+            ...(slots.length > 0 ? { slots } : {}),
+            ...(chorusSnippet ? { chorusSnippet } : {}),
+          },
+        }))
+      })
+      .catch(() => {})
   }
 
   function isCandidateCommitted(candidate: {
@@ -694,5 +862,6 @@ export function useCandidatePool(
     clearCandidates,
     appendSystemMessage,
     isCandidateCommitted,
+    ensureCandidate,
   }
 }

@@ -297,13 +297,18 @@ export class PcoClient {
         const a = inc.attributes as {
           title?: string
           author?: string | null
-          ccli_number?: string | null
+          // PCO documents ccli_number as integer but other places in
+          // this codebase have historically typed it as string. Accept
+          // both shapes at the wire and coerce to string at the
+          // boundary so downstream consumers can rely on
+          // `.trim()` / template-string formatting.
+          ccli_number?: string | number | null
         }
         if (a.title) {
           songsById.set(inc.id, {
             title: a.title,
             author: a.author ?? null,
-            ccli: a.ccli_number ?? null,
+            ccli: a.ccli_number != null ? String(a.ccli_number) : null,
           })
         }
       } else if (inc.type === 'ItemNote') {
@@ -443,6 +448,41 @@ export class PcoClient {
     })
   }
 
+  // Fetch a single Song by its PCO id. Used to enrich candidates
+  // minted from evicted plan items — PlanItem carries title/author/
+  // ccli but not lastScheduledAt, which the candidate card relies
+  // on. One direct GET; no fuzzy match, no listing.
+  async getSongById(songId: string): Promise<Song> {
+    const json = await this.fetch<
+      JsonApiResponse<{
+        title: string
+        author: string | null
+        // PCO returns ccli_number as integer per docs; coerce to
+        // string at the boundary so downstream consumers can rely
+        // on string ops.
+        ccli_number: string | number | null
+        themes: string | null
+        hidden: boolean
+        last_scheduled_at: string | null
+        last_scheduled_short_dates: string | null
+      }>
+    >(`/songs/${songId}`)
+    const d = Array.isArray(json.data) ? json.data[0] : json.data
+    return {
+      id: d.id,
+      title: d.attributes.title,
+      author: d.attributes.author,
+      ccliNumber:
+        d.attributes.ccli_number != null
+          ? String(d.attributes.ccli_number)
+          : null,
+      themes: d.attributes.themes,
+      isHidden: d.attributes.hidden,
+      lastScheduledAt: d.attributes.last_scheduled_at,
+      lastScheduledShortDates: d.attributes.last_scheduled_short_dates,
+    }
+  }
+
   async searchSongs(
     query: string,
     opts: { author?: string } = {},
@@ -469,7 +509,9 @@ export class PcoClient {
         JsonApiResponse<{
           title: string
           author: string | null
-          ccli_number: string | null
+          // PCO returns ccli_number as integer per docs; see
+          // getSongById for the coercion rationale.
+          ccli_number: string | number | null
           themes: string | null
           hidden: boolean
           last_scheduled_at: string | null
@@ -481,7 +523,10 @@ export class PcoClient {
         id: d.id,
         title: d.attributes.title,
         author: d.attributes.author,
-        ccliNumber: d.attributes.ccli_number,
+        ccliNumber:
+          d.attributes.ccli_number != null
+            ? String(d.attributes.ccli_number)
+            : null,
         themes: d.attributes.themes,
         isHidden: d.attributes.hidden,
         lastScheduledAt: d.attributes.last_scheduled_at,

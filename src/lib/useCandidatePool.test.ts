@@ -5,7 +5,8 @@ import type { PlanDataApi } from './usePlanData'
 import type { ExecutorResult } from './planActions/executor'
 
 // Mock the api callables. The candidate pool uses loadSession,
-// saveSession, searchSongsBatch, suggestSongs.
+// saveSession, searchSongsBatch, suggestSongs, getSong,
+// classifySongSlots.
 vi.mock('./api', () => {
   return {
     loadSession: vi.fn(() =>
@@ -14,6 +15,8 @@ vi.mock('./api', () => {
     saveSession: vi.fn(() => Promise.resolve({ data: { ok: true } })),
     searchSongsBatch: vi.fn(),
     suggestSongs: { stream: vi.fn() },
+    getSong: vi.fn(),
+    classifySongSlots: vi.fn(),
   }
 })
 
@@ -59,6 +62,7 @@ function stubPlanData(overrides: Partial<PlanDataApi> = {}): PlanDataApi {
       _setGenerateError = fn
       void _setGenerateError
     },
+    setOnSongEvicted: () => {},
     ...overrides,
   }
 }
@@ -474,6 +478,343 @@ describe('useCandidatePool: clearCandidates', () => {
 
     expect(result.current.candidates).toEqual([])
     expect(result.current.messages).toEqual([])
+  })
+})
+
+describe('useCandidatePool: ensureCandidate (eviction enrichment)', () => {
+  const evicted = {
+    id: 'song-evicted',
+    title: 'Way Maker',
+    author: 'Osinachi Kalu Okoro Egbu',
+    ccli: '7115744',
+  }
+
+  // Helper for tests that don't care about gating getSong — pass an
+  // already-resolved promise so the deferred fetch fires immediately
+  // and waitFor sees the patch. Production passes a real settle
+  // promise (see usePlanData.performIntent).
+  const settled = Promise.resolve()
+
+  it('mints a pending candidate with enrichmentPending=true on first eviction', async () => {
+    // Keep both fetches pending so we can observe the in-flight state.
+    vi.mocked(api.getSong).mockReturnValue(new Promise(() => {}))
+    vi.mocked(api.classifySongSlots).mockReturnValue(new Promise(() => {}))
+
+    const planData = stubPlanData()
+    const { result } = renderHook(() => useCandidatePool('plan-1', planData))
+    await waitFor(() => expect(result.current.sessionLoaded).toBe(true))
+
+    act(() => result.current.ensureCandidate(evicted))
+
+    expect(result.current.candidates).toHaveLength(1)
+    const c = result.current.candidates[0]
+    expect(c.matchStatus).toBe('matched')
+    expect(c.decision).toBe('pending')
+    expect(c.enrichmentPending).toBe(true)
+    expect(c.song?.id).toBe('song-evicted')
+    expect(c.song?.lastScheduledAt).toBeNull() // not loaded yet
+    // System message announces the return.
+    expect(
+      result.current.messages.some((m) =>
+        /returned to candidates/.test(m.content),
+      ),
+    ).toBe(true)
+  })
+
+  it('gates getSong on pcoSettled so we never query PCO before its clear lands', async () => {
+    vi.mocked(api.getSong).mockResolvedValue({
+      data: {
+        song: {
+          id: 'song-evicted',
+          title: 'Way Maker',
+          author: null,
+          ccliNumber: null,
+          themes: null,
+          isHidden: false,
+          lastScheduledAt: '2026-04-26T10:00:00Z',
+          lastScheduledShortDates: '4/26',
+        },
+      },
+    })
+    vi.mocked(api.classifySongSlots).mockReturnValue(new Promise(() => {}))
+
+    const planData = stubPlanData()
+    const { result } = renderHook(() => useCandidatePool('plan-1', planData))
+    await waitFor(() => expect(result.current.sessionLoaded).toBe(true))
+
+    // Externally-controlled settle promise — mirrors how performIntent
+    // wires it up in production.
+    let resolveSettled!: () => void
+    const pcoSettled = new Promise<void>((r) => {
+      resolveSettled = r
+    })
+
+    act(() => result.current.ensureCandidate(evicted, pcoSettled))
+    // After the mint but before resolution: getSong stays held back.
+    // Let microtasks drain to make sure nothing snuck through.
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(vi.mocked(api.getSong)).not.toHaveBeenCalled()
+
+    // Resolve the settle signal — getSong fires.
+    act(() => {
+      resolveSettled()
+    })
+    await waitFor(() =>
+      expect(vi.mocked(api.getSong)).toHaveBeenCalledWith({
+        songId: 'song-evicted',
+      }),
+    )
+  })
+
+  it('patches lastScheduledAt and clears enrichmentPending when getSong resolves', async () => {
+    vi.mocked(api.getSong).mockResolvedValue({
+      data: {
+        song: {
+          id: 'song-evicted',
+          title: 'Way Maker',
+          author: 'Osinachi',
+          ccliNumber: '7115744',
+          themes: null,
+          isHidden: false,
+          lastScheduledAt: '2026-04-26T10:00:00Z',
+          lastScheduledShortDates: '4/26',
+        },
+      },
+    })
+    vi.mocked(api.classifySongSlots).mockReturnValue(new Promise(() => {}))
+
+    const planData = stubPlanData()
+    const { result } = renderHook(() => useCandidatePool('plan-1', planData))
+    await waitFor(() => expect(result.current.sessionLoaded).toBe(true))
+
+    act(() => result.current.ensureCandidate(evicted, settled))
+    await waitFor(() =>
+      expect(result.current.candidates[0]?.enrichmentPending).toBe(false),
+    )
+
+    const c = result.current.candidates[0]
+    expect(c.song?.lastScheduledAt).toBe('2026-04-26T10:00:00Z')
+    expect(c.song?.lastScheduledShortDates).toBe('4/26')
+  })
+
+  it('patches suggestion.slots when classifySongSlots resolves', async () => {
+    vi.mocked(api.getSong).mockReturnValue(new Promise(() => {}))
+    vi.mocked(api.classifySongSlots).mockResolvedValue({
+      data: { slots: ['opener', 'response'] },
+    })
+
+    const planData = stubPlanData()
+    const { result } = renderHook(() => useCandidatePool('plan-1', planData))
+    await waitFor(() => expect(result.current.sessionLoaded).toBe(true))
+
+    act(() => result.current.ensureCandidate(evicted))
+    await waitFor(() =>
+      expect(result.current.candidates[0]?.suggestion.slots).toEqual([
+        'opener',
+        'response',
+      ]),
+    )
+  })
+
+  it('patches suggestion.chorusSnippet when Haiku returns one', async () => {
+    vi.mocked(api.getSong).mockReturnValue(new Promise(() => {}))
+    vi.mocked(api.classifySongSlots).mockResolvedValue({
+      data: {
+        slots: ['opener'],
+        chorusSnippet: 'Way maker, miracle worker',
+      },
+    })
+
+    const planData = stubPlanData()
+    const { result } = renderHook(() => useCandidatePool('plan-1', planData))
+    await waitFor(() => expect(result.current.sessionLoaded).toBe(true))
+
+    act(() => result.current.ensureCandidate(evicted))
+    await waitFor(() =>
+      expect(result.current.candidates[0]?.suggestion.chorusSnippet).toBe(
+        'Way maker, miracle worker',
+      ),
+    )
+    expect(result.current.candidates[0]?.suggestion.slots).toEqual(['opener'])
+  })
+
+  it('leaves chorusSnippet undefined when Haiku omits it', async () => {
+    vi.mocked(api.getSong).mockReturnValue(new Promise(() => {}))
+    vi.mocked(api.classifySongSlots).mockResolvedValue({
+      data: { slots: ['opener'] },
+    })
+
+    const planData = stubPlanData()
+    const { result } = renderHook(() => useCandidatePool('plan-1', planData))
+    await waitFor(() => expect(result.current.sessionLoaded).toBe(true))
+
+    act(() => result.current.ensureCandidate(evicted))
+    await waitFor(() =>
+      expect(result.current.candidates[0]?.suggestion.slots).toEqual([
+        'opener',
+      ]),
+    )
+    expect(
+      result.current.candidates[0]?.suggestion.chorusSnippet,
+    ).toBeUndefined()
+  })
+
+  it('flips enrichmentPending=false on getSong failure (UI moves to honest fallback)', async () => {
+    vi.mocked(api.getSong).mockRejectedValue(new Error('PCO 404'))
+    vi.mocked(api.classifySongSlots).mockResolvedValue({
+      data: { slots: [] },
+    })
+
+    const planData = stubPlanData()
+    const { result } = renderHook(() => useCandidatePool('plan-1', planData))
+    await waitFor(() => expect(result.current.sessionLoaded).toBe(true))
+
+    act(() => result.current.ensureCandidate(evicted, settled))
+    await waitFor(() =>
+      expect(result.current.candidates[0]?.enrichmentPending).toBe(false),
+    )
+    // No song update (lastScheduledAt stays null) — UI renders the
+    // "no recent schedule" fallback rather than "loading…" forever.
+    expect(result.current.candidates[0]?.song?.lastScheduledAt).toBeNull()
+  })
+
+  it('retries getSong once when the first response has null lastScheduledAt', async () => {
+    vi.useFakeTimers()
+    try {
+      // First response: PCO index hasn't caught up. Second: real date.
+      vi.mocked(api.getSong)
+        .mockResolvedValueOnce({
+          data: {
+            song: {
+              id: 'song-evicted',
+              title: 'Way Maker',
+              author: null,
+              ccliNumber: null,
+              themes: null,
+              isHidden: false,
+              lastScheduledAt: null,
+              lastScheduledShortDates: null,
+            },
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            song: {
+              id: 'song-evicted',
+              title: 'Way Maker',
+              author: null,
+              ccliNumber: null,
+              themes: null,
+              isHidden: false,
+              lastScheduledAt: '2026-04-26T10:00:00Z',
+              lastScheduledShortDates: '4/26',
+            },
+          },
+        })
+      vi.mocked(api.classifySongSlots).mockReturnValue(new Promise(() => {}))
+
+      const planData = stubPlanData()
+      const { result } = renderHook(() => useCandidatePool('plan-1', planData))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+
+      act(() => result.current.ensureCandidate(evicted, settled))
+      // First call lands.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(vi.mocked(api.getSong)).toHaveBeenCalledTimes(1)
+
+      // Advance through the retry window — second call fires + patches.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000)
+      })
+      expect(vi.mocked(api.getSong)).toHaveBeenCalledTimes(2)
+      expect(result.current.candidates[0]?.song?.lastScheduledAt).toBe(
+        '2026-04-26T10:00:00Z',
+      )
+      expect(result.current.candidates[0]?.enrichmentPending).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('accepts null as truth when both attempts return null lastScheduledAt', async () => {
+    vi.useFakeTimers()
+    try {
+      const nullSong = {
+        id: 'song-evicted',
+        title: 'Way Maker',
+        author: null,
+        ccliNumber: null,
+        themes: null,
+        isHidden: false,
+        lastScheduledAt: null,
+        lastScheduledShortDates: null,
+      }
+      vi.mocked(api.getSong).mockResolvedValue({ data: { song: nullSong } })
+      vi.mocked(api.classifySongSlots).mockReturnValue(new Promise(() => {}))
+
+      const planData = stubPlanData()
+      const { result } = renderHook(() => useCandidatePool('plan-1', planData))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+
+      act(() => result.current.ensureCandidate(evicted, settled))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000)
+      })
+      expect(vi.mocked(api.getSong)).toHaveBeenCalledTimes(2)
+      // Retry exhausted — UI moves out of pending; lastScheduledAt
+      // stays null, which the chip renders as "no recent schedule".
+      expect(result.current.candidates[0]?.enrichmentPending).toBe(false)
+      expect(result.current.candidates[0]?.song?.lastScheduledAt).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('skips re-minting when a candidate with the same song.id already exists', async () => {
+    vi.mocked(api.loadSession).mockResolvedValue({
+      data: {
+        candidates: [
+          {
+            id: 'c-existing',
+            title: 'Way Maker',
+            author: null,
+            chorusSnippet: null,
+            slots: [],
+            matchStatus: 'matched',
+            song: {
+              id: 'song-evicted',
+              title: 'Way Maker',
+              lastScheduledAt: null,
+              lastScheduledShortDates: null,
+            },
+            error: null,
+            decision: 'pending',
+            addedAt: Date.now(),
+            assignedSlotItemId: null,
+            committedAt: null,
+            priorSlotTitle: null,
+          },
+        ],
+        messages: [],
+      },
+    })
+    const planData = stubPlanData()
+    const { result } = renderHook(() => useCandidatePool('plan-1', planData))
+    await waitFor(() => expect(result.current.sessionLoaded).toBe(true))
+    expect(result.current.candidates).toHaveLength(1)
+
+    act(() => result.current.ensureCandidate(evicted))
+
+    expect(result.current.candidates).toHaveLength(1)
+    expect(vi.mocked(api.getSong)).not.toHaveBeenCalled()
+    expect(vi.mocked(api.classifySongSlots)).not.toHaveBeenCalled()
   })
 })
 

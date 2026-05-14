@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { PlanItem } from '../api'
-import { resolvePlan, type Assignment, type ResolverState } from './resolver'
+import {
+  evictedSongs,
+  resolvePlan,
+  type Assignment,
+  type ResolverState,
+} from './resolver'
 
 function makeItem(partial: Partial<PlanItem> & Pick<PlanItem, 'id'>): PlanItem {
   return {
@@ -235,5 +240,123 @@ describe('resolvePlan: in-turn live tracking', () => {
     // Slot 1 is empty after X moved out, so Y has no eviction.
     expect(r1.evictedSongTitle).toBeNull()
     expect(r1.isMove).toBe(false)
+  })
+})
+
+describe('evictedSongs', () => {
+  it('clear → song is evicted with full PlanItem metadata', () => {
+    const items = defaultPlan({
+      1: {
+        songId: 'song-X',
+        songTitle: 'X',
+        songAuthor: 'Artist',
+        songCcli: '12345',
+      },
+    })
+    const plan = resolvePlan([{ slotIndex: 1, song: null }], stateOf(items))
+    expect(evictedSongs(plan.resolved, items)).toEqual([
+      { id: 'song-X', title: 'X', author: 'Artist', ccli: '12345' },
+    ])
+  })
+
+  it('overwrite → displaced song is evicted', () => {
+    const items = defaultPlan({
+      1: { songId: 'song-old', songTitle: 'Old' },
+    })
+    const plan = resolvePlan(
+      [{ slotIndex: 1, song: { id: 'song-new', title: 'New' } }],
+      stateOf(items),
+    )
+    expect(evictedSongs(plan.resolved, items)).toEqual([
+      { id: 'song-old', title: 'Old', author: null, ccli: null },
+    ])
+  })
+
+  it('move → no eviction (song still in plan at a different slot)', () => {
+    const items = defaultPlan({
+      1: { songId: 'song-X', songTitle: 'X' },
+    })
+    const plan = resolvePlan(
+      [{ slotIndex: 3, song: { id: 'song-X', title: 'X' } }],
+      stateOf(items),
+    )
+    expect(evictedSongs(plan.resolved, items)).toEqual([])
+  })
+
+  it('swap → no evictions (both songs still in plan)', () => {
+    const items = defaultPlan({
+      1: { songId: 'song-A', songTitle: 'A' },
+      2: { songId: 'song-B', songTitle: 'B' },
+    })
+    const plan = resolvePlan(
+      [
+        { slotIndex: 1, song: { id: 'song-B', title: 'B' } },
+        { slotIndex: 2, song: { id: 'song-A', title: 'A' } },
+      ],
+      stateOf(items),
+    )
+    expect(evictedSongs(plan.resolved, items)).toEqual([])
+  })
+
+  it('fresh commit to empty slot → no evictions', () => {
+    const items = defaultPlan()
+    const plan = resolvePlan(
+      [{ slotIndex: 1, song: { id: 'song-new', title: 'New' } }],
+      stateOf(items),
+    )
+    expect(evictedSongs(plan.resolved, items)).toEqual([])
+  })
+
+  it('clear of empty slot → no evictions', () => {
+    const items = defaultPlan()
+    const plan = resolvePlan([{ slotIndex: 1, song: null }], stateOf(items))
+    expect(evictedSongs(plan.resolved, items)).toEqual([])
+  })
+
+  it('untouched slots stay in plan; only changed slots can evict', () => {
+    // Slot 1 has song A (untouched), slot 2 has song B (cleared).
+    // Only B is evicted; A remains.
+    const items = defaultPlan({
+      1: { songId: 'song-A', songTitle: 'A' },
+      2: { songId: 'song-B', songTitle: 'B' },
+    })
+    const plan = resolvePlan([{ slotIndex: 2, song: null }], stateOf(items))
+    expect(evictedSongs(plan.resolved, items)).toEqual([
+      { id: 'song-B', title: 'B', author: null, ccli: null },
+    ])
+  })
+
+  it('move-with-displacement → only displaced song is evicted', () => {
+    // Song X is at slot 1, song Y is at slot 2. Move X into slot 2
+    // (displacing Y). Y is evicted; X is still in plan at slot 2.
+    const items = defaultPlan({
+      1: { songId: 'song-X', songTitle: 'X' },
+      2: { songId: 'song-Y', songTitle: 'Y' },
+    })
+    const plan = resolvePlan(
+      [{ slotIndex: 2, song: { id: 'song-X', title: 'X' } }],
+      stateOf(items),
+    )
+    expect(evictedSongs(plan.resolved, items)).toEqual([
+      { id: 'song-Y', title: 'Y', author: null, ccli: null },
+    ])
+  })
+
+  it('deduplicates if same song id appears at multiple pre-turn slots', () => {
+    // Pathological — shouldn't happen in PCO but be defensive.
+    const items = defaultPlan({
+      1: { songId: 'song-dup', songTitle: 'Dup' },
+      2: { songId: 'song-dup', songTitle: 'Dup' },
+    })
+    const plan = resolvePlan(
+      [
+        { slotIndex: 1, song: null },
+        { slotIndex: 2, song: null },
+      ],
+      stateOf(items),
+    )
+    expect(evictedSongs(plan.resolved, items)).toEqual([
+      { id: 'song-dup', title: 'Dup', author: null, ccli: null },
+    ])
   })
 })

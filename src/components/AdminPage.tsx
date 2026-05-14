@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   addAccessEntry,
   getAccessConfig,
@@ -116,16 +116,94 @@ export function AdminPage() {
           what shapes the model's tool-choice and per-turn behavior.
         </p>
         {config.tooling.tools.map((t) => (
-          <details key={t.name} className="hardcoded-display">
-            <summary>
-              <code>{t.name}</code> tool description
-            </summary>
-            <pre>{t.description}</pre>
-          </details>
+          <React.Fragment key={t.name}>
+            <details className="hardcoded-display">
+              <summary>
+                <code>{t.name}</code> tool description
+              </summary>
+              <pre>{t.description}</pre>
+            </details>
+            <details className="hardcoded-display">
+              <summary>
+                <code>{t.name}</code> input schema{' '}
+                <em>(field descriptions)</em>
+              </summary>
+              <pre>{JSON.stringify(t.inputSchema, null, 2)}</pre>
+            </details>
+          </React.Fragment>
         ))}
         <details className="hardcoded-display">
           <summary>Auto-refresh nudge</summary>
           <pre>{config.tooling.autoRefreshNudge}</pre>
+        </details>
+        <details className="hardcoded-display">
+          <summary>
+            Chorus snippet guidance{' '}
+            <em>(embedded in propose_songs and classify_song)</em>
+          </summary>
+          <pre>{config.tooling.chorusSnippetGuidance}</pre>
+        </details>
+      </section>
+
+      <section className="admin-section read-only">
+        <h3>Song classifier prompts (read-only)</h3>
+        <p className="help">
+          Fires once per song when a candidate is minted from a slot
+          eviction. Single Sonnet call returns slot labels + optional
+          chorus snippet. Edit in
+          <code> functions/src/ai/anthropic.ts</code>.
+        </p>
+        <details className="hardcoded-display">
+          <summary>Classifier system prompt</summary>
+          <pre>{config.tooling.classifier.systemPrompt}</pre>
+        </details>
+        <details className="hardcoded-display">
+          <summary>
+            <code>{config.tooling.classifier.tool.name}</code> tool description
+          </summary>
+          <pre>{config.tooling.classifier.tool.description}</pre>
+        </details>
+        <details className="hardcoded-display">
+          <summary>
+            <code>{config.tooling.classifier.tool.name}</code> input schema{' '}
+            <em>(field descriptions)</em>
+          </summary>
+          <pre>
+            {JSON.stringify(config.tooling.classifier.tool.inputSchema, null, 2)}
+          </pre>
+        </details>
+      </section>
+
+      <section className="admin-section read-only">
+        <h3>Per-turn prompt preview (read-only)</h3>
+        <p className="help">
+          What the model receives on every suggester turn. The system
+          prompt is assembled from the resolved persona plus the
+          technical requirements; the user message is rebuilt from
+          current plan state. Both are shown here with placeholder
+          dynamic values so admins can see the exact structure without
+          needing a live session.
+        </p>
+        <details className="hardcoded-display">
+          <summary>
+            Composed system prompt{' '}
+            <em>(default role + technical requirements)</em>
+          </summary>
+          <pre>{config.tooling.composedSystemPromptPreview}</pre>
+        </details>
+        <details className="hardcoded-display">
+          <summary>
+            Sample user message — stable half{' '}
+            <em>(prompt-cached, 1h TTL)</em>
+          </summary>
+          <pre>{config.tooling.sampleUserMessage.stable}</pre>
+        </details>
+        <details className="hardcoded-display">
+          <summary>
+            Sample user message — volatile half{' '}
+            <em>(fresh each turn)</em>
+          </summary>
+          <pre>{config.tooling.sampleUserMessage.volatile}</pre>
         </details>
       </section>
 

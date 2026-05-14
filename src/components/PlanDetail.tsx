@@ -73,7 +73,20 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setDecision,
     clearCandidates,
     isCandidateCommitted,
+    ensureCandidate,
   } = useCandidatePool(planId, planData)
+
+  // Wire slot-eviction notifications into the candidate pool. When a
+  // song is cleared / displaced from the plan (via X click, DnD to
+  // trash, DnD to suggestions, AI command — any path), it shows up
+  // in the suggestions list as a pending candidate so the user can
+  // drag it back without re-running Suggest. Matches the
+  // setAppendSystemMessage wiring above it.
+  useEffect(() => {
+    planData.setOnSongEvicted(ensureCandidate)
+    // Wiring is stable for the life of this component mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // UI-only state. Everything below this line is rendering / drag
   // concerns; nothing in this section talks to the model.
@@ -123,7 +136,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   // Hovered drop-target ids so we can highlight the specific slot or the
   // trash zone the user is over, instead of every valid target at once.
   const [dragOverItemId, setDragOverItemId] = useState<string | null>(null)
-  const [dragOverTrash, setDragOverTrash] = useState(false)
+  // Whether the suggestions panel (right column) is the current drop
+  // target during a slot drag. Dropping the slot on the suggestions
+  // panel clears it and the executor's onSongEvicted returns the
+  // displaced song to candidates.
+  const [dragOverCandidates, setDragOverCandidates] = useState(false)
 
   // Floating-ghost we render ourselves at the cursor position during a
   // drag. The browser-default drag image was rendering blank, and
@@ -142,7 +159,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setDragKind(null)
     setDragSourceId(null)
     setDragOverItemId(null)
-    setDragOverTrash(false)
+    setDragOverCandidates(false)
     setDragGhost(null)
   }
 
@@ -199,37 +216,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           {dragGhost.sub && (
             <div className="drag-ghost-sub">{dragGhost.sub}</div>
           )}
-        </div>
-      )}
-      {dragKind === 'slot' && (
-        <div
-          className={`slot-trash${dragOverTrash ? ' drag-over' : ''}`}
-          onDragOver={(e) => {
-            e.preventDefault()
-            e.dataTransfer.dropEffect = 'move'
-            if (!dragOverTrash) setDragOverTrash(true)
-          }}
-          onDragLeave={() => setDragOverTrash(false)}
-          onDrop={(e) => {
-            e.preventDefault()
-            // Source id lives in React state now — the dataTransfer
-            // payload was deprecated when we moved off the
-            // application/x-songpicker custom mime type. Reading the
-            // old key here silently no-op'd the clear.
-            if (dragKind === 'slot' && dragSourceId) {
-              const slot = (items ?? []).find((it) => it.id === dragSourceId)
-              if (slot) {
-                void performIntent(compileClearSlot(slot, items ?? []))
-              }
-            }
-            endDrag()
-          }}
-          aria-label="Drop to clear this slot"
-        >
-          <span className="slot-trash-icon" aria-hidden>
-            🗑
-          </span>
-          <span className="slot-trash-label">Drop to clear this slot</span>
         </div>
       )}
       <div className="plan-header">
@@ -716,7 +702,39 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
 
         </div>
 
-        <div className="plan-right">
+        <div
+          className={`plan-right${
+            dragKind === 'slot' ? ' drag-target-candidates' : ''
+          }${dragOverCandidates ? ' drag-over' : ''}`}
+          onDragOver={(e) => {
+            if (dragKind !== 'slot' || !dragSourceId) return
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'move'
+            if (!dragOverCandidates) setDragOverCandidates(true)
+          }}
+          onDragLeave={(e) => {
+            // dragleave fires for every child crossed; only flip off
+            // when the cursor actually exits the panel.
+            const related = e.relatedTarget as Node | null
+            if (related && e.currentTarget.contains(related)) return
+            if (dragOverCandidates) setDragOverCandidates(false)
+          }}
+          onDrop={(e) => {
+            if (dragKind !== 'slot' || !dragSourceId) return
+            e.preventDefault()
+            const slot = (items ?? []).find((it) => it.id === dragSourceId)
+            if (slot) {
+              void performIntent(compileClearSlot(slot, items ?? []))
+            }
+            endDrag()
+          }}
+        >
+      {dragKind === 'slot' && (
+        <div className="candidates-drop-hint" aria-hidden>
+          <span className="candidates-drop-icon">↩</span>
+          <span>Drop to return this song to candidates</span>
+        </div>
+      )}
       {candidates.length === 0 && (
         <EmptyState
           icon="sparkle"
@@ -821,7 +839,17 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                           <Icon name="check" size={12} />
                           in library
                         </span>
-                        {c.song!.lastScheduledAt ? (
+                        {c.enrichmentPending ? (
+                          // PlanItem doesn't carry lastScheduledAt — we
+                          // fetch it via getSong on eviction-mint.
+                          // Suppress the "never played" lie while in
+                          // flight. On fetch failure the flag stays
+                          // true forever so the chip stays hidden —
+                          // truthful beats best-effort.
+                          <span className="chip chip-checking">
+                            loading history…
+                          </span>
+                        ) : c.song!.lastScheduledAt ? (
                           (() => {
                             const recent = playedWithinDays(
                               c.song!.lastScheduledAt,
@@ -844,8 +872,18 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                             )
                           })()
                         ) : (
-                          <span className="chip chip-time chip-never">
-                            never played
+                          // null lastScheduledAt after enrichment +
+                          // retry has settled. Could mean: genuinely
+                          // never scheduled, scheduled only in other
+                          // service types (PCO scopes this field),
+                          // or PCO's index never caught up. "no
+                          // scheduling found" is honest in all three
+                          // cases; "never played" was the lie.
+                          <span
+                            className="chip chip-time chip-never"
+                            title="Planning Center didn't return a scheduling date for this song. It may genuinely not have been scheduled, or the schedule index hasn't caught up yet."
+                          >
+                            no scheduling found
                           </span>
                         )}
                         {c.song!.ccliNumber && (
