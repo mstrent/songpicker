@@ -351,14 +351,16 @@ page.
 - **Feature branch + PR for anything non-trivial.** Typo fixes and
   one-line copy tweaks can land on `main`; logic changes, new
   files, prompt edits, dependency bumps go through a branch + PR.
-  Branch protection enforces this server-side. Squash-merge so
-  `main` stays one-commit-per-PR — the existing terse commit-
-  message style assumes that shape.
+  This is a self-discipline rule, not a server-side gate — GitHub
+  doesn't enforce branch protection on free private repos.
+  Squash-merge so `main` stays one-commit-per-PR (the existing
+  terse commit-message style assumes that shape).
 - **CI runs lint, test, SPA build, and functions build on every PR
-  and push to `main`** (`.github/workflows/ci.yml`). Failures
-  block merge. Don't disable a check to make it pass — fix the
-  underlying problem or back out the change. CI never deploys;
-  deploys stay manual.
+  and push to `main`** (`.github/workflows/ci.yml`). Red CI on a
+  PR means don't merge; red CI on `main` means revert or fix
+  forward immediately. Don't disable a check to make it pass —
+  fix the underlying problem or back out the change. CI never
+  deploys; deploys stay manual.
 - **Lazy migration at the read boundary, not migration scripts.**
   When a Firestore document shape changes (candidate model, session
   model, prompt config), handle old data in the read path. The
