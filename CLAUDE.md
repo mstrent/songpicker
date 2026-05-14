@@ -1,4 +1,26 @@
-# Songpicker — Claude conventions
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Commands
+
+- `npm run dev` — Vite + Functions tsc-watch + Firebase emulators (functions + firestore), single Ctrl-C exits all three. **Wait** for "export complete" — pressing Ctrl-C again corrupts the emulator export at `.emulator-data/`.
+- `npm run build` — `tsc -b && vite build` (SPA). Functions build separately: `npm --prefix functions run build`.
+- `npm run lint` — ESLint over the repo.
+- `npm test` — Vitest, in-process, fast. Watcher: `npm run test:watch`.
+- Run a single test file: `npm test -- src/lib/planActions/resolver.test.ts`.
+- Filter by test name: `npm test -- -t "swap"`.
+- `npm run deploy` — SPA build + `firebase deploy` (hosting + functions + firestore rules).
+- Node 22 only (`.nvmrc`). `nvm use` in any new shell.
+
+Testable surface: pure helpers, the slot-state resolver, the executor (with mocked callables), and the `usePlanData` / `useCandidatePool` hooks. We don't render-test PlanDetail for state correctness.
+
+## Repo shape
+
+- `src/` — React SPA (Vite + TS). `App.tsx` is auth gate + hash router; `components/PlanDetail.tsx` composes `usePlanData` (plan-side) and `useCandidatePool` (songpicker-side); `lib/planActions/` holds the resolver + executor + helpers; `lib/callables.ts` wraps typed Cloud Function clients.
+- `functions/src/` — Cloud Functions (Gen 2, TS, Node 22). `index.ts` exports all callables; `pco/` is the PCO REST client (plain fetch, no SDK); `ai/` holds the Anthropic provider + `buildUserMessage`; `prompts.ts` has the hardcoded fallbacks; `sessions.ts` persists the candidate pool; `slotPlaceholders.ts` reconciles the per-plan restore-title map.
+- `docs/unification-plan.md` — active refactor toward the architecture below; check the current phase before redesigning slot-state code.
+- `README.md` — user-facing overview, callable-function table, PCO endpoint table, first-time setup. Read it once; don't duplicate its contents here.
 
 ## Architecture philosophy
 
@@ -318,6 +340,62 @@ page.
 - `functions/.secret.local` for emulator-time secret values
   (`PCO_APP_ID`, `PCO_SECRET`, `ANTHROPIC_API_KEY`). Bootstrap from
   prod with `firebase functions:secrets:access <NAME>`. Gitignored.
+
+## Shipping practices
+
+- **Deploy is gated on lint + test.** `npm run deploy` runs
+  `npm run lint && npm test && npm run build && firebase deploy`.
+  If lint or tests fail, the deploy aborts. Don't work around this
+  by invoking `firebase deploy` directly — fix the failure or back
+  out the change.
+- **Feature branch + PR for anything non-trivial.** Typo fixes and
+  one-line copy tweaks can land on `main`; logic changes, new
+  files, prompt edits, dependency bumps go through a branch + PR.
+  Branch protection enforces this server-side. Squash-merge so
+  `main` stays one-commit-per-PR — the existing terse commit-
+  message style assumes that shape.
+- **CI runs lint, test, SPA build, and functions build on every PR
+  and push to `main`** (`.github/workflows/ci.yml`). Failures
+  block merge. Don't disable a check to make it pass — fix the
+  underlying problem or back out the change. CI never deploys;
+  deploys stay manual.
+- **Lazy migration at the read boundary, not migration scripts.**
+  When a Firestore document shape changes (candidate model, session
+  model, prompt config), handle old data in the read path. The
+  `'shortlist'` → `'pending'` sanitizer in
+  `functions/src/sessions.ts` is the canonical example. Reasons:
+  the data set is one user, lazy migration is simpler to reason
+  about, and the sanitizer doubles as documentation of what
+  changed. Don't write one-off backfill scripts.
+- **Dependabot opens weekly bumps** for root npm, `functions/`
+  npm, and `github-actions` (`.github/dependabot.yml`). PRs flow
+  through CI so a breaking bump fails loudly before merge.
+
+## Testing as we go
+
+The testable surface (pure helpers, resolver, executor with mocked
+deps, hooks) is defined in the architecture-philosophy section
+above. These rules govern how the suite grows over time:
+
+- **Every bug fix ships with the regression test that would have
+  caught it.** Build the suite along actual failure lines, not
+  imagined ones. The test goes in the same PR as the fix.
+- **Test against the shared layer when two paths converge.** AI
+  and UI both compile to `Assignment[]` and feed the resolver —
+  the test goes against the resolver, not against
+  `compileAiAssignments` and `compileDndAssignments` separately.
+  Corollary to "prefer breaking both paths with the same bug."
+- **Mock at the client boundary, not over the wire.** No tests
+  against real PCO or real Anthropic. `PcoClient` and `AiProvider`
+  are the mocking seams. Network tests are flaky, slow, and burn
+  rate-limit budget for no real coverage gain at this scale.
+- **AI prompt-structure changes get a regression test.** When you
+  touch `prompts.ts`, `buildUserMessage`, or `renderCandidates`,
+  pin the structural shape (blocks present, order, cache-
+  breakpoint position) for a known input. Not a brittle snapshot
+  — a structural assertion. AI prompt regressions are uniquely
+  expensive: token bloat, cache misses, or weird tool calls don't
+  fail loudly, they just degrade silently.
 
 ## SPA patterns
 
