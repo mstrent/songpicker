@@ -12,15 +12,9 @@ import {
 } from '../lib/api'
 import { Icon } from './Icon'
 
-const COPY: Record<PromptType, { label: string; help: string }> = {
-  role: {
-    label: 'AI persona (system-wide default)',
-    help: "What users see in their AI persona editor when they haven't set their own override. Save blank to fall back to the hardcoded default below.",
-  },
-  structure: {
-    label: 'AI service-flow prompt (system-wide default)',
-    help: "What users see in their AI service-flow editor when they haven't set their own override. Save blank to fall back to the hardcoded default below.",
-  },
+const PROMPT_LABEL: Record<PromptType, string> = {
+  role: 'AI persona (system-wide default)',
+  structure: 'AI service-flow prompt (system-wide default)',
 }
 
 export function AdminPage() {
@@ -70,15 +64,9 @@ export function AdminPage() {
       >
         ← Back
       </a>
-      <h2>
-        <span className="sparkle" aria-hidden>✨</span>
-        <span className="gradient-text">Admin · AI defaults</span>
-      </h2>
-      <p className="muted">
-        Edit the system-wide defaults that apply when individual users
-        haven't set their own. User-level and per-plan overrides still
-        take precedence.
-      </p>
+      <h2>Admin</h2>
+
+      <AccessSection />
 
       <AdminPromptSection
         type="role"
@@ -91,123 +79,92 @@ export function AdminPage() {
         onSaved={() => void refresh()}
       />
 
-      <section className="admin-section read-only">
-        <h3>Technical requirements (read-only)</h3>
-        <p className="help">
-          Always appended to the AI persona before being sent as the
-          model's system message. Hidden from regular users; shown here
-          so admins can see exactly what the model is asked to enforce.
-        </p>
-        <details className="hardcoded-display">
-          <summary>View technical requirements</summary>
-          <pre>{config.technical}</pre>
-        </details>
-      </section>
-
-      <section className="admin-section read-only">
-        <h3>AI tooling prompts (read-only)</h3>
-        <p className="help">
-          Description text the AI sees for each of its tools, plus the
-          per-turn nudge appended when an auto-refresh fires. Not
-          editable from this UI — change these in
-          <code> functions/src/ai/anthropic.ts</code> (tool descriptions)
-          or <code>functions/src/ai/userMessage.ts</code> (auto-refresh
-          nudge) and redeploy. Surfaced here so admins can see exactly
-          what shapes the model's tool-choice and per-turn behavior.
-        </p>
-        {config.tooling.tools.map((t) => (
-          <React.Fragment key={t.name}>
+      <section className="admin-section read-only admin-reference">
+        <details>
+          <summary>Reference: prompts &amp; tool schemas (read-only)</summary>
+          <div className="admin-reference-body">
+            <h4>Technical requirements</h4>
             <details className="hardcoded-display">
-              <summary>
-                <code>{t.name}</code> tool description
-              </summary>
-              <pre>{t.description}</pre>
+              <summary>View technical requirements</summary>
+              <pre>{config.technical}</pre>
+            </details>
+
+            <h4>AI tooling prompts</h4>
+            {config.tooling.tools.map((t) => (
+              <React.Fragment key={t.name}>
+                <details className="hardcoded-display">
+                  <summary>
+                    <code>{t.name}</code> tool description
+                  </summary>
+                  <pre>{t.description}</pre>
+                </details>
+                <details className="hardcoded-display">
+                  <summary>
+                    <code>{t.name}</code> input schema{' '}
+                    <em>(field descriptions)</em>
+                  </summary>
+                  <pre>{JSON.stringify(t.inputSchema, null, 2)}</pre>
+                </details>
+              </React.Fragment>
+            ))}
+            <details className="hardcoded-display">
+              <summary>Auto-refresh nudge</summary>
+              <pre>{config.tooling.autoRefreshNudge}</pre>
             </details>
             <details className="hardcoded-display">
               <summary>
-                <code>{t.name}</code> input schema{' '}
+                Chorus snippet guidance{' '}
+                <em>(embedded in propose_songs and classify_song)</em>
+              </summary>
+              <pre>{config.tooling.chorusSnippetGuidance}</pre>
+            </details>
+
+            <h4>Song classifier prompts</h4>
+            <details className="hardcoded-display">
+              <summary>Classifier system prompt</summary>
+              <pre>{config.tooling.classifier.systemPrompt}</pre>
+            </details>
+            <details className="hardcoded-display">
+              <summary>
+                <code>{config.tooling.classifier.tool.name}</code> tool description
+              </summary>
+              <pre>{config.tooling.classifier.tool.description}</pre>
+            </details>
+            <details className="hardcoded-display">
+              <summary>
+                <code>{config.tooling.classifier.tool.name}</code> input schema{' '}
                 <em>(field descriptions)</em>
               </summary>
-              <pre>{JSON.stringify(t.inputSchema, null, 2)}</pre>
+              <pre>
+                {JSON.stringify(config.tooling.classifier.tool.inputSchema, null, 2)}
+              </pre>
             </details>
-          </React.Fragment>
-        ))}
-        <details className="hardcoded-display">
-          <summary>Auto-refresh nudge</summary>
-          <pre>{config.tooling.autoRefreshNudge}</pre>
-        </details>
-        <details className="hardcoded-display">
-          <summary>
-            Chorus snippet guidance{' '}
-            <em>(embedded in propose_songs and classify_song)</em>
-          </summary>
-          <pre>{config.tooling.chorusSnippetGuidance}</pre>
+
+            <h4>Per-turn prompt preview</h4>
+            <details className="hardcoded-display">
+              <summary>
+                Composed system prompt{' '}
+                <em>(default role + technical requirements)</em>
+              </summary>
+              <pre>{config.tooling.composedSystemPromptPreview}</pre>
+            </details>
+            <details className="hardcoded-display">
+              <summary>
+                Sample user message — stable half{' '}
+                <em>(prompt-cached, 1h TTL)</em>
+              </summary>
+              <pre>{config.tooling.sampleUserMessage.stable}</pre>
+            </details>
+            <details className="hardcoded-display">
+              <summary>
+                Sample user message — volatile half{' '}
+                <em>(fresh each turn)</em>
+              </summary>
+              <pre>{config.tooling.sampleUserMessage.volatile}</pre>
+            </details>
+          </div>
         </details>
       </section>
-
-      <section className="admin-section read-only">
-        <h3>Song classifier prompts (read-only)</h3>
-        <p className="help">
-          Fires once per song when a candidate is minted from a slot
-          eviction. Single Sonnet call returns slot labels + optional
-          chorus snippet. Edit in
-          <code> functions/src/ai/anthropic.ts</code>.
-        </p>
-        <details className="hardcoded-display">
-          <summary>Classifier system prompt</summary>
-          <pre>{config.tooling.classifier.systemPrompt}</pre>
-        </details>
-        <details className="hardcoded-display">
-          <summary>
-            <code>{config.tooling.classifier.tool.name}</code> tool description
-          </summary>
-          <pre>{config.tooling.classifier.tool.description}</pre>
-        </details>
-        <details className="hardcoded-display">
-          <summary>
-            <code>{config.tooling.classifier.tool.name}</code> input schema{' '}
-            <em>(field descriptions)</em>
-          </summary>
-          <pre>
-            {JSON.stringify(config.tooling.classifier.tool.inputSchema, null, 2)}
-          </pre>
-        </details>
-      </section>
-
-      <section className="admin-section read-only">
-        <h3>Per-turn prompt preview (read-only)</h3>
-        <p className="help">
-          What the model receives on every suggester turn. The system
-          prompt is assembled from the resolved persona plus the
-          technical requirements; the user message is rebuilt from
-          current plan state. Both are shown here with placeholder
-          dynamic values so admins can see the exact structure without
-          needing a live session.
-        </p>
-        <details className="hardcoded-display">
-          <summary>
-            Composed system prompt{' '}
-            <em>(default role + technical requirements)</em>
-          </summary>
-          <pre>{config.tooling.composedSystemPromptPreview}</pre>
-        </details>
-        <details className="hardcoded-display">
-          <summary>
-            Sample user message — stable half{' '}
-            <em>(prompt-cached, 1h TTL)</em>
-          </summary>
-          <pre>{config.tooling.sampleUserMessage.stable}</pre>
-        </details>
-        <details className="hardcoded-display">
-          <summary>
-            Sample user message — volatile half{' '}
-            <em>(fresh each turn)</em>
-          </summary>
-          <pre>{config.tooling.sampleUserMessage.volatile}</pre>
-        </details>
-      </section>
-
-      <AccessSection />
     </div>
   )
 }
@@ -250,15 +207,6 @@ function AccessSection() {
   return (
     <section className="admin-section">
       <h3>Access lists</h3>
-      <p className="help">
-        Who can sign in (Allowed) and who can edit system-wide config
-        (Admins). Entries can be exact emails (<code>name@example.com</code>)
-        or domain wildcards (<code>@example.com</code>). The effective
-        list is the union of the two columns below: <em>break-glass</em>
-        entries baked into <code>functions/.env</code> at deploy time
-        are always honored, so removing every Firestore admin can't
-        lock you out.
-      </p>
       {error && <div className="error">{error}</div>}
       {config === null ? (
         <p className="muted">Loading…</p>
@@ -432,7 +380,6 @@ function AdminPromptSection({
   }
   const [saving, setSaving] = useState<'save' | 'reset' | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const copy = COPY[type]
 
   async function save(value: string, mode: 'save' | 'reset') {
     setSaving(mode)
@@ -452,8 +399,7 @@ function AdminPromptSection({
 
   return (
     <section className="admin-section">
-      <h3>{copy.label}</h3>
-      <p className="help">{copy.help}</p>
+      <h3>{PROMPT_LABEL[type]}</h3>
       <textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}

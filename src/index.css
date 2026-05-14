@@ -1919,6 +1919,52 @@ textarea {
   color: var(--fg);
 }
 
+/* Reference wrapper: collapses the four read-only prompt sections into
+   one expandable section, keeping the page short by default. The outer
+   <details>'s <summary> is styled as a section heading; inner sub-
+   sections use <h4> instead of the section-level <h3>. */
+.admin-section.admin-reference {
+  padding-top: 1rem;
+  padding-bottom: 1rem;
+}
+.admin-reference > details > summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+.admin-reference > details > summary::-webkit-details-marker {
+  display: none;
+}
+.admin-reference > details > summary::before {
+  content: '';
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-right: 1.75px solid currentColor;
+  border-bottom: 1.75px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+}
+.admin-reference > details[open] > summary::before {
+  transform: rotate(45deg);
+}
+.admin-reference-body {
+  margin-top: 0.5rem;
+}
+.admin-reference-body h4 {
+  margin: 1.25rem 0 0.4rem;
+  font-size: 0.92rem;
+}
+.admin-reference-body > h4:first-child {
+  margin-top: 0.75rem;
+}
+
 /* Access lists (admin-managed allowed/admin email rosters). Two
    columns: env break-glass entries on the left (read-only, dimmed) and
    Firestore-stored entries on the right with add/remove controls. */
