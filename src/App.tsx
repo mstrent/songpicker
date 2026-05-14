@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { onAuthStateChanged, type User } from 'firebase/auth'
 import { auth } from './lib/firebase'
 import { logOut } from './lib/auth'
-import { getAdminStatus, getPcoStatus } from './lib/api'
+import { getAdminStatus, getPcoStatus, recordSignIn } from './lib/api'
 import { config } from './config'
 import { SignIn } from './components/SignIn'
 import { PlanList } from './components/PlanList'
@@ -27,6 +27,7 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const userMenuRef = useRef<HTMLDivElement>(null)
+  const recordedSignInUidRef = useRef<string | null>(null)
   const hash = useHashRoute()
 
   useEffect(() => {
@@ -47,7 +48,21 @@ export default function App() {
     }
   }, [userMenuOpen])
 
-  useEffect(() => onAuthStateChanged(auth, setUser), [])
+  useEffect(() => {
+    return onAuthStateChanged(auth, (next) => {
+      setUser(next)
+      // Fire one recordSignIn per real sign-in transition. StrictMode's
+      // double-invoke is harmless because the second pass observes the
+      // same uid and short-circuits. Errors are swallowed: a missed
+      // metric write must never disrupt sign-in.
+      if (next && recordedSignInUidRef.current !== next.uid) {
+        recordedSignInUidRef.current = next.uid
+        recordSignIn().catch(() => {})
+      } else if (!next) {
+        recordedSignInUidRef.current = null
+      }
+    })
+  }, [])
 
   const refreshPcoStatus = useCallback(async () => {
     try {

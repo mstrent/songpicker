@@ -19,6 +19,7 @@ import {
 } from './ai/anthropic'
 import { AUTO_REFRESH_NUDGE, buildSampleUserMessage } from './ai/userMessage'
 import type { AiCandidate, StreamChunk } from './ai/types'
+import { loadAllMetrics, recordMetric } from './metrics'
 import { PcoClient } from './pco/client'
 import { pMap } from './pco/concurrency'
 import {
@@ -200,7 +201,8 @@ export const listPlans = onCall(async (req) => {
 })
 
 export const getPlanContext = onCall(async (req) => {
-  const { uid } = await requireAllowed(req)
+  const { uid, email } = await requireAllowed(req)
+  void recordMetric(uid, email, 'plansOpened')
   const { serviceTypeId, planId } = req.data as {
     serviceTypeId?: string
     planId?: string
@@ -335,7 +337,8 @@ export const suggestSongs = onCall<
 >(
   { secrets: [ANTHROPIC_API_KEY] },
   async (req, res) => {
-    const { uid } = await requireAllowed(req)
+    const { uid, email } = await requireAllowed(req)
+    void recordMetric(uid, email, 'aiSuggestions')
     const {
       theme,
       userMessage,
@@ -606,7 +609,8 @@ export const saveSession = onCall(async (req) => {
 // commits those alongside the song id so the slot lands fully
 // populated, mirroring what the PCO web UI does on song-pick.
 export const placeSongInSlot = onCall(async (req) => {
-  const { uid } = await requireAllowed(req)
+  const { uid, email } = await requireAllowed(req)
+  void recordMetric(uid, email, 'slotCommits')
   const {
     serviceTypeId,
     planId,
@@ -673,7 +677,8 @@ export const placeSongInSlot = onCall(async (req) => {
 // Intent-shaped clear endpoint: "this slot should be empty." Renames
 // the older clearSlot for consistency with placeSongInSlot.
 export const clearSongFromSlot = onCall(async (req) => {
-  const { uid } = await requireAllowed(req)
+  const { uid, email } = await requireAllowed(req)
+  void recordMetric(uid, email, 'slotClears')
   const { serviceTypeId, planId, slotItemId, restoreTitle } = req.data as {
     serviceTypeId?: string
     planId?: string
@@ -820,4 +825,17 @@ export const removeAccessEntry = onCall(async (req) => {
   }
   const stored = await removeAccessEntryInternal(which, entry)
   return { stored }
+})
+
+// Fired by the SPA on each Firebase Auth sign-in transition.
+export const recordSignIn = onCall(async (req) => {
+  const { uid, email } = await requireAllowed(req)
+  await recordMetric(uid, email, 'signIns')
+  return { ok: true }
+})
+
+export const getMetrics = onCall(async (req) => {
+  await requireAdmin(req)
+  const users = await loadAllMetrics()
+  return { users }
 })
