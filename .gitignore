@@ -16,7 +16,7 @@ functions/.env
 serviceAccountKey*.json
 
 # Claude Code local state
-.claude/
+.claude/settings.local.json
 
 # Editor / OS
 .DS_Store
