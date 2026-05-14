@@ -485,3 +485,25 @@ export const removeAccessEntry = httpsCallable<
   { list: AccessList; entry: string },
   { stored: { allowedEmails: string[]; adminEmails: string[] } }
 >(functions, 'removeAccessEntry')
+
+export interface UserMetricsView {
+  uid: string
+  email: string
+  firstSeenAt: string | null
+  lastSeenAt: string | null
+  signIns: number
+  plansOpened: number
+  aiSuggestions: number
+  slotCommits: number
+  slotClears: number
+}
+
+export const recordSignIn = httpsCallable<void, { ok: boolean }>(
+  functions,
+  'recordSignIn',
+)
+
+export const getMetrics = httpsCallable<void, { users: UserMetricsView[] }>(
+  functions,
+  'getMetrics',
+)
