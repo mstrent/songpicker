@@ -1092,29 +1092,29 @@ textarea {
 }
 
 /* Suggestions panel becomes a drop target when a filled slot is being
-   dragged — drop to clear the slot (the song returns to candidates). */
-.plan-right.drag-target-candidates {
-  outline: 2px dashed var(--accent);
-  outline-offset: -6px;
-  border-radius: 12px;
-}
-.plan-right.drag-target-candidates.drag-over {
-  outline-style: solid;
-  background: var(--accent-soft);
-}
+   dragged — drop to clear the slot (the song returns to candidates).
+   The hint banner is the sole visual indicator; no panel-level outline
+   so the dashed borders don't stack. */
 .candidates-drop-hint {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  padding: 0.6rem 0.9rem;
-  margin-bottom: 0.4rem;
+  padding: 0.7rem 0.9rem;
+  margin-bottom: 0.6rem;
   font-weight: 600;
   font-size: 0.92rem;
   color: var(--accent);
-  border: 1px dashed var(--accent);
+  border: 1.5px dashed var(--accent);
   border-radius: 10px;
   background: var(--surface);
+  transition: background 0.15s ease, border-style 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.plan-right.drag-target-candidates.drag-over .candidates-drop-hint {
+  border-style: solid;
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .candidates-drop-icon {
   font-size: 1.1rem;
