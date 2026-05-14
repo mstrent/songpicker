@@ -96,7 +96,9 @@ Testable surface: pure helpers, the slot-state resolver, the executor (with mock
   product fit yet. Auto-refine signaling fires only on UI rejects
   because AI rejects shouldn't trigger another AI turn.
   Document such asymmetries explicitly so the next person doesn't
-  "fix" them.
+  "fix" them — this includes the `code-simplifier` subagent / `simplify`
+  skill, which should treat documented asymmetries as load-bearing
+  rather than candidates for consolidation.
 - See `docs/unification-plan.md` for the active refactor toward this
   architecture and which phase we're in.
 
@@ -194,6 +196,11 @@ These are non-obvious things we've burned time on; don't relearn them.
   `PcoClient.reorderPlanItems` for any future explicit reorder UI.
 
 ## Per-user data model (Firestore, all admin-SDK-only)
+
+Inspection-only via Firebase MCP (see Tooling). Production code paths
+must go through the typed callables (`savePcoCredentials`,
+`getAccessConfig`, etc.) — they enforce validation that the MCP tools
+bypass.
 
 - `pcoCredentials/{uid}` — `{ appId, secret, updatedAt }`. Written by
   `savePcoCredentials` (validated by calling PCO first), read by
@@ -324,6 +331,24 @@ page.
   `HttpsError('aborted', message)` so the client doesn't see
   `INTERNAL` for AI-side failures.
 
+## Tooling (installed MCP plugins)
+
+- **GitHub MCP** (`mcp__plugin_github_github__*`) for read-only
+  GitHub ops — browsing PRs/issues/commits, viewing files at refs,
+  code review reads. **Writes still go through `gh` CLI** per the
+  system prompt: PR creation, comments, merges, and the post-merge
+  cleanup ritual all rely on its HEREDOC patterns for clean bodies,
+  and the squash-merge / one-commit-per-PR convention assumes that
+  shape.
+- **Firebase MCP** (`mcp__plugin_firebase_firebase__*`) for ad-hoc
+  inspection — Firestore docs, Auth users, deploy state, function
+  logs. Not for production code paths; see "Per-user data model"
+  for why the typed callables stay the only client surface.
+- **Context7** (`mcp__plugin_context7_context7__*`) for current
+  library/framework docs — React, Vite, Firebase SDK, Anthropic
+  SDK, Tailwind, etc. Prefer over WebSearch / WebFetch; training
+  data lags real releases.
+
 ## Dev workflow
 
 - **Node 22** (`.nvmrc`). `nvm use` in any shell working on this
@@ -414,7 +439,9 @@ above. These rules govern how the suite grows over time:
   prompt pills. Don't re-add `ai-context-marker` decorations onto
   every input that feeds the AI — Matt asked us to strip those
   because the whole flow is so obviously AI-driven that the icons
-  just added noise.
+  just added noise. The `frontend-design` skill defaults to
+  distinctive, AI-flavored aesthetics — when using it on this repo,
+  this rule overrides those defaults.
 - **Per-plan DnD uses HTML5 drag-and-drop with our own ghost.**
   Quirks worth remembering:
   - Anchor (`<a>`) children of draggable rows must set
