@@ -19,4 +19,4 @@ export const ADMIN_EMAILS = defineString('ADMIN_EMAILS', { default: '' })
 // Comma-separated PCO service type names to include in listPlans.
 // Empty string = include all (no filter).
 // Example: "Sunday Services" or "Sunday Services,Saturday Service"
-export const INCLUDED_SERVICE_TYPES = defineString('INCLUDED_SERVICE_TYPES', { default: '' })
+export const INCLUDED_SERVICE_TYPES = defineString('INCLUDED_SERVICE_TYPES', { default: 'Sunday Services' })
