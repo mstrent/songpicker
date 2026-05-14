@@ -198,7 +198,7 @@ function MetricsSection() {
       <h3>Usage</h3>
       {error && <div className="error">{error}</div>}
       {users === null ? (
-        <p className="muted">Loading…</p>
+        error ? null : <p className="muted">Loading…</p>
       ) : users.length === 0 ? (
         <p className="muted">No activity recorded yet.</p>
       ) : (

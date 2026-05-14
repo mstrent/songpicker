@@ -22,7 +22,7 @@ vi.mock('firebase-admin/firestore', () => ({
   },
 }))
 
-import { buildMetricUpdate, METRIC_ACTIONS } from './metrics'
+import { buildMetricUpdate, METRIC_ACTIONS, recordMetric } from './metrics'
 
 describe('buildMetricUpdate', () => {
   it('first write (no existing doc) sets firstSeenAt and increments the action counter', () => {
@@ -59,5 +59,22 @@ describe('buildMetricUpdate', () => {
       }
       expect(out[action]).toBe(INCREMENT_1)
     }
+  })
+})
+
+describe('recordMetric', () => {
+  // The vi.mock above makes getFirestore() throw. recordMetric must
+  // swallow that and log a warning — a flaky Firestore write must
+  // never propagate into the user-facing callable.
+  it('swallows Firestore errors and logs a warning instead of throwing', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await expect(
+      recordMetric('uid-1', 'matt@thetrents.org', 'signIns'),
+    ).resolves.toBeUndefined()
+    expect(warn).toHaveBeenCalledWith(
+      '[metrics] write failed:',
+      expect.any(Error),
+    )
+    warn.mockRestore()
   })
 })
