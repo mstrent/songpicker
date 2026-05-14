@@ -34,11 +34,11 @@ const MODEL = 'claude-sonnet-4-6'
 export const CHORUS_SNIPPET_GUIDANCE = `Worship titles collide heavily across catalogues. The same title — especially single-word or very short ones — can name multiple distinct songs by different authors, with completely different lyrics. A title's exact words may also appear as a PHRASE inside an unrelated song's lyrics, where they function as content rather than identification.
 
 Rules for chorus snippets:
-- Include the snippet ONLY when you can confidently match lyrics to THIS specific title + author combination. The author tag (and CCLI when present) is the disambiguator — use it.
+- Include the snippet ONLY when you can confidently match lyrics to THIS specific title. The author (and CCLI when present) is the disambiguator — use it.
 - Knowing lyrics for a DIFFERENT song that shares this title is NOT a reason to include them here. Omit instead.
 - Don't blend lyrics from same-titled songs.
-- If a title's words appear as lyric content inside a different song, don't quote those lines here — that other song's lyrics are not lyrics for this title.
-- A wrong snippet actively misleads the user. Omit > guess. Empty is the correct answer whenever you are not certain you are recalling THIS author's song.`
+- If a title's words appear as lyric content inside a different song, that is NOT a match.
+- Incorrect lyrics actively misleads the user. If you are not confident in the exact lyrics, respond with 'UNKNOWN' instead of guessing.`
 
 // CLAUDE.md says ancillary calls default to Haiku, and the slot half
 // of this classifier (contextual reasoning) is well-served by Haiku
