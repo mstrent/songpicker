@@ -44,6 +44,7 @@ import {
   saveUserTheme,
   type PromptType,
 } from './prompts'
+import { loadAllMetrics, recordMetric } from './metrics'
 import {
   loadPickerSession,
   savePickerSession,
@@ -820,4 +821,22 @@ export const removeAccessEntry = onCall(async (req) => {
   }
   const stored = await removeAccessEntryInternal(which, entry)
   return { stored }
+})
+
+// Fired by the SPA on every Firebase Auth transition to signed-in.
+// Counts as a fresh sign-in. requireAllowed runs first so the
+// metric is never written for a denied caller. Returns `{ ok: true }`
+// to keep the SPA's existing call/await pattern uniform.
+export const recordSignIn = onCall(async (req) => {
+  const { uid, email } = await requireAllowed(req)
+  await recordMetric(uid, email, 'signIns')
+  return { ok: true }
+})
+
+// Admin-only roll-up dump for the Admin page. Returns
+// { users: UserMetricsView[] } sorted by lastSeenAt desc.
+export const getMetrics = onCall(async (req) => {
+  await requireAdmin(req)
+  const users = await loadAllMetrics()
+  return { users }
 })
