@@ -21,7 +21,7 @@ export function PlanList({ currentUserName, currentUserEmail }: Props) {
       try {
         const res = await listPlans()
         if (!cancelled) setPlans(res.data.plans)
-      } catch (e: unknown) {
+      } catch {
         if (cancelled) return
         await new Promise((r) => setTimeout(r, 1500))
         if (cancelled) return

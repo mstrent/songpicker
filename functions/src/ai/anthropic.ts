@@ -321,6 +321,7 @@ export class AnthropicProvider implements AiProvider {
           if (isContentFilterError(e2)) {
             throw new Error(
               "Anthropic's safety filter blocked the response twice in a row. This is usually transient — try again, or rephrase your request.",
+              { cause: e2 },
             )
           }
           throw e2
@@ -492,7 +493,7 @@ function parseSetSlotContents(
     const r = raw as Record<string, unknown>
     const idx = typeof r.slotIndex === 'number' ? Math.floor(r.slotIndex) : NaN
     if (!Number.isFinite(idx) || idx < 1) continue
-    let candidateId: string | null = null
+    let candidateId: string | null
     if (r.candidateId === null) candidateId = null
     else if (typeof r.candidateId === 'string' && r.candidateId.trim())
       candidateId = r.candidateId

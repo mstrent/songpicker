@@ -180,6 +180,9 @@ export function usePlanData(
   // Plan load (re-runs on plan switch).
   useEffect(() => {
     let cancelled = false
+    // Reset to loading-state synchronously so the UI doesn't flash prior-plan
+    // data before getPlanContext resolves.
+    /* eslint-disable react-hooks/set-state-in-effect */
     setLoadError(null)
     setPlan(null)
     setNotes(null)
@@ -187,6 +190,7 @@ export function usePlanData(
     setSlotPlaceholders({})
     setThemeSource('')
     setNotesSource('')
+    /* eslint-enable react-hooks/set-state-in-effect */
     themeInitialized.current = false
     notesInitialized.current = false
     userTouchedTheme.current = false

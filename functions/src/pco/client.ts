@@ -101,6 +101,7 @@ export class PcoClient {
         `Planning Center ${path}: invalid JSON response — ${
           (e as Error).message
         }: ${text.slice(0, 500)}`,
+        { cause: e },
       )
     }
   }

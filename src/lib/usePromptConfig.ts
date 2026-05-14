@@ -28,6 +28,9 @@ export function usePromptConfig(type: PromptType, planId: string) {
   }, [type, planId])
 
   useEffect(() => {
+    // Initial + plan-switch load of the prompt config. refresh() ends in
+    // setConfig/setError but the call itself is async — the rule can't tell.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh()
   }, [refresh])
 

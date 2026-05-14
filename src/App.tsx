@@ -60,6 +60,8 @@ export default function App() {
 
   useEffect(() => {
     if (user) {
+      // Reset to loading-state on user change, then fan out async fetches.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPcoReady(null)
       setIsAdmin(false)
       void refreshPcoStatus()

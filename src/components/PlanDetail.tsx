@@ -166,6 +166,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   // While any drag is active, follow the cursor with our floating
   // ghost via the document-level dragover event (dragover fires
   // continuously and reports clientX/clientY).
+  const dragGhostActive = dragGhost !== null
   useEffect(() => {
     if (!dragGhost) return
     function onMove(e: DragEvent) {
@@ -179,7 +180,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     }
     document.addEventListener('dragover', onMove)
     return () => document.removeEventListener('dragover', onMove)
-  }, [dragGhost !== null])
+    // Only re-bind when the ghost transitions between active/inactive, not on
+    // every position update. dragGhost is read inside the effect closure but
+    // we deliberately don't depend on its identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragGhostActive])
 
   // Suppress the browser's default drag image so it doesn't compete
   // with our floating ghost (and so users on Chromium/Retina don't see

@@ -308,10 +308,14 @@ export function useCandidatePool(
   // Plan-switch resets pool state.
   useEffect(() => {
     let cancelled = false
+    // Reset all pool slices synchronously so the UI doesn't flash prior-plan
+    // state before the session load resolves.
+    /* eslint-disable react-hooks/set-state-in-effect */
     setCandidates([])
     setMessages([])
     setSessionLoaded(false)
     setRejectedPoolOpen(false)
+    /* eslint-enable react-hooks/set-state-in-effect */
     if (autoRefineTimer.current) {
       clearTimeout(autoRefineTimer.current)
       autoRefineTimer.current = null
