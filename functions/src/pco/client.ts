@@ -1,4 +1,5 @@
 import { pMap } from './concurrency'
+import { titlesMatch } from './titleMatch'
 import type {
   NewItem,
   Plan,
@@ -493,12 +494,14 @@ export class PcoClient {
     // input). `where[title]=` filters, but the matching is fuzzier than
     // documented: searching "Surrender" returns "I Surrender",
     // "I Surrender All", and "Surrender" — i.e., substring/contains, not
-    // exact. So we always filter the API results client-side to true
-    // case-insensitive title equality before returning. When multiple
-    // library entries genuinely share the title (rare), the optional
-    // `opts.author` provides a tiebreaker via author-overlap scoring so
-    // the AI-proposed song doesn't get linked to a same-title-different-
-    // author song just because PCO returned it first.
+    // exact. So we filter the API results client-side via `titlesMatch`,
+    // which normalizes leading articles ("Lion and the Lamb" vs "The
+    // Lion and the Lamb"), curly vs straight apostrophes, and "&" vs
+    // "and" before comparing. When multiple library entries genuinely
+    // share the title (rare), the optional `opts.author` provides a
+    // tiebreaker via author-overlap scoring so the AI-proposed song
+    // doesn't get linked to a same-title-different-author song just
+    // because PCO returned it first.
     const tryTitle = async (title: string): Promise<Song[]> => {
       const trimmed = title.trim()
       if (!trimmed) return []
@@ -533,8 +536,7 @@ export class PcoClient {
         lastScheduledAt: d.attributes.last_scheduled_at,
         lastScheduledShortDates: d.attributes.last_scheduled_short_dates,
       }))
-      const target = trimmed.toLowerCase()
-      const exact = all.filter((s) => s.title.trim().toLowerCase() === target)
+      const exact = all.filter((s) => titlesMatch(s.title, trimmed))
       if (exact.length <= 1 || !opts.author) return exact
       const author = opts.author
       return [...exact].sort(
