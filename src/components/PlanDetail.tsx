@@ -71,6 +71,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setRejectedPoolOpen,
     handleSuggest,
     setDecision,
+    recheckCandidate,
     clearCandidates,
     isCandidateCommitted,
     ensureCandidate,
@@ -975,6 +976,27 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                         <Icon name="x" size={13} />
                         Reject
                       </button>
+
+                      {(c.matchStatus === 'unmatched' ||
+                        c.matchStatus === 'error' ||
+                        c.matchStatus === 'checking') && (
+                        // Only meaningful for not-yet-matched rows. The
+                        // user added the song in Planning Center after
+                        // we first looked; this re-runs the library
+                        // search so a fresh match unlocks Commit.
+                        <button
+                          type="button"
+                          className="decision-btn decision-recheck icon-text"
+                          onClick={() => recheckCandidate(c.id)}
+                          disabled={c.matchStatus === 'checking'}
+                          title="Already added it in Planning Center? Re-check the library."
+                        >
+                          <Icon name="refresh" size={13} />
+                          {c.matchStatus === 'checking'
+                            ? 'Checking…'
+                            : 'Re-check'}
+                        </button>
+                      )}
 
                       {matched && isCommitted && (
                         // Service order on the left is the source of

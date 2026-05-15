@@ -4,6 +4,7 @@ import {
   getSong,
   loadSession,
   saveSession,
+  searchSongs,
   searchSongsBatch,
   suggestSongs,
   type AiAction,
@@ -243,6 +244,12 @@ export interface CandidatePoolApi {
   setRejectedPoolOpen: (open: boolean) => void
   handleSuggest: (opts?: { autoRefresh?: boolean }) => Promise<void>
   setDecision: (id: string, next: Decision) => void
+  /** Re-run the Planning Center library lookup for a single candidate.
+   *  Used when the user added the song to PCO after we first reported
+   *  it as missing — flips matchStatus from `unmatched`/`error` to
+   *  `matched` (with a populated `song` ref) so the normal commit
+   *  path works. No-op on already-matched candidates. */
+  recheckCandidate: (id: string) => void
   clearCandidates: () => void
   appendSystemMessage: (msg: string) => void
   /** True iff this candidate's matched library song is currently
@@ -626,6 +633,53 @@ export function useCandidatePool(
       })
   }
 
+  // Per-candidate library re-check. The user clicked "Re-check" on a
+  // row that came back unmatched (or errored); they've since added
+  // the song in Planning Center and want us to look again. Re-uses
+  // the existing `searchSongs` callable — no new function-side
+  // surface — and the debounced session save persists the new
+  // matchStatus/song.
+  function recheckCandidate(id: string): void {
+    const target = candidates.find((c) => c.id === id)
+    if (!target) return
+    // Already matched? Nothing useful to do.
+    if (target.matchStatus === 'matched') return
+    // Avoid stacking concurrent rechecks on the same row.
+    if (target.matchStatus === 'checking') return
+    setCandidates((prev) =>
+      prev.map((cur) =>
+        cur.id === id
+          ? { ...cur, matchStatus: 'checking' as MatchStatus, error: undefined }
+          : cur,
+      ),
+    )
+    searchSongs({
+      query: target.suggestion.title,
+      ...(target.suggestion.author ? { author: target.suggestion.author } : {}),
+    })
+      .then((res) => {
+        const match = res.data.songs[0]
+        setCandidates((prev) =>
+          prev.map((cur) =>
+            cur.id === id
+              ? match
+                ? { ...cur, matchStatus: 'matched' as MatchStatus, song: match, error: undefined }
+                : { ...cur, matchStatus: 'unmatched' as MatchStatus, error: undefined }
+              : cur,
+          ),
+        )
+      })
+      .catch((e: Error) => {
+        setCandidates((prev) =>
+          prev.map((cur) =>
+            cur.id === id
+              ? { ...cur, matchStatus: 'error' as MatchStatus, error: e.message }
+              : cur,
+          ),
+        )
+      })
+  }
+
   async function handleSuggest(opts?: {
     autoRefresh?: boolean
   }): Promise<void> {
@@ -863,6 +917,7 @@ export function useCandidatePool(
     setRejectedPoolOpen,
     handleSuggest,
     setDecision,
+    recheckCandidate,
     clearCandidates,
     appendSystemMessage,
     isCandidateCommitted,

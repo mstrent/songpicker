@@ -1644,6 +1644,11 @@ textarea {
   color: var(--error);
   border-color: var(--error);
 }
+.candidate .decision-recheck:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
 .candidate .decision-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
