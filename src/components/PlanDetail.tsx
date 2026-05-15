@@ -459,6 +459,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       {displayTitle && (
                         <div className="lookup-row">
                           <SongLookupLinks query={displayTitle} size="sm" />
+                          <LyricsButton
+                            variant="icon"
+                            title={it.songTitle ?? displayTitle}
+                            author={it.songAuthor}
+                          />
                         </div>
                       )}
                     </div>
