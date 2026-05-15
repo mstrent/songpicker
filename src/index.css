@@ -2473,6 +2473,128 @@ a.chip-link:focus-visible {
     animation: none;
   }
 }
+/* Lyrics icon button — used in the slot row's lookup-row and on
+   rejected cards. Matches the .iconbtn-sm dimensions; hover treatment
+   uses --accent so the row stays visually balanced with Spotify /
+   YouTube / PraiseCharts icons. */
+.iconbtn-lyrics:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Labeled "Lyrics" chip — sits inline at the end of the chorus-snippet
+   text on candidate / rejected cards, directly replacing the small
+   `.chip-ai` badge that used to live there. Sized to match the base
+   `.chip` family (pill, small font, tight padding) so the snippet line
+   still reads as a single visual unit. NOT decorated with the AI
+   gradient — LRCLIB lyrics aren't AI-generated, and per CLAUDE.md AI
+   styling is reserved for "explicit AI moments" only. */
+.lyrics-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  background: var(--bg);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  margin-left: 0.4rem;
+  vertical-align: middle;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.lyrics-chip:hover,
+.lyrics-chip:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* Full-screen modal for the lyrics popup. Used by LyricsButton. */
+.lyrics-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.lyrics-modal-card {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: min(640px, 100%);
+  max-height: min(80vh, 720px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+}
+.lyrics-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.lyrics-modal-title {
+  font-size: 0.95rem;
+  line-height: 1.3;
+}
+.lyrics-modal-author {
+  color: var(--muted);
+  font-weight: normal;
+}
+.lyrics-modal-body {
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+.lyrics-text {
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  margin: 0;
+}
+.lyrics-status {
+  color: var(--muted);
+  text-align: center;
+  padding: 24px 0;
+}
+.lyrics-status-error {
+  color: var(--error);
+}
+.lyrics-status-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+.lyrics-status-hint {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0;
+}
+.lyrics-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.lyrics-modal-source {
+  color: var(--muted);
+}
 .iconbtn-pco:hover {
   border-color: #6cb33f;
   background: rgba(108, 179, 63, 0.08);
