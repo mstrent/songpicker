@@ -154,7 +154,7 @@ export function LyricsButton({ title, author, variant }: LyricsButtonProps) {
                 <div className="lyrics-status lyrics-status-empty">
                   <p>Not found on LRCLIB.</p>
                   <p className="lyrics-status-hint">
-                    Try the PraiseCharts link beside this button for chart and lyric resources.
+                    Try PraiseCharts for chart and lyric resources.
                   </p>
                 </div>
               )}
