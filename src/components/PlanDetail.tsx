@@ -14,6 +14,7 @@ import { PromptPill } from './PromptPill'
 import { Icon } from './Icon'
 import { EmptyState } from './EmptyState'
 import { SongLookupLinks } from './SongLookupLinks'
+import { LyricsButton } from './LyricsButton'
 
 type OpenPrompt = 'role' | 'structure' | null
 
@@ -692,13 +693,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       title="AI-sourced lyrics. May be inaccurate."
                     >
                       “{c.suggestion.chorusSnippet}”
-                      <span
-                        className="chip chip-ai"
-                        aria-label="AI-sourced lyrics. May be inaccurate."
-                      >
-                        <Icon name="sparkle" size={10} />
-                        AI
-                      </span>
+                      <LyricsButton
+                        variant="chip"
+                        title={c.song?.title ?? c.suggestion.title}
+                        author={c.song?.author ?? c.suggestion.author ?? null}
+                      />
                     </div>
                   )}
                   <button
@@ -943,13 +942,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       <span className="snippet-quote" aria-hidden>“</span>
                       {c.suggestion.chorusSnippet}
                       <span className="snippet-quote" aria-hidden>”</span>
-                      <span
-                        className="chip chip-ai"
-                        aria-label="AI-sourced lyrics. May be inaccurate."
-                      >
-                        <Icon name="sparkle" size={10} />
-                        AI
-                      </span>
+                      <LyricsButton
+                        variant="chip"
+                        title={c.song?.title ?? c.suggestion.title}
+                        author={c.song?.author ?? c.suggestion.author ?? null}
+                      />
                     </div>
                   )}
                   <div className="decision-row">
