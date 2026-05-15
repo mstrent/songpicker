@@ -144,6 +144,9 @@ export function LyricsButton({ title, author, variant }: LyricsButtonProps) {
               {!loading && !error && result && result.found && result.instrumental && (
                 <p className="lyrics-status">Instrumental — no lyrics.</p>
               )}
+              {!loading && !error && result && result.found && !result.instrumental && !result.plainLyrics && (
+                <p className="lyrics-status">Found on LRCLIB, but no lyric text available.</p>
+              )}
               {!loading && !error && result && result.found && !result.instrumental && result.plainLyrics && (
                 <pre className="lyrics-text">{result.plainLyrics}</pre>
               )}
