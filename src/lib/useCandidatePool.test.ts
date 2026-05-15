@@ -13,6 +13,7 @@ vi.mock('./api', () => {
       Promise.resolve({ data: { candidates: [], messages: [] } }),
     ),
     saveSession: vi.fn(() => Promise.resolve({ data: { ok: true } })),
+    searchSongs: vi.fn(),
     searchSongsBatch: vi.fn(),
     suggestSongs: { stream: vi.fn() },
     getSong: vi.fn(),
@@ -478,6 +479,157 @@ describe('useCandidatePool: clearCandidates', () => {
 
     expect(result.current.candidates).toEqual([])
     expect(result.current.messages).toEqual([])
+  })
+})
+
+describe('useCandidatePool: recheckCandidate', () => {
+  // Persisted shape for a candidate that came back unmatched on first
+  // lookup — fields match the loadSession contract used by other
+  // tests in this file.
+  const unmatched = {
+    id: 'c1',
+    title: 'Surrender',
+    author: 'Marc James',
+    chorusSnippet: null,
+    slots: [],
+    matchStatus: 'unmatched' as const,
+    song: null,
+    error: null,
+    decision: 'pending' as const,
+    addedAt: 0,
+    assignedSlotItemId: null,
+    committedAt: null,
+    priorSlotTitle: null,
+  }
+
+  function newSong() {
+    return {
+      id: 'song-x',
+      title: 'Surrender',
+      author: 'Marc James',
+      ccliNumber: null,
+      themes: null,
+      isHidden: false,
+      lastScheduledAt: null,
+      lastScheduledShortDates: null,
+    }
+  }
+
+  it('flips unmatched → matched when Planning Center now returns the song', async () => {
+    ;vi.mocked(api.loadSession).mockResolvedValue({
+      data: { candidates: [unmatched], messages: [] },
+    })
+    const song = newSong()
+    ;vi.mocked(api.searchSongs).mockResolvedValue({
+      data: { songs: [song] },
+    })
+    const { result } = renderHook(() =>
+      useCandidatePool('plan-1', stubPlanData()),
+    )
+    await waitFor(() => expect(result.current.sessionLoaded).toBe(true))
+
+    await act(async () => {
+      result.current.recheckCandidate('c1')
+    })
+
+    await waitFor(() =>
+      expect(result.current.candidates[0].matchStatus).toBe('matched'),
+    )
+    expect(result.current.candidates[0].song).toEqual(song)
+    expect(api.searchSongs).toHaveBeenCalledWith({
+      query: 'Surrender',
+      author: 'Marc James',
+    })
+  })
+
+  it('stays unmatched when Planning Center still has no hit', async () => {
+    ;vi.mocked(api.loadSession).mockResolvedValue({
+      data: { candidates: [unmatched], messages: [] },
+    })
+    ;vi.mocked(api.searchSongs).mockResolvedValue({
+      data: { songs: [] },
+    })
+    const { result } = renderHook(() =>
+      useCandidatePool('plan-1', stubPlanData()),
+    )
+    await waitFor(() => expect(result.current.sessionLoaded).toBe(true))
+
+    await act(async () => {
+      result.current.recheckCandidate('c1')
+    })
+
+    await waitFor(() =>
+      // The recheck flow flips to 'checking' first; wait until it
+      // settles back to a terminal status.
+      expect(result.current.candidates[0].matchStatus).not.toBe('checking'),
+    )
+    expect(result.current.candidates[0].matchStatus).toBe('unmatched')
+    expect(result.current.candidates[0].song).toBeUndefined()
+  })
+
+  it('marks the candidate as errored when the lookup throws', async () => {
+    ;vi.mocked(api.loadSession).mockResolvedValue({
+      data: { candidates: [unmatched], messages: [] },
+    })
+    ;vi.mocked(api.searchSongs).mockRejectedValue(new Error('PCO down'))
+    const { result } = renderHook(() =>
+      useCandidatePool('plan-1', stubPlanData()),
+    )
+    await waitFor(() => expect(result.current.sessionLoaded).toBe(true))
+
+    await act(async () => {
+      result.current.recheckCandidate('c1')
+    })
+
+    await waitFor(() =>
+      expect(result.current.candidates[0].matchStatus).toBe('error'),
+    )
+    expect(result.current.candidates[0].error).toBe('PCO down')
+  })
+
+  it('is a no-op on an already-matched candidate', async () => {
+    const matched = {
+      ...unmatched,
+      matchStatus: 'matched' as const,
+      song: newSong(),
+    }
+    ;vi.mocked(api.loadSession).mockResolvedValue({
+      data: { candidates: [matched], messages: [] },
+    })
+    const { result } = renderHook(() =>
+      useCandidatePool('plan-1', stubPlanData()),
+    )
+    await waitFor(() => expect(result.current.sessionLoaded).toBe(true))
+
+    act(() => {
+      result.current.recheckCandidate('c1')
+    })
+
+    expect(api.searchSongs).not.toHaveBeenCalled()
+    expect(result.current.candidates[0].matchStatus).toBe('matched')
+  })
+
+  it('omits author from the query when the suggestion has none', async () => {
+    const noAuthor = { ...unmatched, author: null }
+    ;vi.mocked(api.loadSession).mockResolvedValue({
+      data: { candidates: [noAuthor], messages: [] },
+    })
+    ;vi.mocked(api.searchSongs).mockResolvedValue({
+      data: { songs: [newSong()] },
+    })
+    const { result } = renderHook(() =>
+      useCandidatePool('plan-1', stubPlanData()),
+    )
+    await waitFor(() => expect(result.current.sessionLoaded).toBe(true))
+
+    await act(async () => {
+      result.current.recheckCandidate('c1')
+    })
+
+    await waitFor(() =>
+      expect(result.current.candidates[0].matchStatus).toBe('matched'),
+    )
+    expect(api.searchSongs).toHaveBeenCalledWith({ query: 'Surrender' })
   })
 })
 
