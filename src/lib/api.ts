@@ -282,6 +282,29 @@ export const searchSongsBatch = httpsCallable<
   { results: Array<Song[] | null> }
 >(functions, 'searchSongsBatch')
 
+export interface LyricsResult {
+  found: boolean
+  plainLyrics: string | null
+  instrumental: boolean
+  source: 'lrclib'
+  /** Epoch ms when this entry was last fetched from LRCLIB. Lets the
+   *  modal show a "last checked X ago" hint and the manual refresh
+   *  button. */
+  fetchedAt: number
+  /** True iff the server returned the previously-cached value rather
+   *  than calling LRCLIB on this request. */
+  fromCache: boolean
+}
+
+/** On-demand lyrics lookup, cached server-side. `forceRefresh: true`
+ *  bypasses the cache and re-queries LRCLIB (used by the modal's
+ *  "Re-check LRCLIB" button when an earlier negative result might be
+ *  stale). */
+export const getLyrics = httpsCallable<
+  { title: string; author?: string; forceRefresh?: boolean },
+  LyricsResult
+>(functions, 'getLyrics')
+
 export type PromptType = 'structure' | 'role'
 export type PromptSource = 'plan' | 'user' | 'system'
 
