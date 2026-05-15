@@ -68,8 +68,6 @@ export function AdminPage() {
       </a>
       <h2>Admin</h2>
 
-      <MetricsSection />
-
       <AccessSection />
 
       <AdminPromptSection
@@ -82,6 +80,8 @@ export function AdminPage() {
         config={config.structure}
         onSaved={() => void refresh()}
       />
+
+      <MetricsSection />
 
       <section className="admin-section read-only admin-reference">
         <details>
@@ -194,43 +194,47 @@ function MetricsSection() {
   }, [])
 
   return (
-    <section className="admin-section">
-      <h3>Usage</h3>
-      {error && <div className="error">{error}</div>}
-      {users === null ? (
-        error ? null : <p className="muted">Loading…</p>
-      ) : users.length === 0 ? (
-        <p className="muted">No activity recorded yet.</p>
-      ) : (
-        <table className="metrics-table">
-          <thead>
-            <tr>
-              <th>Email</th>
-              <th>Sign-ins</th>
-              <th>Plans opened</th>
-              <th>AI suggestions</th>
-              <th>Commits</th>
-              <th>Clears</th>
-              <th>First seen</th>
-              <th>Last seen</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((u) => (
-              <tr key={u.uid}>
-                <td>{u.email}</td>
-                <td>{u.signIns}</td>
-                <td>{u.plansOpened}</td>
-                <td>{u.aiSuggestions}</td>
-                <td>{u.slotCommits}</td>
-                <td>{u.slotClears}</td>
-                <td title={u.firstSeenAt ?? ''}>{formatRelative(u.firstSeenAt)}</td>
-                <td title={u.lastSeenAt ?? ''}>{formatRelative(u.lastSeenAt)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+    <section className="admin-section read-only admin-reference">
+      <details>
+        <summary>Usage metrics (diagnostic)</summary>
+        <div className="admin-reference-body">
+          {error && <div className="error">{error}</div>}
+          {users === null ? (
+            error ? null : <p className="muted">Loading…</p>
+          ) : users.length === 0 ? (
+            <p className="muted">No activity recorded yet.</p>
+          ) : (
+            <table className="metrics-table">
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Sign-ins</th>
+                  <th>Plans opened</th>
+                  <th>AI suggestions</th>
+                  <th>Commits</th>
+                  <th>Clears</th>
+                  <th>First seen</th>
+                  <th>Last seen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u) => (
+                  <tr key={u.uid}>
+                    <td>{u.email}</td>
+                    <td>{u.signIns}</td>
+                    <td>{u.plansOpened}</td>
+                    <td>{u.aiSuggestions}</td>
+                    <td>{u.slotCommits}</td>
+                    <td>{u.slotClears}</td>
+                    <td title={u.firstSeenAt ?? ''}>{formatRelative(u.firstSeenAt)}</td>
+                    <td title={u.lastSeenAt ?? ''}>{formatRelative(u.lastSeenAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </details>
     </section>
   )
 }
