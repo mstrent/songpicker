@@ -11,22 +11,11 @@
 // "I Surrender" / "Surrender" case in PCO's substring filter that
 // motivated the original strict equality. Normalization here only
 // drops differences that are virtually never meaningful.
-function normalize(title: string): string {
-  return title
-    .normalize('NFKC')
-    .toLowerCase()
-    .trim()
-    .replace(/[‘’ʼ]/g, "'")
-    .replace(/[“”]/g, '"')
-    .replace(/\s*&\s*/g, ' and ')
-    .replace(/\s+/g, ' ')
-    .replace(/^(?:the|a|an)\s+/, '')
-    .trim()
-}
+import { normalizeText } from '../normalize'
 
 export function titlesMatch(a: string, b: string): boolean {
-  const na = normalize(a)
-  const nb = normalize(b)
+  const na = normalizeText(a)
+  const nb = normalizeText(b)
   if (!na || !nb) return false
   return na === nb
 }
