@@ -343,7 +343,7 @@ describe('fetchFromLrclib', () => {
         },
         {
           id: 2,
-          trackName: 'Lord I Need You',
+          trackName: 'Lord, I Need You',
           artistName: 'Matt Maher',
           albumName: null,
           duration: 240,

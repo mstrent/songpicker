@@ -55,9 +55,20 @@ function stripParentheticals(title: string): string {
   return title.replace(/\s*\([^)]*\)\s*/g, ' ').trim()
 }
 
+// Strip common title punctuation (commas, periods, colons, hyphens,
+// etc.) so LRCLIB's "Lord, I Need You" matches PCO's "Lord I Need You"
+// after normalization. Slashes are excluded — they're delimiters in
+// our author/songwriter context, not title separators.
+function stripPunctuation(s: string): string {
+  return s
+    .replace(/[,.;:!?\-–—_]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 function titlesMatchTolerantly(a: string, b: string): boolean {
-  const na = normalizeText(stripParentheticals(a))
-  const nb = normalizeText(stripParentheticals(b))
+  const na = normalizeText(stripPunctuation(stripParentheticals(a)))
+  const nb = normalizeText(stripPunctuation(stripParentheticals(b)))
   return na.length > 0 && na === nb
 }
 
