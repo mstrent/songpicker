@@ -18,6 +18,7 @@ serviceAccountKey*.json
 # Claude Code local state
 .claude/settings.local.json
 .claude/worktrees/
+.playwright-mcp/
 
 # Editor / OS
 .DS_Store
