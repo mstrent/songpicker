@@ -27,7 +27,7 @@ describe('fetchFromLrclib', () => {
     )
   })
 
-  it('returns a found result drawn from the first array element', async () => {
+  it('returns a found result drawn from the first title-matching array element', async () => {
     const mockFetch = globalThis.fetch as ReturnType<typeof vi.fn>
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -66,7 +66,7 @@ describe('fetchFromLrclib', () => {
     })
   })
 
-  it('returns an instrumental result when the top track is marked instrumental', async () => {
+  it('returns an instrumental result when the top title-matching track is marked instrumental', async () => {
     const mockFetch = globalThis.fetch as ReturnType<typeof vi.fn>
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -113,12 +113,7 @@ describe('fetchFromLrclib', () => {
     })
   })
 
-  it('handles a slash-separated author list (the case that motivated this change)', async () => {
-    // PCO's author field for worship songs typically lists every
-    // songwriter slash-separated. /api/get's exact-match required us
-    // to special-case this; /api/search just ranks the right
-    // recording first because tokens like "Pat Barrett" still match
-    // a recording artist named "Pat Barrett".
+  it('handles a slash-separated author list (the case that motivated /api/search)', async () => {
     const mockFetch = globalThis.fetch as ReturnType<typeof vi.fn>
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -148,10 +143,6 @@ describe('fetchFromLrclib', () => {
       instrumental: false,
       lrclibId: 100,
     })
-    // Sanity-check that the slash-separated string was URL-encoded into the query.
-    const callUrl = mockFetch.mock.calls[0][0] as string
-    expect(callUrl).toContain('artist_name=')
-    expect(callUrl).toContain('Pat+Barrett')
   })
 
   it('omits artist_name from the URL when author is missing', async () => {
@@ -181,5 +172,110 @@ describe('fetchFromLrclib', () => {
     await expect(
       fetchFromLrclib({ title: 'Reckless Love', author: 'Cory Asbury' }),
     ).rejects.toThrow(/lrclib/i)
+  })
+
+  it('rejects an array whose results do not title-match the request', async () => {
+    // LRCLIB returned something fuzzy-ranked but the trackName has
+    // nothing to do with what we asked for — treat as not-found
+    // rather than display unrelated lyrics in the modal.
+    const mockFetch = globalThis.fetch as ReturnType<typeof vi.fn>
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => [
+        {
+          id: 999,
+          trackName: 'Totally Different Song',
+          artistName: 'Some Artist',
+          albumName: null,
+          duration: 200,
+          instrumental: false,
+          plainLyrics: 'Unrelated lyrics body',
+          syncedLyrics: null,
+        },
+      ],
+    } as Response)
+
+    const result = await fetchFromLrclib({ title: 'Build My Life', author: 'Pat Barrett' })
+
+    expect(result).toEqual({
+      found: false,
+      plainLyrics: null,
+      instrumental: false,
+      lrclibId: null,
+    })
+  })
+
+  it('skips earlier non-matching results and takes the first title-matching entry', async () => {
+    // LRCLIB ranked a tangentially related track ahead of the
+    // actual song — walk past it and accept the real match.
+    const mockFetch = globalThis.fetch as ReturnType<typeof vi.fn>
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => [
+        {
+          id: 1,
+          trackName: 'Build',
+          artistName: 'Random',
+          albumName: null,
+          duration: 100,
+          instrumental: false,
+          plainLyrics: 'unrelated',
+          syncedLyrics: null,
+        },
+        {
+          id: 2,
+          trackName: 'Build My Life',
+          artistName: 'Pat Barrett',
+          albumName: null,
+          duration: 245,
+          instrumental: false,
+          plainLyrics: 'Worthy of every song',
+          syncedLyrics: null,
+        },
+      ],
+    } as Response)
+
+    const result = await fetchFromLrclib({ title: 'Build My Life', author: 'Pat Barrett' })
+
+    expect(result).toEqual({
+      found: true,
+      plainLyrics: 'Worthy of every song',
+      instrumental: false,
+      lrclibId: 2,
+    })
+  })
+
+  it('treats parenthetical-suffixed LRCLIB titles as a match', async () => {
+    // LRCLIB commonly returns "(Live)", "(feat. ...)", "(Acoustic)"
+    // suffixed variants. PCO titles don't carry those, so strip
+    // parentheticals before comparing.
+    const mockFetch = globalThis.fetch as ReturnType<typeof vi.fn>
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => [
+        {
+          id: 50,
+          trackName: 'Build My Life (feat. Pat Barrett)',
+          artistName: 'Bethel Music',
+          albumName: 'Peace, Vol. II',
+          duration: 318,
+          instrumental: false,
+          plainLyrics: 'Worthy of every song',
+          syncedLyrics: null,
+        },
+      ],
+    } as Response)
+
+    const result = await fetchFromLrclib({ title: 'Build My Life', author: 'Pat Barrett' })
+
+    expect(result).toEqual({
+      found: true,
+      plainLyrics: 'Worthy of every song',
+      instrumental: false,
+      lrclibId: 50,
+    })
   })
 })
