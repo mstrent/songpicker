@@ -286,6 +286,11 @@ export interface LyricsResult {
   found: boolean
   plainLyrics: string | null
   instrumental: boolean
+  /** Recording artist on the matched LRCLIB track (NOT the PCO
+   *  songwriter list). Shown in the popover so users can see whose
+   *  version's lyrics they're reading — useful when a worship song's
+   *  songwriters aren't also recording artists and we land on a cover. */
+  artistName: string | null
   source: 'lrclib'
   /** Epoch ms when this entry was last fetched from LRCLIB. Lets the
    *  modal show a "last checked X ago" hint and the manual refresh

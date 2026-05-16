@@ -11,6 +11,7 @@ describe('getLyricsForSong', () => {
       plainLyrics: 'Cached lyrics body',
       instrumental: false,
       lrclibId: 42,
+      artistName: 'Cached Artist',
       source: 'lrclib',
       fetchedAt: 1700000000000,
     }
@@ -32,6 +33,7 @@ describe('getLyricsForSong', () => {
       found: true,
       plainLyrics: 'Cached lyrics body',
       instrumental: false,
+      artistName: 'Cached Artist',
       source: 'lrclib',
       fetchedAt: 1700000000000,
       fromCache: true,
@@ -44,6 +46,7 @@ describe('getLyricsForSong', () => {
       plainLyrics: 'Fresh lyrics body',
       instrumental: false,
       lrclibId: 99,
+      artistName: 'Fresh Artist',
     }
     const deps = {
       readCache: vi.fn().mockResolvedValue(null),
@@ -81,6 +84,7 @@ describe('getLyricsForSong', () => {
       plainLyrics: null,
       instrumental: false,
       lrclibId: null,
+      artistName: null,
     }
     const deps = {
       readCache: vi.fn().mockResolvedValue(null),
@@ -103,6 +107,7 @@ describe('getLyricsForSong', () => {
       plainLyrics: null,
       instrumental: false,
       lrclibId: null,
+      artistName: null,
       source: 'lrclib',
       fetchedAt: 1700000000000,
     }
@@ -111,6 +116,7 @@ describe('getLyricsForSong', () => {
       plainLyrics: 'Now found',
       instrumental: false,
       lrclibId: 7,
+      artistName: 'Some Recording Artist',
     }
     const deps = {
       readCache: vi.fn().mockResolvedValue(cached),

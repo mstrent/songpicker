@@ -1,30 +1,31 @@
 import { normalizeText } from '../normalize'
 
-// LRCLIB is a free, no-API-key lyrics service. We hit its
-// /api/search endpoint with track_name only — NOT artist_name.
+// LRCLIB is a free, no-API-key lyrics service. Lookup is multi-pass
+// against /api/search:
 //
-// Why title-only on the wire: LRCLIB treats artist_name as a
-// strict-ish AND filter. PCO's song.author field lists every credited
-// songwriter slash-separated (e.g., "Brett Younker / Karl Martin /
-// Kirby Kaple / Matt Redman / Pat Barrett" for "Build My Life"), and
-// no recording artist's name contains that whole string, so passing
-// artist_name returns empty arrays even when LRCLIB has the song under
-// a clean artist name. Title-only returns the full ranked list, then
-// we filter client-side.
+//   Pass 1 — per-author-token: split PCO's songwriter string by /,
+//   commas, and " and ", then query `?track_name=<title>&
+//   artist_name=<token>` for each token in order. LRCLIB's
+//   artist_name field is fuzzy on a single name (so "Matt Maher"
+//   matches recordings credited to "Matt Maher") but it rejects
+//   the whole PCO slash-list as one unmatched string. Iterating
+//   one token at a time gets around that, and gating by author
+//   token avoids title collisions (the worship "Lord I Need You"
+//   vs Kanye's secular track of the same name).
 //
-// Client-side gating happens in two passes:
+//   Pass 2 — title-only fallback: for songs whose songwriters
+//   aren't also recording artists (e.g., "Oceans (Where Feet May
+//   Fail)" was written by Matt Crocker / Joel Houston / Salomon
+//   Ligthelm and recorded by Hillsong UNITED — no overlap), fall
+//   back to `?track_name=<title>` and accept the first title-match.
+//   Lyrics body is the same across worship covers; the popover
+//   surfaces the recording artist so the user can see whose
+//   version it is.
 //
-//   1. titlesMatchTolerantly — keep only results whose trackName
-//      matches the requested title (parenthetical-suffix tolerant
-//      via stripParentheticals).
-//
-//   2. Author-token overlap — when an author is supplied (almost
-//      always — PCO populates it), require the chosen result's
-//      recording artist to contain at least one token from the
-//      requested author. Without this guard, "Lord I Need You"
-//      returns Kanye West's track at position 0 and the Matt Maher
-//      worship version several positions down, and we'd happily
-//      render Kanye's lyrics for the worship song.
+// Both passes filter the API results through titlesMatchTolerantly
+// (parenthetical-suffix + light punctuation tolerant) so that fuzzy
+// LRCLIB ranking can't sneak in unrelated tracks whose titles only
+// loosely contain the search term ("Beat Surrender" for "Surrender").
 
 const LRCLIB_SEARCH_URL = 'https://lrclib.net/api/search'
 
@@ -38,6 +39,11 @@ export interface LrclibResult {
   plainLyrics: string | null
   instrumental: boolean
   lrclibId: number | null
+  /** Recording artist of the matched track (NOT the PCO songwriter
+   *  list). Surfaced to the popover so users can see whose version's
+   *  lyrics they're reading — especially useful when a worship song's
+   *  songwriters aren't also recording artists and we land on a cover. */
+  artistName: string | null
 }
 
 interface LrclibTrackResponse {
@@ -75,22 +81,23 @@ function titlesMatchTolerantly(a: string, b: string): boolean {
 // Split PCO's songwriter credit string ("Daniel Carson, Matt Maher,
 // Christy Nockels, and Jesse Reeves" / "Brett Younker / Karl Martin /
 // Pat Barrett") into individual names. The 2-char minimum drops
-// degenerate fragments from "&" leftovers or stray "I"/"a" tokens.
+// degenerate fragments. Names are returned trimmed but un-normalized
+// — the LRCLIB API endpoint matches case-insensitively on its end.
 function authorTokens(author: string): string[] {
   return author
     .split(/[/,]|\sand\s/gi)
-    .map((t) => normalizeText(t))
-    .filter((t) => t.length >= 2)
-}
-
-function artistContainsAnyToken(artist: string, tokens: string[]): boolean {
-  if (tokens.length === 0) return false
-  const norm = normalizeText(artist)
-  return tokens.some((t) => norm.includes(t))
+    .map((t) => t.trim())
+    .filter((t) => normalizeText(t).length >= 2)
 }
 
 function notFound(): LrclibResult {
-  return { found: false, plainLyrics: null, instrumental: false, lrclibId: null }
+  return {
+    found: false,
+    plainLyrics: null,
+    instrumental: false,
+    lrclibId: null,
+    artistName: null,
+  }
 }
 
 function toFoundResult(r: LrclibTrackResponse): LrclibResult {
@@ -99,40 +106,47 @@ function toFoundResult(r: LrclibTrackResponse): LrclibResult {
     plainLyrics: r.plainLyrics,
     instrumental: r.instrumental,
     lrclibId: r.id,
+    artistName: r.artistName,
   }
 }
 
-export async function fetchFromLrclib(query: LrclibQuery): Promise<LrclibResult> {
-  const params = new URLSearchParams()
-  params.set('track_name', query.title)
-  const url = `${LRCLIB_SEARCH_URL}?${params.toString()}`
-
+async function searchLrclib(
+  params: Record<string, string>,
+): Promise<LrclibTrackResponse[]> {
+  const search = new URLSearchParams(params)
+  const url = `${LRCLIB_SEARCH_URL}?${search.toString()}`
   const res = await fetch(url, { method: 'GET' })
-
   if (!res.ok) {
     throw new Error(`LRCLIB request failed: HTTP ${res.status}`)
   }
+  const data = await res.json()
+  return Array.isArray(data) ? (data as LrclibTrackResponse[]) : []
+}
 
-  const results = (await res.json()) as LrclibTrackResponse[]
-  if (!Array.isArray(results)) return notFound()
+export async function fetchFromLrclib(query: LrclibQuery): Promise<LrclibResult> {
+  // Pass 1: try each author token as an artist_name hint, in order.
+  // First search that returns a title-matched track wins.
+  if (query.author) {
+    for (const token of authorTokens(query.author)) {
+      const results = await searchLrclib({
+        track_name: query.title,
+        artist_name: token,
+      })
+      const titleMatched = results.filter((r) =>
+        titlesMatchTolerantly(query.title, r.trackName),
+      )
+      if (titleMatched.length > 0) return toFoundResult(titleMatched[0])
+    }
+  }
 
+  // Pass 2: title-only fallback. For songs whose songwriters aren't
+  // also recording artists (Oceans, etc.), accept the first
+  // title-matched cover — worship covers preserve the lyric body.
+  const results = await searchLrclib({ track_name: query.title })
   const titleMatched = results.filter((r) =>
     titlesMatchTolerantly(query.title, r.trackName),
   )
-  if (titleMatched.length === 0) return notFound()
+  if (titleMatched.length > 0) return toFoundResult(titleMatched[0])
 
-  // With an author, require recording-artist overlap with one of the
-  // songwriter tokens. No overlap → not found (safer than serving
-  // wrong-song lyrics).
-  if (query.author) {
-    const tokens = authorTokens(query.author)
-    const authorMatched = titleMatched.find((r) =>
-      artistContainsAnyToken(r.artistName, tokens),
-    )
-    if (authorMatched) return toFoundResult(authorMatched)
-    return notFound()
-  }
-
-  // No author supplied — best-effort take first title match.
-  return toFoundResult(titleMatched[0])
+  return notFound()
 }

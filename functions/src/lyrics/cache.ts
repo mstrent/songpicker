@@ -17,6 +17,11 @@ export interface LyricsCacheEntry {
   plainLyrics: string | null
   instrumental: boolean
   lrclibId: number | null
+  /** Recording artist on the matched track. Stored so the popover
+   *  can show whose version's lyrics are being displayed without a
+   *  re-fetch. Null for not-found entries and for pre-existing
+   *  cache rows that predate this field. */
+  artistName: string | null
   source: 'lrclib'
   fetchedAt: number
 }
@@ -49,6 +54,7 @@ export async function readLyricsCache(
     plainLyrics: data.plainLyrics,
     instrumental: data.instrumental,
     lrclibId: data.lrclibId,
+    artistName: data.artistName ?? null,
     source: data.source,
     fetchedAt: data.fetchedAt,
   }
@@ -63,6 +69,7 @@ export async function writeLyricsCache(
     plainLyrics: string | null
     instrumental: boolean
     lrclibId: number | null
+    artistName: string | null
   },
   now: () => number = Date.now,
 ): Promise<void> {
@@ -74,6 +81,7 @@ export async function writeLyricsCache(
     plainLyrics: result.plainLyrics,
     instrumental: result.instrumental,
     lrclibId: result.lrclibId,
+    artistName: result.artistName,
     source: 'lrclib',
     fetchedAt: now(),
   }

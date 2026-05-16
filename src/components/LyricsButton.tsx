@@ -225,6 +225,13 @@ export function LyricsPopover({ song, onClose }: LyricsPopoverProps) {
           <>
             <span className="lyrics-popover-source">
               LRCLIB{result.fromCache ? ' · cached' : ''}
+              {result.found && result.artistName && (
+                <span className="lyrics-popover-artist">
+                  {' · '}
+                  <span className="lyrics-popover-artist-label">via</span>{' '}
+                  {result.artistName}
+                </span>
+              )}
             </span>
             <button
               type="button"

@@ -102,6 +102,7 @@ describe('readLyricsCache', () => {
       plainLyrics: 'Before I spoke a word',
       instrumental: false,
       lrclibId: 42,
+      artistName: null,
       source: 'lrclib',
       fetchedAt: 1700000000000,
     })
@@ -122,6 +123,7 @@ describe('writeLyricsCache', () => {
         plainLyrics: 'Before I spoke a word',
         instrumental: false,
         lrclibId: 42,
+        artistName: 'Cory Asbury',
       },
       now,
     )
@@ -134,6 +136,7 @@ describe('writeLyricsCache', () => {
       plainLyrics: 'Before I spoke a word',
       instrumental: false,
       lrclibId: 42,
+      artistName: 'Cory Asbury',
       source: 'lrclib',
       fetchedAt: 1700000000000,
     })
@@ -145,7 +148,7 @@ describe('writeLyricsCache', () => {
       fakeDb as unknown as Parameters<typeof writeLyricsCache>[0],
       'Reckless Love',
       undefined,
-      { found: false, plainLyrics: null, instrumental: false, lrclibId: null },
+      { found: false, plainLyrics: null, instrumental: false, lrclibId: null, artistName: null },
       () => 1700000000000,
     )
 

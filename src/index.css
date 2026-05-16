@@ -2698,6 +2698,21 @@ a.chip-link:focus-visible {
   font-size: 0.7rem;
   letter-spacing: 0.08em;
   color: var(--muted);
+  /* Allow long recording-artist names to wrap to a second line
+     rather than getting clipped against the Re-check button. */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.lyrics-popover-artist {
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.lyrics-popover-artist-label {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  opacity: 0.7;
 }
 .lyrics-popover-close {
   border-color: transparent;

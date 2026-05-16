@@ -20,6 +20,10 @@ export interface GetLyricsResult {
   found: boolean
   plainLyrics: string | null
   instrumental: boolean
+  /** Recording artist on the matched track (NOT the requested PCO
+   *  songwriter list). Null for not-found results and for entries
+   *  cached before this field was tracked. */
+  artistName: string | null
   source: 'lrclib'
   fetchedAt: number
   fromCache: boolean
@@ -46,6 +50,7 @@ export async function getLyricsForSong(
         found: cached.found,
         plainLyrics: cached.plainLyrics,
         instrumental: cached.instrumental,
+        artistName: cached.artistName,
         source: cached.source,
         fetchedAt: cached.fetchedAt,
         fromCache: true,
@@ -59,6 +64,7 @@ export async function getLyricsForSong(
     found: fresh.found,
     plainLyrics: fresh.plainLyrics,
     instrumental: fresh.instrumental,
+    artistName: fresh.artistName,
     source: 'lrclib',
     fetchedAt: Date.now(),
     fromCache: false,
