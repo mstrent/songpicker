@@ -1,22 +1,25 @@
 import { normalizeText } from '../normalize'
 
-// LRCLIB is a free, no-API-key lyrics service. We use its
-// /api/search endpoint (not /api/get) because PCO's song.author
-// field lists every songwriter slash-separated (e.g., "Brett
-// Younker / Karl Martin / Kirby Kaple / Matt Redman / Pat Barrett"
-// for "Build My Life"), while LRCLIB indexes recordings by their
-// performing artist. /api/get is exact-match and 404s on those
-// strings even when LRCLIB has the song under a clean artist name;
-// /api/search ranks fuzzy matches and surfaces the right recording
-// at position 0 in both the clean case ("Cory Asbury" → "Reckless
-// Love") and the slash-list case.
+// LRCLIB is a free, no-API-key lyrics service. We hit its
+// /api/search endpoint with track_name only — NOT artist_name.
 //
-// The fuzzy ranking sometimes returns weak matches as results[0]
-// when the song genuinely isn't in LRCLIB's index — so we filter
-// the array to results whose trackName matches the requested
-// title under normalizeText rules (and tolerate parenthetical
-// suffixes like "(Live)", "(feat. ...)", "(Hillsong)"). Empty
-// after filtering → not-found.
+// Why title-only: LRCLIB treats artist_name as a strict-ish AND
+// filter. PCO's song.author field for worship songs lists every
+// credited songwriter slash-separated (e.g., "Brett Younker / Karl
+// Martin / Kirby Kaple / Matt Redman / Pat Barrett" for "Build My
+// Life"), and no recording artist's name contains that whole
+// string, so passing artist_name returns empty arrays even when
+// LRCLIB has the song under a clean artist name. Title-only
+// returns the full ranked list, and titlesMatchTolerantly below
+// prevents accepting unrelated tracks.
+//
+// We still walk the array and filter to results whose trackName
+// matches the requested title under normalizeText rules
+// (parenthetical-suffix tolerant). Author is intentionally NOT
+// used to constrain the query or to rank results — for our
+// purpose (showing the user the lyric for a song they identified
+// by title), any same-title recording's lyric body is correct,
+// and LRCLIB's own relevance ranking handles the priority.
 
 const LRCLIB_SEARCH_URL = 'https://lrclib.net/api/search'
 
@@ -43,10 +46,6 @@ interface LrclibTrackResponse {
   syncedLyrics: string | null
 }
 
-// LRCLIB's track names commonly carry parenthetical suffixes:
-// "(Live)", "(Acoustic)", "(feat. X)", "(Hillsong)". PCO and AI
-// titles usually don't carry these, so strip them from both sides
-// before comparing.
 function stripParentheticals(title: string): string {
   return title.replace(/\s*\([^)]*\)\s*/g, ' ').trim()
 }
@@ -59,7 +58,6 @@ function titlesMatchTolerantly(a: string, b: string): boolean {
 
 export async function fetchFromLrclib(query: LrclibQuery): Promise<LrclibResult> {
   const params = new URLSearchParams()
-  if (query.author) params.set('artist_name', query.author)
   params.set('track_name', query.title)
   const url = `${LRCLIB_SEARCH_URL}?${params.toString()}`
 

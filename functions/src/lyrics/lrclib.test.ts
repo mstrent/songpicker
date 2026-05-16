@@ -11,7 +11,7 @@ describe('fetchFromLrclib', () => {
     vi.unstubAllGlobals()
   })
 
-  it('hits the LRCLIB /api/search endpoint with title + author', async () => {
+  it('hits the LRCLIB /api/search endpoint with track_name only (never artist_name)', async () => {
     const mockFetch = globalThis.fetch as ReturnType<typeof vi.fn>
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -21,10 +21,14 @@ describe('fetchFromLrclib', () => {
 
     await fetchFromLrclib({ title: 'Reckless Love', author: 'Cory Asbury' })
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      'https://lrclib.net/api/search?artist_name=Cory+Asbury&track_name=Reckless+Love',
-      expect.objectContaining({ method: 'GET' }),
+    const callUrl = mockFetch.mock.calls[0][0] as string
+    expect(callUrl).toBe(
+      'https://lrclib.net/api/search?track_name=Reckless+Love',
     )
+    // Sanity: artist_name is never sent, even when an author is supplied,
+    // because LRCLIB's strict-ish artist filter rejects PCO multi-songwriter
+    // lists. See module comment.
+    expect(callUrl).not.toContain('artist_name')
   })
 
   it('returns a found result drawn from the first title-matching array element', async () => {
@@ -113,7 +117,10 @@ describe('fetchFromLrclib', () => {
     })
   })
 
-  it('handles a slash-separated author list (the case that motivated /api/search)', async () => {
+  it('handles a slash-separated author list (the case that motivated title-only search)', async () => {
+    // PCO's author field is the full songwriter credit list. LRCLIB's
+    // artist filter would AND-reject this whole string; sending
+    // title only lets the song's actual recordings surface.
     const mockFetch = globalThis.fetch as ReturnType<typeof vi.fn>
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -143,9 +150,15 @@ describe('fetchFromLrclib', () => {
       instrumental: false,
       lrclibId: 100,
     })
+
+    // The slash-separated author must NOT have been sent to LRCLIB.
+    const callUrl = mockFetch.mock.calls[0][0] as string
+    expect(callUrl).not.toContain('artist_name')
+    expect(callUrl).not.toContain('Brett')
+    expect(callUrl).not.toContain('Pat')
   })
 
-  it('omits artist_name from the URL when author is missing', async () => {
+  it('sends track_name even when no author is supplied (same URL shape)', async () => {
     const mockFetch = globalThis.fetch as ReturnType<typeof vi.fn>
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -175,9 +188,6 @@ describe('fetchFromLrclib', () => {
   })
 
   it('rejects an array whose results do not title-match the request', async () => {
-    // LRCLIB returned something fuzzy-ranked but the trackName has
-    // nothing to do with what we asked for — treat as not-found
-    // rather than display unrelated lyrics in the modal.
     const mockFetch = globalThis.fetch as ReturnType<typeof vi.fn>
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -207,8 +217,6 @@ describe('fetchFromLrclib', () => {
   })
 
   it('skips earlier non-matching results and takes the first title-matching entry', async () => {
-    // LRCLIB ranked a tangentially related track ahead of the
-    // actual song — walk past it and accept the real match.
     const mockFetch = globalThis.fetch as ReturnType<typeof vi.fn>
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -248,9 +256,6 @@ describe('fetchFromLrclib', () => {
   })
 
   it('treats parenthetical-suffixed LRCLIB titles as a match', async () => {
-    // LRCLIB commonly returns "(Live)", "(feat. ...)", "(Acoustic)"
-    // suffixed variants. PCO titles don't carry those, so strip
-    // parentheticals before comparing.
     const mockFetch = globalThis.fetch as ReturnType<typeof vi.fn>
     mockFetch.mockResolvedValueOnce({
       ok: true,
