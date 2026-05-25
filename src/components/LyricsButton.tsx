@@ -125,6 +125,19 @@ export function LyricsPopover({ song, onClose }: LyricsPopoverProps) {
    *  result rather than overwrite the newer song's state. */
   const currentId = useRef(song.id)
 
+  const popoverRef = useRef<HTMLDivElement | null>(null)
+  /** When the user has dragged the popover, we override the docked
+   *  position with these viewport-relative coords. Persists across
+   *  song swaps but resets when the popover closes (component unmounts). */
+  const [position, setPosition] = useState<{ x: number; y: number } | null>(null)
+  const [dragging, setDragging] = useState(false)
+  const dragStartRef = useRef<{
+    mouseX: number
+    mouseY: number
+    popX: number
+    popY: number
+  } | null>(null)
+
   const load = useCallback(
     async (forceRefresh: boolean) => {
       currentId.current = song.id
@@ -155,24 +168,115 @@ export function LyricsPopover({ song, onClose }: LyricsPopoverProps) {
     void load(false)
   }, [song.id, load])
 
-  // Escape closes. No click-outside dismissal — the popover is
-  // intentionally non-blocking; user keeps it open while scanning
-  // through candidate songs.
+  // Escape closes. Clicks outside the popover ALSO close — except
+  // clicks on a .lyrics-chip / .iconbtn-lyrics, which swap the
+  // popover's content to the newly-clicked song without dismissing.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose()
     }
+    function onDocMouseDown(e: MouseEvent) {
+      const t = e.target as Element | null
+      if (!t) return
+      if (popoverRef.current?.contains(t)) return
+      // Only dismiss on clicks in genuine empty space. Any click that
+      // lands on an interactive element (buttons, links, inputs,
+      // drag handles, key/menu chips, etc.) keeps the popover open
+      // so the user can re-order songs, change keys, ask for more AI
+      // suggestions, etc. while still reading lyrics. Clicks on a
+      // .lyrics-chip in particular get caught by the `button` half
+      // of this selector and swap the popover's content via the
+      // trigger's own onClick.
+      if (
+        t.closest(
+          'button, a, input, textarea, select, label, [role="button"], [role="link"], [role="menuitem"], [role="menu"], [role="combobox"], [role="listbox"], [role="textbox"], [draggable="true"], [contenteditable="true"]',
+        )
+      ) {
+        return
+      }
+      onClose()
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('mousedown', onDocMouseDown)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('mousedown', onDocMouseDown)
+    }
   }, [onClose])
+
+  // Drag-to-reposition via the header. The window mousemove + mouseup
+  // listeners are attached synchronously inside the mousedown handler
+  // (rather than via a useEffect on `dragging`) so the listener is
+  // already live by the time the very next mousemove event fires —
+  // a useEffect-gated attach would race against the React commit.
+  const handleHeaderMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      // Don't start drag if the click was on the close button or any
+      // interactive child of the header.
+      const t = e.target as Element | null
+      if (t?.closest('.lyrics-popover-close, button, a')) return
+      const rect = popoverRef.current?.getBoundingClientRect()
+      if (!rect) return
+      dragStartRef.current = {
+        mouseX: e.clientX,
+        mouseY: e.clientY,
+        popX: rect.left,
+        popY: rect.top,
+      }
+      setDragging(true)
+
+      function onMove(ev: MouseEvent) {
+        const start = dragStartRef.current
+        const popover = popoverRef.current
+        if (!start || !popover) return
+        const r = popover.getBoundingClientRect()
+        const newX = start.popX + (ev.clientX - start.mouseX)
+        const newY = start.popY + (ev.clientY - start.mouseY)
+        // Keep at least the title bar visible — clamp so the popover
+        // can't be dragged off the screen edges.
+        const clampedX = Math.max(
+          8,
+          Math.min(window.innerWidth - r.width - 8, newX),
+        )
+        const clampedY = Math.max(
+          8,
+          Math.min(window.innerHeight - 56, newY),
+        )
+        setPosition({ x: clampedX, y: clampedY })
+      }
+      function onUp() {
+        setDragging(false)
+        dragStartRef.current = null
+        window.removeEventListener('mousemove', onMove)
+        window.removeEventListener('mouseup', onUp)
+      }
+      window.addEventListener('mousemove', onMove)
+      window.addEventListener('mouseup', onUp)
+
+      e.preventDefault()
+    },
+    [],
+  )
+
+  const dockedClass = position
+    ? 'lyrics-popover-positioned'
+    : `lyrics-popover-dock-${song.dockSide}`
+  const inlineStyle = position
+    ? { top: position.y, left: position.x, right: 'auto' as const }
+    : undefined
 
   return (
     <div
-      className={`lyrics-popover lyrics-popover-dock-${song.dockSide}`}
+      ref={popoverRef}
+      className={`lyrics-popover ${dockedClass}${dragging ? ' lyrics-popover-dragging' : ''}`}
+      style={inlineStyle}
       role="region"
       aria-label={`Lyrics for ${song.title}`}
     >
-      <div className="lyrics-popover-header">
+      <div
+        className="lyrics-popover-header"
+        onMouseDown={handleHeaderMouseDown}
+      >
         <div className="lyrics-popover-title">
           <strong>{song.title}</strong>
           {song.author && (

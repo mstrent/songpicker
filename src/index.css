@@ -2609,6 +2609,17 @@ a.chip-link:focus-visible {
   gap: 12px;
   padding: 16px 18px 12px;
   position: relative; /* above ::before bloom */
+  cursor: grab;
+  user-select: none;
+}
+.lyrics-popover-dragging .lyrics-popover-header {
+  cursor: grabbing;
+}
+/* Once the user has dragged the popover, top/left are pinned inline
+   and we want to skip the side-dock entry animation that would
+   otherwise re-run on song swaps. */
+.lyrics-popover-positioned {
+  animation: none;
 }
 .lyrics-popover-title {
   font-size: 1.05rem;
@@ -2691,6 +2702,12 @@ a.chip-link:focus-visible {
   font-size: 0.78rem;
   color: var(--muted);
   letter-spacing: 0.02em;
+}
+.lyrics-popover-footer .btn-link {
+  /* Keep "Re-check" intact even when a long recording-artist credit
+     fills the rest of the footer; the source label wraps instead. */
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .lyrics-popover-source {
   text-transform: uppercase;
