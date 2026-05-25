@@ -14,6 +14,7 @@ import { PromptPill } from './PromptPill'
 import { Icon } from './Icon'
 import { EmptyState } from './EmptyState'
 import { SongLookupLinks } from './SongLookupLinks'
+import { LyricsTrigger, LyricsPopover, type ActiveLyrics } from './LyricsButton'
 
 type OpenPrompt = 'role' | 'structure' | null
 
@@ -107,6 +108,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   const roleHook = usePromptConfig('role', planId)
   const structureHook = usePromptConfig('structure', planId)
   const [openPrompt, setOpenPrompt] = useState<OpenPrompt>(null)
+  /** Single shared popover state for the lyrics viewer. Hoisted up
+   *  here (rather than inside each LyricsTrigger) so clicking a chip
+   *  on candidate A and then candidate B swaps content in one popover
+   *  instead of toggling separate per-chip modals. */
+  const [activeLyrics, setActiveLyrics] = useState<ActiveLyrics | null>(null)
   function togglePrompt(which: 'role' | 'structure') {
     setOpenPrompt((prev) => (prev === which ? null : which))
   }
@@ -458,6 +464,12 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       {displayTitle && (
                         <div className="lookup-row">
                           <SongLookupLinks query={displayTitle} size="sm" />
+                          <LyricsTrigger
+                            variant="icon"
+                            title={it.songTitle ?? displayTitle}
+                            author={it.songAuthor}
+                            onActivate={setActiveLyrics}
+                          />
                         </div>
                       )}
                     </div>
@@ -692,13 +704,12 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       title="AI-sourced lyrics. May be inaccurate."
                     >
                       “{c.suggestion.chorusSnippet}”
-                      <span
-                        className="chip chip-ai"
-                        aria-label="AI-sourced lyrics. May be inaccurate."
-                      >
-                        <Icon name="sparkle" size={10} />
-                        AI
-                      </span>
+                      <LyricsTrigger
+                        variant="chip"
+                        title={c.song?.title ?? c.suggestion.title}
+                        author={c.song?.author ?? c.suggestion.author ?? null}
+                        onActivate={setActiveLyrics}
+                      />
                     </div>
                   )}
                   <button
@@ -943,13 +954,12 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       <span className="snippet-quote" aria-hidden>“</span>
                       {c.suggestion.chorusSnippet}
                       <span className="snippet-quote" aria-hidden>”</span>
-                      <span
-                        className="chip chip-ai"
-                        aria-label="AI-sourced lyrics. May be inaccurate."
-                      >
-                        <Icon name="sparkle" size={10} />
-                        AI
-                      </span>
+                      <LyricsTrigger
+                        variant="chip"
+                        title={c.song?.title ?? c.suggestion.title}
+                        author={c.song?.author ?? c.suggestion.author ?? null}
+                        onActivate={setActiveLyrics}
+                      />
                     </div>
                   )}
                   <div className="decision-row">
@@ -1080,6 +1090,12 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       })()}
         </div>
       </div>
+      {activeLyrics && (
+        <LyricsPopover
+          song={activeLyrics}
+          onClose={() => setActiveLyrics(null)}
+        />
+      )}
     </div>
   )
 }

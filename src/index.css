@@ -2414,6 +2414,7 @@ a.chip-link:focus-visible {
   justify-content: center;
   width: 32px;
   height: 32px;
+  padding: 0; /* override global `button { padding: 0.55rem 1.1rem }` so the SVG isn't squashed to 0 width when iconbtn is rendered as a <button> */
   border-radius: 8px;
   background: var(--bg);
   color: var(--muted);
@@ -2472,6 +2473,295 @@ a.chip-link:focus-visible {
   .candidate.match-unmatched .iconbtn-chart {
     animation: none;
   }
+}
+/* Lyrics icon button — used in the slot row's lookup-row and on
+   rejected cards. Matches the .iconbtn-sm dimensions; hover treatment
+   uses --accent so the row stays visually balanced with Spotify /
+   YouTube / PraiseCharts icons. */
+.iconbtn-lyrics:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Labeled "Lyrics" chip — sits inline at the end of the chorus-snippet
+   text on candidate / rejected cards, directly replacing the small
+   `.chip-ai` badge that used to live there. Sized to match the base
+   `.chip` family (pill, small font, tight padding) so the snippet line
+   still reads as a single visual unit. NOT decorated with the AI
+   gradient — LRCLIB lyrics aren't AI-generated, and per CLAUDE.md AI
+   styling is reserved for "explicit AI moments" only. */
+.lyrics-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  font-style: normal; /* break inherited italic from .chorus-snippet */
+  letter-spacing: 0.01em;
+  background: var(--bg);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  margin-left: 0.4rem;
+  vertical-align: middle;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.lyrics-chip:hover,
+.lyrics-chip:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* Non-blocking lyrics popover. Docks at the top-right of the viewport,
+   doesn't dim the page, doesn't capture clicks elsewhere. Clicking a
+   different .lyrics-chip while it's open swaps the content via React
+   state rather than dismiss-and-reopen. */
+.lyrics-popover {
+  position: fixed;
+  top: 16px;
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(64vh, calc(100vh - 32px));
+  background: var(--surface);
+  color: var(--fg);
+  /* Break inherited italic from .chorus-snippet (the popover is mounted
+     in the React tree under that italic ancestor). */
+  font-style: normal;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  display: flex;
+  flex-direction: column;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.6) inset,
+    0 2px 6px rgba(20, 14, 40, 0.05),
+    0 24px 60px rgba(20, 14, 40, 0.18);
+  overflow: hidden;
+  z-index: 950;
+}
+.lyrics-popover-dock-left {
+  left: 16px;
+  animation: lyrics-popover-enter-left 220ms cubic-bezier(0.2, 0.9, 0.3, 1.1);
+}
+.lyrics-popover-dock-right {
+  right: 16px;
+  animation: lyrics-popover-enter-right 220ms cubic-bezier(0.2, 0.9, 0.3, 1.1);
+}
+@keyframes lyrics-popover-enter-left {
+  from { opacity: 0; transform: translateX(-10px) scale(0.97); }
+  to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+@keyframes lyrics-popover-enter-right {
+  from { opacity: 0; transform: translateX(10px) scale(0.97); }
+  to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+/* Mobile / narrow viewports: morph into a bottom-sheet so the page
+   above the popover is still scannable and clickable. Lyrics scroll
+   inside the sheet; user closes with the × or Escape. The dock-left
+   / dock-right modifiers are ignored on this size — both collapse
+   into the bottom sheet. */
+@media (max-width: 640px) {
+  .lyrics-popover,
+  .lyrics-popover-dock-left,
+  .lyrics-popover-dock-right {
+    top: auto;
+    right: 0;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    max-height: 70vh;
+    border-radius: 18px 18px 0 0;
+    box-shadow:
+      0 -2px 6px rgba(20, 14, 40, 0.05),
+      0 -16px 40px rgba(20, 14, 40, 0.18);
+    animation: lyrics-popover-enter-mobile 240ms cubic-bezier(0.2, 0.9, 0.3, 1.1);
+  }
+  @keyframes lyrics-popover-enter-mobile {
+    from { opacity: 0; transform: translateY(24px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+}
+.lyrics-popover::before {
+  /* Atmospheric brand-purple bloom across the top of the popover —
+     adds depth and a subtle "this is a songpicker surface" signal
+     without the heaviness of a solid stripe. Solid --accent (NOT the
+     AI gradient) since LRCLIB lyrics aren't AI-generated. */
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 80%;
+  height: 90px;
+  background: radial-gradient(ellipse at top, rgba(90, 59, 255, 0.16), transparent 70%);
+  pointer-events: none;
+}
+@keyframes lyrics-popover-body-swap {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.lyrics-popover-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 12px;
+  position: relative; /* above ::before bloom */
+  cursor: grab;
+  user-select: none;
+}
+.lyrics-popover-dragging .lyrics-popover-header {
+  cursor: grabbing;
+}
+/* Once the user has dragged the popover, top/left are pinned inline
+   and we want to skip the side-dock entry animation that would
+   otherwise re-run on song swaps. */
+.lyrics-popover-positioned {
+  animation: none;
+}
+.lyrics-popover-title {
+  font-size: 1.05rem;
+  line-height: 1.35;
+  letter-spacing: -0.005em;
+}
+.lyrics-popover-title strong {
+  color: var(--fg);
+  font-weight: 600;
+}
+.lyrics-popover-author {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-weight: normal;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+.lyrics-popover-body {
+  padding: 14px 22px 22px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  border-top: 1px solid var(--border);
+  /* The body remounts on song change via React key={song.id}, so this
+     animation runs on each swap — content visibly refreshes. */
+  animation: lyrics-popover-body-swap 200ms ease-out;
+  /* Thin custom scrollbar — the OS default is too heavy in a small
+     surface. Firefox + WebKit support these two declarations. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.lyrics-popover-body::-webkit-scrollbar {
+  width: 6px;
+}
+.lyrics-popover-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.lyrics-popover-body::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+.lyrics-popover-body::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
+.lyrics-text {
+  white-space: pre-wrap;
+  font-family: Georgia, 'Cambria', 'Times New Roman', serif;
+  font-size: 1rem;
+  line-height: 1.65;
+  margin: 0;
+  max-width: 100%;
+  color: var(--fg);
+}
+.lyrics-status {
+  color: var(--muted);
+  text-align: center;
+  padding: 28px 0;
+}
+.lyrics-status-error {
+  color: var(--error);
+}
+.lyrics-status-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+.lyrics-status-hint {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0;
+}
+.lyrics-popover-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px 12px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+.lyrics-popover-footer .btn-link {
+  /* Keep "Re-check" intact even when a long recording-artist credit
+     fills the rest of the footer; the source label wraps instead. */
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.lyrics-popover-source {
+  text-transform: uppercase;
+  font-weight: 600;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  /* Allow long recording-artist names to wrap to a second line
+     rather than getting clipped against the Re-check button. */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.lyrics-popover-artist {
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.lyrics-popover-artist-label {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  opacity: 0.7;
+}
+.lyrics-popover-close {
+  border-color: transparent;
+  background: transparent;
+  color: var(--fg);
+  opacity: 0.55;
+}
+.lyrics-popover-close:hover,
+.lyrics-popover-close:focus-visible {
+  opacity: 1;
+  background: var(--border);
+  outline: none;
+}
+.btn-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: inherit;
+  font-weight: 500;
+  text-decoration: none;
+}
+.btn-link:hover,
+.btn-link:focus-visible {
+  text-decoration: underline;
+  outline: none;
+}
+.btn-link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  text-decoration: none;
 }
 .iconbtn-pco:hover {
   border-color: #6cb33f;

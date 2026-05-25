@@ -55,6 +55,13 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Shared cross-user cache of song lyrics fetched from LRCLIB. The
+    // getLyrics Cloud Function reads/writes via admin SDK; clients
+    // always go through the callable, never read here directly.
+    match /lyrics/{cacheKey} {
+      allow read, write: if false;
+    }
+
     match /sessions/{sessionId} {
       allow read: if signedIn() && ownsExisting();
       allow create: if signedIn() && ownsIncoming();

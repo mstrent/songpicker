@@ -1,4 +1,5 @@
 import { initializeApp } from 'firebase-admin/app'
+import { getFirestore } from 'firebase-admin/firestore'
 import { setGlobalOptions } from 'firebase-functions/v2'
 import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/https'
 
@@ -19,6 +20,7 @@ import {
 } from './ai/anthropic'
 import { AUTO_REFRESH_NUDGE, buildSampleUserMessage } from './ai/userMessage'
 import type { AiCandidate, StreamChunk } from './ai/types'
+import { defaultLyricsDeps, getLyricsForSong } from './lyrics'
 import { loadAllMetrics, recordMetric } from './metrics'
 import { PcoClient } from './pco/client'
 import { pMap } from './pco/concurrency'
@@ -324,6 +326,33 @@ export const searchSongsBatch = onCall(async (req) => {
     return client.searchSongs(query, author)
   })
   return { results }
+})
+
+// On-demand lyrics lookup for the candidate-card / slot-row modal.
+// Wraps LRCLIB behind a shared Firestore cache so each (title, author)
+// is fetched at most once across all users. Negative results are
+// cached too — the modal exposes a "Re-check LRCLIB" button that sets
+// forceRefresh: true when the user wants to try again.
+export const getLyrics = onCall(async (req) => {
+  await requireAllowed(req)
+  const { title, author, forceRefresh } = req.data as {
+    title?: string
+    author?: string
+    forceRefresh?: boolean
+  }
+  if (!title || typeof title !== 'string') {
+    throw new HttpsError('invalid-argument', 'title required')
+  }
+  const db = getFirestore()
+  const result = await getLyricsForSong(
+    {
+      title: title.trim(),
+      author: typeof author === 'string' && author.trim() ? author.trim() : undefined,
+      forceRefresh: forceRefresh === true,
+    },
+    defaultLyricsDeps(db),
+  )
+  return result
 })
 
 // Streaming callable: streams text deltas and tool actions as the AI
