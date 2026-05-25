@@ -15,6 +15,7 @@ import { Icon } from './Icon'
 import { EmptyState } from './EmptyState'
 import { SongLookupLinks } from './SongLookupLinks'
 import { LyricsTrigger, LyricsPopover, type ActiveLyrics } from './LyricsButton'
+import { lastScheduledDisplay } from '../lib/lastScheduled'
 
 type OpenPrompt = 'role' | 'structure' | null
 
@@ -878,23 +879,22 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                           </span>
                         ) : c.song!.lastScheduledAt ? (
                           (() => {
-                            const recent = playedWithinDays(
+                            // PCO's last_scheduled_at includes future
+                            // plans — a song queued on next Sunday's
+                            // plan comes back as a future timestamp.
+                            // Branch on past vs future inside the
+                            // helper so the chip never says "last
+                            // played today" for an upcoming schedule.
+                            const d = lastScheduledDisplay(
                               c.song!.lastScheduledAt,
-                              28,
                             )
+                            if (!d) return null
                             return (
                               <span
-                                className={`chip chip-time${recent ? ' chip-recent' : ''}`}
-                                title={
-                                  recent
-                                    ? `Played ${relativeTime(c.song!.lastScheduledAt)} — recent enough that congregations may notice if you repeat it`
-                                    : new Date(
-                                        c.song!.lastScheduledAt,
-                                      ).toLocaleString()
-                                }
+                                className={`chip chip-time${d.recent ? ' chip-recent' : ''}`}
+                                title={d.tooltip}
                               >
-                                last played{' '}
-                                {relativeTime(c.song!.lastScheduledAt)}
+                                {d.label}
                               </span>
                             )
                           })()
@@ -1098,25 +1098,5 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
       )}
     </div>
   )
-}
-
-
-// True iff `iso` parses to a date within the last `days` days. Used to
-// flag "recently played" candidates so the user can avoid repeating
-// what the congregation just heard.
-function playedWithinDays(iso: string, days: number): boolean {
-  const t = new Date(iso).getTime()
-  if (Number.isNaN(t)) return false
-  return Date.now() - t < days * 24 * 60 * 60 * 1000
-}
-
-function relativeTime(iso: string): string {
-  const days = Math.floor((Date.now() - new Date(iso).getTime()) / (1000 * 60 * 60 * 24))
-  if (days < 1) return 'today'
-  if (days < 7) return `${days} day${days === 1 ? '' : 's'} ago`
-  if (days < 60) return `${Math.floor(days / 7)} weeks ago`
-  if (days < 365) return `${Math.floor(days / 30)} months ago`
-  const years = Math.floor(days / 365)
-  return `${years} year${years === 1 ? '' : 's'} ago`
 }
 
