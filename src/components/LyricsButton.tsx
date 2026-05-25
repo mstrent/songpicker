@@ -163,8 +163,11 @@ export function LyricsPopover({ song, onClose }: LyricsPopoverProps) {
   )
 
   // Re-fetch whenever the song changes (including initial mount).
+  // load() updates loading/result/error state as the fetch unfolds;
+  // the lint rule flags transitive setState through called functions
+  // but the standard fetch-on-effect pattern is exactly what we want.
   useEffect(() => {
-    setResult(null)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load(false)
   }, [song.id, load])
 
