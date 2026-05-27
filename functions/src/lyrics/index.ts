@@ -5,6 +5,7 @@ import {
   writeLyricsCache,
   type LyricsCacheEntry,
 } from './cache'
+import { createLyricsDisambiguator } from './disambiguate'
 import { fetchFromLrclib, type LrclibResult } from './lrclib'
 
 export interface GetLyricsRequest {
@@ -73,10 +74,17 @@ export async function getLyricsForSong(
 
 // Default-deps factory wires the orchestrator to real Firestore + LRCLIB.
 // The callable in index.ts uses this; tests inject their own deps.
-export function defaultLyricsDeps(db: Firestore): OrchestratorDeps {
+export function defaultLyricsDeps(
+  db: Firestore,
+  anthropicApiKey?: string,
+): OrchestratorDeps {
+  const disambiguate = anthropicApiKey
+    ? createLyricsDisambiguator(anthropicApiKey)
+    : undefined
   return {
     readCache: (title, author) => readLyricsCache(db, title, author),
-    writeCache: (title, author, result) => writeLyricsCache(db, title, author, result),
-    fetchLrclib: (q) => fetchFromLrclib(q),
+    writeCache: (title, author, result) =>
+      writeLyricsCache(db, title, author, result),
+    fetchLrclib: (q) => fetchFromLrclib(q, disambiguate),
   }
 }
