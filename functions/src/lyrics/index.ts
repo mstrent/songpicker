@@ -1,11 +1,19 @@
+import Anthropic from '@anthropic-ai/sdk'
 import type { Firestore } from 'firebase-admin/firestore'
 
 import {
+  lyricsCacheKey,
   readLyricsCache,
   writeLyricsCache,
   type LyricsCacheEntry,
 } from './cache'
 import { createLyricsDisambiguator } from './disambiguate'
+import {
+  enrichSnippets as enrichSnippetsCore,
+  type EnrichSnippetsDeps,
+  type SnippetQuery,
+  type SnippetResult,
+} from './enrichSnippets'
 import { fetchFromLrclib, type LrclibResult } from './lrclib'
 
 export interface GetLyricsRequest {
@@ -88,3 +96,68 @@ export function defaultLyricsDeps(
     fetchLrclib: (q) => fetchFromLrclib(q, disambiguate),
   }
 }
+
+const HAIKU_MODEL = 'claude-haiku-4-5-20251001'
+
+export function defaultEnrichDeps(
+  db: Firestore,
+  anthropicApiKey: string,
+): EnrichSnippetsDeps {
+  const client = new Anthropic({ apiKey: anthropicApiKey })
+  const disambiguate = createLyricsDisambiguator(anthropicApiKey)
+
+  return {
+    async batchReadLyricsCache(
+      queries: SnippetQuery[],
+    ): Promise<Array<LyricsCacheEntry | null>> {
+      if (queries.length === 0) return []
+      const keys = queries.map((q) => lyricsCacheKey(q.title, q.author))
+      const snaps = await db.getAll(
+        ...keys.map((k) => db.collection('lyrics').doc(k)),
+      )
+      return snaps.map((snap) => {
+        if (!snap.exists) return null
+        const data = snap.data() as
+          | (LyricsCacheEntry & { title?: string; author?: string })
+          | undefined
+        if (!data) return null
+        return {
+          found: data.found,
+          plainLyrics: data.plainLyrics,
+          instrumental: data.instrumental,
+          lrclibId: data.lrclibId,
+          artistName: data.artistName ?? null,
+          source: data.source,
+          fetchedAt: data.fetchedAt,
+        }
+      })
+    },
+
+    async fetchAndCacheLyrics(query: SnippetQuery): Promise<LrclibResult> {
+      const fresh = await fetchFromLrclib(
+        { title: query.title, author: query.author },
+        disambiguate,
+      )
+      await writeLyricsCache(db, query.title, query.author, fresh)
+      return fresh
+    },
+
+    async callHaiku(
+      prompt: string,
+    ): Promise<Record<string, string | null>> {
+      const response = await client.messages.create({
+        model: HAIKU_MODEL,
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: prompt }],
+      })
+      const text =
+        response.content[0]?.type === 'text' ? response.content[0].text : ''
+      const jsonMatch = text.match(/\{[\s\S]*\}/)
+      if (!jsonMatch) return {}
+      return JSON.parse(jsonMatch[0])
+    },
+  }
+}
+
+export { enrichSnippetsCore as enrichSnippetsBatch }
+export type { SnippetQuery, SnippetResult }

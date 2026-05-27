@@ -19,7 +19,12 @@ import {
 } from './ai/anthropic'
 import { AUTO_REFRESH_NUDGE, buildSampleUserMessage } from './ai/userMessage'
 import type { AiCandidate, StreamChunk } from './ai/types'
-import { defaultLyricsDeps, getLyricsForSong } from './lyrics'
+import {
+  defaultEnrichDeps,
+  defaultLyricsDeps,
+  enrichSnippetsBatch,
+  getLyricsForSong,
+} from './lyrics'
 import { loadAllMetrics, recordMetric } from './metrics'
 import { PcoClient } from './pco/client'
 import { pMap } from './pco/concurrency'
@@ -357,6 +362,38 @@ export const getLyrics = onCall(
       defaultLyricsDeps(db, ANTHROPIC_API_KEY.value()),
     )
     return result
+  },
+)
+
+export const enrichSnippets = onCall(
+  { secrets: [ANTHROPIC_API_KEY] },
+  async (req) => {
+    await requireAllowed(req)
+    const { songs } = req.data as {
+      songs?: Array<{ title?: string; author?: string }>
+    }
+    if (!Array.isArray(songs) || songs.length === 0) {
+      throw new HttpsError('invalid-argument', 'songs array required')
+    }
+    if (songs.length > 20) {
+      throw new HttpsError('invalid-argument', 'max 20 songs per batch')
+    }
+    const validated = songs
+      .filter(
+        (s): s is { title: string; author?: string } =>
+          typeof s.title === 'string' && s.title.trim().length > 0,
+      )
+      .map((s) => ({
+        title: s.title.trim(),
+        author:
+          typeof s.author === 'string' && s.author.trim()
+            ? s.author.trim()
+            : undefined,
+      }))
+    const db = getFirestore()
+    const deps = defaultEnrichDeps(db, ANTHROPIC_API_KEY.value())
+    const results = await enrichSnippetsBatch(validated, deps)
+    return { results }
   },
 )
 

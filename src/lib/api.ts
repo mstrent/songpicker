@@ -310,6 +310,18 @@ export const getLyrics = httpsCallable<
   LyricsResult
 >(functions, 'getLyrics')
 
+export type SnippetSource = 'lrclib' | 'haiku-extract' | 'haiku-generate'
+
+export interface SnippetEnrichResult {
+  snippet: string | null
+  source: SnippetSource
+}
+
+export const enrichSnippets = httpsCallable<
+  { songs: Array<{ title: string; author?: string }> },
+  { results: SnippetEnrichResult[] }
+>(functions, 'enrichSnippets')
+
 export type PromptType = 'structure' | 'role'
 export type PromptSource = 'plan' | 'user' | 'system'
 
