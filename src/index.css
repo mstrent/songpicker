@@ -2307,6 +2307,24 @@ textarea {
   font-style: normal;
   padding: 0 0.15rem;
 }
+.candidate .snippet-shimmer,
+.rejected-card .snippet-shimmer {
+  height: 2.4em;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--accent-soft) 25%,
+    color-mix(in srgb, var(--accent-soft) 60%, transparent) 50%,
+    var(--accent-soft) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  margin-top: 0.35rem;
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
 
 .candidate .slot-tag {
   font-size: 0.7rem;
