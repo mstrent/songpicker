@@ -118,7 +118,7 @@ describe('enrichSnippets', () => {
     })
     expect(results[1]).toEqual({
       snippet: null,
-      source: 'haiku-generate',
+      source: null,
     })
   })
 
@@ -173,7 +173,7 @@ describe('enrichSnippets', () => {
 
     const results = await enrichSnippets([{ title: 'Unknown Song' }], deps)
 
-    expect(results[0]).toEqual({ snippet: null, source: 'haiku-generate' })
+    expect(results[0]).toEqual({ snippet: null, source: null })
   })
 
   it('returns empty array for empty input', async () => {

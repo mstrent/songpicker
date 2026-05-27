@@ -318,9 +318,9 @@ export function useCandidatePool(
         const enrichResults = res.data.results
         setCandidates((prev) =>
           prev.map((c) => {
-            if (c.suggestion.snippetSource) return c
             const idx = needsEnrich.findIndex((n) => n.id === c.id)
-            if (idx === -1 || !enrichResults[idx]) {
+            if (idx === -1) return c
+            if (!enrichResults[idx]) {
               return { ...c, enrichmentPending: false }
             }
             const { snippet, source } = enrichResults[idx]
@@ -330,7 +330,7 @@ export function useCandidatePool(
               suggestion: {
                 ...c.suggestion,
                 chorusSnippet: snippet ?? undefined,
-                snippetSource: source,
+                ...(source ? { snippetSource: source } : {}),
               },
             }
           }),

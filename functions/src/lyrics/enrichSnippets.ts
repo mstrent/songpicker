@@ -10,7 +10,7 @@ export type SnippetSource = 'lrclib' | 'haiku-extract' | 'haiku-generate'
 
 export interface SnippetResult {
   snippet: string | null
-  source: SnippetSource
+  source: SnippetSource | null
 }
 
 export interface EnrichSnippetsDeps {
@@ -107,10 +107,12 @@ export async function enrichSnippets(
         .filter((l) => l.trim())
         .slice(0, 4)
         .join('\n')
-      return { snippet: fallback || null, source: 'lrclib' }
+      return fallback
+        ? { snippet: fallback, source: 'lrclib' }
+        : { snippet: null, source: null }
     }
     if (!snippet) {
-      return { snippet: null, source: 'haiku-generate' }
+      return { snippet: null, source: null }
     }
     if (lyrics[i]) {
       return { snippet, source: 'lrclib' }

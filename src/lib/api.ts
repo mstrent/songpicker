@@ -314,7 +314,7 @@ export type SnippetSource = 'lrclib' | 'haiku-extract' | 'haiku-generate'
 
 export interface SnippetEnrichResult {
   snippet: string | null
-  source: SnippetSource
+  source: SnippetSource | null
 }
 
 export const enrichSnippets = httpsCallable<
