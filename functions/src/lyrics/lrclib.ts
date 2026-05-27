@@ -1,32 +1,21 @@
 import { normalizeText } from '../normalize'
 
-// LRCLIB is a free, no-API-key lyrics service. Lookup is multi-pass
+// LRCLIB is a free, no-API-key lyrics service. Single-pass lookup
 // against /api/search:
 //
-//   Pass 1 — per-author-token: split PCO's songwriter string by /,
-//   commas, and " and ", then query `?track_name=<title>&
-//   artist_name=<token>` for each token in order. LRCLIB's
-//   artist_name field is fuzzy on a single name (so "Matt Maher"
-//   matches recordings credited to "Matt Maher") but it rejects
-//   the whole PCO slash-list as one unmatched string. Iterating
-//   one token at a time gets around that, and gating by author
-//   token avoids title collisions (the worship "Lord I Need You"
-//   vs Kanye's secular track of the same name).
-//
-//   Pass 2 — title-only fallback with AI disambiguation: for songs
-//   whose songwriters aren't also recording artists (e.g., "Oceans"
-//   by Crocker / Houston / Ligthelm, recorded by Hillsong UNITED),
-//   fall back to `?track_name=<title>`. When multiple distinct songs
-//   share the title (the worship "Yes I Will" vs Michael Franti's
+//   Search `?track_name=<title>` and filter through
+//   titlesMatchTolerantly (parenthetical-suffix + light punctuation
+//   tolerant) so fuzzy LRCLIB ranking can't sneak in unrelated tracks
+//   ("Beat Surrender" for "Surrender"). When multiple distinct songs
+//   share the title (worship "Yes I Will" vs Michael Franti's
 //   unrelated track), results are grouped by lyrics fingerprint and
-//   a Haiku classifier picks the correct worship version. Adds ~0.5s
-//   only when there's genuine ambiguity — single-song results skip
-//   the AI call entirely.
+//   a Haiku classifier picks the correct worship version. The AI call
+//   only fires when there's genuine ambiguity — single-song results
+//   skip it entirely.
 //
-// Both passes filter the API results through titlesMatchTolerantly
-// (parenthetical-suffix + light punctuation tolerant) so that fuzzy
-// LRCLIB ranking can't sneak in unrelated tracks whose titles only
-// loosely contain the search term ("Beat Surrender" for "Surrender").
+//   PCO passes songwriter names, not recording artists, so we don't
+//   use artist_name in the LRCLIB query. Haiku disambiguation handles
+//   the title-collision case that author filtering used to address.
 
 const LRCLIB_SEARCH_URL = 'https://lrclib.net/api/search'
 
@@ -77,18 +66,6 @@ function titlesMatchTolerantly(a: string, b: string): boolean {
   const na = normalizeText(stripPunctuation(stripParentheticals(a)))
   const nb = normalizeText(stripPunctuation(stripParentheticals(b)))
   return na.length > 0 && na === nb
-}
-
-// Split PCO's songwriter credit string ("Daniel Carson, Matt Maher,
-// Christy Nockels, and Jesse Reeves" / "Brett Younker / Karl Martin /
-// Pat Barrett") into individual names. The 2-char minimum drops
-// degenerate fragments. Names are returned trimmed but un-normalized
-// — the LRCLIB API endpoint matches case-insensitively on its end.
-function authorTokens(author: string): string[] {
-  return author
-    .split(/[/,]|\sand\s/gi)
-    .map((t) => t.trim())
-    .filter((t) => normalizeText(t).length >= 2)
 }
 
 export interface DisambiguationCandidate {
@@ -161,26 +138,6 @@ export async function fetchFromLrclib(
   query: LrclibQuery,
   disambiguate?: LyricsDisambiguator,
 ): Promise<LrclibResult> {
-  // Pass 1: try each author token as an artist_name hint, in order.
-  // First search that returns a title-matched track wins.
-  if (query.author) {
-    for (const token of authorTokens(query.author)) {
-      const results = await searchLrclib({
-        track_name: query.title,
-        artist_name: token,
-      })
-      const titleMatched = results.filter((r) =>
-        titlesMatchTolerantly(query.title, r.trackName),
-      )
-      if (titleMatched.length > 0) return toFoundResult(titleMatched[0])
-    }
-  }
-
-  // Pass 2: title-only fallback. For songs whose songwriters aren't
-  // also recording artists (Oceans, etc.), search by title alone.
-  // When multiple distinct songs share the title ("Yes I Will" the
-  // worship song vs Michael Franti's "Yes I Will"), use the AI
-  // disambiguator to pick the correct worship version.
   const results = await searchLrclib({ track_name: query.title })
   const titleMatched = results.filter((r) =>
     titlesMatchTolerantly(query.title, r.trackName),
