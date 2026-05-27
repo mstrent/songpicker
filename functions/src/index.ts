@@ -333,27 +333,33 @@ export const searchSongsBatch = onCall(async (req) => {
 // is fetched at most once across all users. Negative results are
 // cached too — the modal exposes a "Re-check LRCLIB" button that sets
 // forceRefresh: true when the user wants to try again.
-export const getLyrics = onCall(async (req) => {
-  await requireAllowed(req)
-  const { title, author, forceRefresh } = req.data as {
-    title?: string
-    author?: string
-    forceRefresh?: boolean
-  }
-  if (!title || typeof title !== 'string') {
-    throw new HttpsError('invalid-argument', 'title required')
-  }
-  const db = getFirestore()
-  const result = await getLyricsForSong(
-    {
-      title: title.trim(),
-      author: typeof author === 'string' && author.trim() ? author.trim() : undefined,
-      forceRefresh: forceRefresh === true,
-    },
-    defaultLyricsDeps(db),
-  )
-  return result
-})
+export const getLyrics = onCall(
+  { secrets: [ANTHROPIC_API_KEY] },
+  async (req) => {
+    await requireAllowed(req)
+    const { title, author, forceRefresh } = req.data as {
+      title?: string
+      author?: string
+      forceRefresh?: boolean
+    }
+    if (!title || typeof title !== 'string') {
+      throw new HttpsError('invalid-argument', 'title required')
+    }
+    const db = getFirestore()
+    const result = await getLyricsForSong(
+      {
+        title: title.trim(),
+        author:
+          typeof author === 'string' && author.trim()
+            ? author.trim()
+            : undefined,
+        forceRefresh: forceRefresh === true,
+      },
+      defaultLyricsDeps(db, ANTHROPIC_API_KEY.value()),
+    )
+    return result
+  },
+)
 
 // Streaming callable: streams text deltas and tool actions as the AI
 // produces them, and resolves with the full SuggestResult for callers

@@ -13,14 +13,15 @@ import { normalizeText } from '../normalize'
 //   token avoids title collisions (the worship "Lord I Need You"
 //   vs Kanye's secular track of the same name).
 //
-//   Pass 2 — title-only fallback: for songs whose songwriters
-//   aren't also recording artists (e.g., "Oceans (Where Feet May
-//   Fail)" was written by Matt Crocker / Joel Houston / Salomon
-//   Ligthelm and recorded by Hillsong UNITED — no overlap), fall
-//   back to `?track_name=<title>` and accept the first title-match.
-//   Lyrics body is the same across worship covers; the popover
-//   surfaces the recording artist so the user can see whose
-//   version it is.
+//   Pass 2 — title-only fallback with AI disambiguation: for songs
+//   whose songwriters aren't also recording artists (e.g., "Oceans"
+//   by Crocker / Houston / Ligthelm, recorded by Hillsong UNITED),
+//   fall back to `?track_name=<title>`. When multiple distinct songs
+//   share the title (the worship "Yes I Will" vs Michael Franti's
+//   unrelated track), results are grouped by lyrics fingerprint and
+//   a Haiku classifier picks the correct worship version. Adds ~0.5s
+//   only when there's genuine ambiguity — single-song results skip
+//   the AI call entirely.
 //
 // Both passes filter the API results through titlesMatchTolerantly
 // (parenthetical-suffix + light punctuation tolerant) so that fuzzy
@@ -90,6 +91,39 @@ function authorTokens(author: string): string[] {
     .filter((t) => normalizeText(t).length >= 2)
 }
 
+export interface DisambiguationCandidate {
+  artistName: string
+  albumName: string | null
+  lyricsPreview: string
+}
+
+export type LyricsDisambiguator = (
+  query: LrclibQuery,
+  candidates: DisambiguationCandidate[],
+) => Promise<number>
+
+function lyricsFingerprint(lyrics: string | null): string {
+  if (!lyrics) return ''
+  return lyrics
+    .slice(0, 200)
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+}
+
+function groupByLyrics(
+  results: LrclibTrackResponse[],
+): LrclibTrackResponse[][] {
+  const groups = new Map<string, LrclibTrackResponse[]>()
+  for (const r of results) {
+    const fp = lyricsFingerprint(r.plainLyrics)
+    if (!fp) continue
+    const group = groups.get(fp) ?? []
+    group.push(r)
+    groups.set(fp, group)
+  }
+  return Array.from(groups.values())
+}
+
 function notFound(): LrclibResult {
   return {
     found: false,
@@ -123,7 +157,10 @@ async function searchLrclib(
   return Array.isArray(data) ? (data as LrclibTrackResponse[]) : []
 }
 
-export async function fetchFromLrclib(query: LrclibQuery): Promise<LrclibResult> {
+export async function fetchFromLrclib(
+  query: LrclibQuery,
+  disambiguate?: LyricsDisambiguator,
+): Promise<LrclibResult> {
   // Pass 1: try each author token as an artist_name hint, in order.
   // First search that returns a title-matched track wins.
   if (query.author) {
@@ -140,13 +177,34 @@ export async function fetchFromLrclib(query: LrclibQuery): Promise<LrclibResult>
   }
 
   // Pass 2: title-only fallback. For songs whose songwriters aren't
-  // also recording artists (Oceans, etc.), accept the first
-  // title-matched cover — worship covers preserve the lyric body.
+  // also recording artists (Oceans, etc.), search by title alone.
+  // When multiple distinct songs share the title ("Yes I Will" the
+  // worship song vs Michael Franti's "Yes I Will"), use the AI
+  // disambiguator to pick the correct worship version.
   const results = await searchLrclib({ track_name: query.title })
   const titleMatched = results.filter((r) =>
     titlesMatchTolerantly(query.title, r.trackName),
   )
-  if (titleMatched.length > 0) return toFoundResult(titleMatched[0])
+  if (titleMatched.length > 0) {
+    const groups = groupByLyrics(titleMatched)
+    if (groups.length > 1 && disambiguate) {
+      const representatives = groups.map((g) => ({
+        artistName: g[0].artistName,
+        albumName: g[0].albumName,
+        lyricsPreview:
+          g[0].plainLyrics?.split('\n').slice(0, 2).join(' / ') ?? '',
+      }))
+      try {
+        const pick = await disambiguate(query, representatives)
+        if (pick >= 0 && pick < groups.length) {
+          return toFoundResult(groups[pick][0])
+        }
+      } catch {
+        // Disambiguation failed — fall through to first result
+      }
+    }
+    return toFoundResult(titleMatched[0])
+  }
 
   return notFound()
 }
