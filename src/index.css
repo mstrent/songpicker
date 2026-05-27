@@ -2308,9 +2308,13 @@ textarea {
   padding: 0 0.15rem;
 }
 .candidate .snippet-unavailable {
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   font-style: italic;
   color: var(--muted);
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+  padding: 0.4rem 0.7rem;
+  border-radius: 0 6px 6px 0;
   margin-top: 0.35rem;
 }
 .candidate .snippet-shimmer,
