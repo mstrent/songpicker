@@ -1120,9 +1120,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         <LyricsPopover
           song={activeLyrics}
           onClose={() => setActiveLyrics(null)}
-          onRecheck={(plainLyrics) =>
-            reEnrichSnippet(activeLyrics.title, plainLyrics)
-          }
+          onRecheck={() => reEnrichSnippet(activeLyrics.title)}
         />
       )}
     </div>

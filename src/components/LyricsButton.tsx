@@ -114,7 +114,7 @@ export function LyricsTrigger({
 interface LyricsPopoverProps {
   song: ActiveLyrics
   onClose: () => void
-  onRecheck?: (plainLyrics: string | null) => void
+  onRecheck?: () => void
 }
 
 export function LyricsPopover({ song, onClose, onRecheck }: LyricsPopoverProps) {
@@ -153,7 +153,7 @@ export function LyricsPopover({ song, onClose, onRecheck }: LyricsPopoverProps) 
         })
         if (currentId.current === song.id) {
           setResult(res.data)
-          if (forceRefresh) onRecheck?.(res.data.plainLyrics)
+          if (forceRefresh) onRecheck?.()
         }
       } catch (err) {
         if (currentId.current === song.id) {

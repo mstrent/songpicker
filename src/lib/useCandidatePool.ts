@@ -273,7 +273,7 @@ export interface CandidatePoolApi {
    *  (otherwise PCO returns today's plan as "last scheduled"). Tests
    *  may omit it; production wires it through performIntent. */
   ensureCandidate: (evicted: EvictedSong, pcoSettled?: Promise<unknown>) => void
-  reEnrichSnippet: (title: string, plainLyrics: string | null) => void
+  reEnrichSnippet: (title: string) => void
 }
 
 export function useCandidatePool(
@@ -961,29 +961,28 @@ export function useCandidatePool(
     }
   }
 
-  function reEnrichSnippet(title: string, plainLyrics: string | null) {
+  function reEnrichSnippet(title: string) {
     const titleLower = title.toLowerCase()
-    const snippet = plainLyrics
-      ? plainLyrics
-          .split('\n')
-          .filter((l) => l.trim())
-          .slice(0, 4)
-          .join('\n') || null
-      : null
-    setCandidates((prev) =>
-      prev.map((c) => {
+    setCandidates((prev) => {
+      const updated = prev.map((c) => {
         const cTitle = (c.song?.title ?? c.suggestion.title).toLowerCase()
         if (cTitle !== titleLower) return c
         return {
           ...c,
           suggestion: {
             ...c.suggestion,
-            chorusSnippet: snippet ?? undefined,
-            snippetSource: snippet ? 'lrclib' : undefined,
+            chorusSnippet: undefined,
+            snippetSource: undefined,
           },
         }
-      }),
-    )
+      })
+      const toEnrich = updated.filter((c) => {
+        const cTitle = (c.song?.title ?? c.suggestion.title).toLowerCase()
+        return cTitle === titleLower && !c.suggestion.snippetSource
+      })
+      if (toEnrich.length > 0) triggerEnrichment(toEnrich)
+      return updated
+    })
   }
 
   return {
