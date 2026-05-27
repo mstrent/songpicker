@@ -115,14 +115,6 @@ export function AdminPage() {
               <summary>Auto-refresh nudge</summary>
               <pre>{config.tooling.autoRefreshNudge}</pre>
             </details>
-            <details className="hardcoded-display">
-              <summary>
-                Chorus snippet guidance{' '}
-                <em>(embedded in propose_songs and classify_song)</em>
-              </summary>
-              <pre>{config.tooling.chorusSnippetGuidance}</pre>
-            </details>
-
             <h4>Song classifier prompts</h4>
             <details className="hardcoded-display">
               <summary>Classifier system prompt</summary>

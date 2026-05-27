@@ -13,7 +13,6 @@ import {
 } from './access'
 import { getAiProvider } from './ai'
 import {
-  CHORUS_SNIPPET_GUIDANCE,
   CLASSIFY_SONG_SYSTEM,
   CLASSIFY_SONG_TOOL,
   TOOLS,
@@ -578,8 +577,8 @@ export const getAdminPromptConfig = onCall(async (req) => {
         name: t.name,
         description: t.description ?? '',
         // Full JSON Schema for each tool's input — exposes the nested
-        // field descriptions (SONG_SLOTS_FIELD, CHORUS_SNIPPET_FIELD,
-        // candidateId descriptions, etc.) that the top-level
+        // field descriptions (SONG_SLOTS_FIELD, candidateId
+        // descriptions, etc.) that the top-level
         // description listing doesn't show. Rendered as pretty JSON.
         inputSchema: t.input_schema,
       })),
@@ -592,7 +591,6 @@ export const getAdminPromptConfig = onCall(async (req) => {
           inputSchema: CLASSIFY_SONG_TOOL.input_schema,
         },
       },
-      chorusSnippetGuidance: CHORUS_SNIPPET_GUIDANCE,
       // Assembled system message admins-side preview: role + technical
       // requirements concatenated as the model receives them. Uses the
       // hardcoded role default; admins can substitute their own role

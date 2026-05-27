@@ -85,6 +85,7 @@ describe('useCandidatePool: initial load', () => {
             title: 'Surrender',
             author: null,
             chorusSnippet: null,
+            snippetSource: null,
             slots: [],
             matchStatus: 'matched',
             song: {
@@ -166,6 +167,7 @@ describe('useCandidatePool: setDecision', () => {
             title: 'Surrender',
             author: null,
             chorusSnippet: null,
+            snippetSource: null,
             slots: [],
             matchStatus: 'matched',
             song: {
@@ -208,6 +210,7 @@ describe('useCandidatePool: setDecision', () => {
             title: 'Surrender',
             author: null,
             chorusSnippet: null,
+            snippetSource: null,
             slots: [],
             matchStatus: 'matched',
             song: {
@@ -247,6 +250,7 @@ describe('useCandidatePool: setDecision', () => {
             title: 'Surrender',
             author: null,
             chorusSnippet: null,
+            snippetSource: null,
             slots: [],
             matchStatus: 'matched',
             song: {
@@ -382,6 +386,7 @@ describe('useCandidatePool: handleSuggest (AI driver)', () => {
             title: 'Build My Life',
             author: null,
             chorusSnippet: null,
+            snippetSource: null,
             slots: [],
             matchStatus: 'matched',
             song: {
@@ -447,6 +452,7 @@ describe('useCandidatePool: clearCandidates', () => {
             title: 'X',
             author: null,
             chorusSnippet: null,
+            snippetSource: null,
             slots: [],
             matchStatus: 'matched',
             song: null,
@@ -491,6 +497,7 @@ describe('useCandidatePool: recheckCandidate', () => {
     title: 'Surrender',
     author: 'Marc James',
     chorusSnippet: null,
+    snippetSource: null,
     slots: [],
     matchStatus: 'unmatched' as const,
     song: null,
@@ -769,29 +776,7 @@ describe('useCandidatePool: ensureCandidate (eviction enrichment)', () => {
     )
   })
 
-  it('patches suggestion.chorusSnippet when Haiku returns one', async () => {
-    vi.mocked(api.getSong).mockReturnValue(new Promise(() => {}))
-    vi.mocked(api.classifySongSlots).mockResolvedValue({
-      data: {
-        slots: ['opener'],
-        chorusSnippet: 'Way maker, miracle worker',
-      },
-    })
-
-    const planData = stubPlanData()
-    const { result } = renderHook(() => useCandidatePool('plan-1', planData))
-    await waitFor(() => expect(result.current.sessionLoaded).toBe(true))
-
-    act(() => result.current.ensureCandidate(evicted))
-    await waitFor(() =>
-      expect(result.current.candidates[0]?.suggestion.chorusSnippet).toBe(
-        'Way maker, miracle worker',
-      ),
-    )
-    expect(result.current.candidates[0]?.suggestion.slots).toEqual(['opener'])
-  })
-
-  it('leaves chorusSnippet undefined when Haiku omits it', async () => {
+  it('patches suggestion.slots from classifier response', async () => {
     vi.mocked(api.getSong).mockReturnValue(new Promise(() => {}))
     vi.mocked(api.classifySongSlots).mockResolvedValue({
       data: { slots: ['opener'] },
@@ -807,9 +792,6 @@ describe('useCandidatePool: ensureCandidate (eviction enrichment)', () => {
         'opener',
       ]),
     )
-    expect(
-      result.current.candidates[0]?.suggestion.chorusSnippet,
-    ).toBeUndefined()
   })
 
   it('flips enrichmentPending=false on getSong failure (UI moves to honest fallback)', async () => {
@@ -938,6 +920,7 @@ describe('useCandidatePool: ensureCandidate (eviction enrichment)', () => {
             title: 'Way Maker',
             author: null,
             chorusSnippet: null,
+            snippetSource: null,
             slots: [],
             matchStatus: 'matched',
             song: {

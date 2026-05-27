@@ -123,9 +123,6 @@ function renderCandidate(c: AiCandidate): string {
   if (c.slots && c.slots.length > 0) {
     parts.push(`— tagged: ${c.slots.join(', ')}`)
   }
-  if (c.chorusSnippet) {
-    parts.push(`— chorus: "${c.chorusSnippet}"`)
-  }
   return parts.join(' ')
 }
 

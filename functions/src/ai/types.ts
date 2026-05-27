@@ -179,7 +179,6 @@ export interface ClassifySongRequest {
 
 export interface ClassifySongResult {
   slots: string[]
-  chorusSnippet?: string
 }
 
 export interface AiProvider {

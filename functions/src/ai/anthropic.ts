@@ -31,31 +31,11 @@ const MODEL = 'claude-sonnet-4-6'
 // that can become positive cues by accident. Single source of truth
 // — update here, both flows pick it up. Surfaced read-only on the
 // Admin page via the existing tooling payload.
-export const CHORUS_SNIPPET_GUIDANCE = `Worship titles collide heavily across catalogues. The same title — especially single-word or very short ones — can name multiple distinct songs by different authors, with completely different lyrics. A title's exact words may also appear as a PHRASE inside an unrelated song's lyrics, where they function as content rather than identification.
+// Chorus snippets are no longer AI-sourced — they come from LRCLIB
+// via the enrichSnippets callable. The classifier only returns slot
+// labels now; Haiku is sufficient for that task.
+const CLASSIFIER_MODEL = 'claude-haiku-4-5-20251001'
 
-Rules for chorus snippets:
-- Include the snippet ONLY when you can confidently match lyrics to THIS specific title. The author (and CCLI when present) is the disambiguator — use it.
-- Knowing lyrics for a DIFFERENT song that shares this title is NOT a reason to include them here. Omit instead.
-- Don't blend lyrics from same-titled songs.
-- If a title's words appear as lyric content inside a different song, that is NOT a match.
-- Incorrect lyrics actively misleads the user. If you are not confident in the exact lyrics, respond with 'UNKNOWN' instead of guessing.`
-
-// CLAUDE.md says ancillary calls default to Haiku, and the slot half
-// of this classifier (contextual reasoning) is well-served by Haiku
-// 4.5. But the same call also returns a chorus snippet — that's a
-// recall task on worship lyrics, where Haiku fabricates plausibly-
-// sounding content even when prompted to omit. Sonnet 4.6 is
-// markedly better at "I don't know, skip." The classifier fires
-// once per eviction (rare event), so the ~4× cost over Haiku is
-// negligible vs. the cost of showing the user wrong lyrics for a
-// song they actually know.
-const CLASSIFIER_MODEL = 'claude-sonnet-4-6'
-
-// Shared field schemas reused by propose_songs and classify_song —
-// both tools accept the same conceptual song metadata (slot tags +
-// chorus snippet) and previously had near-identical inline definitions
-// that risked drifting. Extracting them puts one canonical schema +
-// one canonical description in front of the model from both flows.
 const SONG_SLOTS_FIELD = {
   type: 'array' as const,
   items: { type: 'string' as const },
@@ -63,30 +43,20 @@ const SONG_SLOTS_FIELD = {
     'Conceptual role names drawn from the structure prompt (e.g. "opener", "mid-service", "closer", "communion", "response"). Lowercase short noun phrases — NOT position labels like "song slot 2".',
 }
 
-const CHORUS_SNIPPET_FIELD = {
-  type: 'string' as const,
-  description: `1–2 recognisable lines from the chorus, under 100 chars. Helps the user identify the song at a glance and disambiguate songs sharing a title.\n\n${CHORUS_SNIPPET_GUIDANCE}`,
-}
-
 export const CLASSIFY_SONG_TOOL: Anthropic.Tool = {
   name: 'classify_song',
   description:
-    'Return slot-position labels and a chorus snippet for the given song.',
+    'Return slot-position labels for the given song.',
   input_schema: {
     type: 'object',
     properties: {
-      // Same shared schema as propose_songs, with the classifier's
-      // tighter minItems/maxItems constraints layered on.
       slots: { ...SONG_SLOTS_FIELD, minItems: 1, maxItems: 3 },
-      chorusSnippet: CHORUS_SNIPPET_FIELD,
     },
     required: ['slots'],
   },
 }
 
-export const CLASSIFY_SONG_SYSTEM = `You analyze worship songs for placement and identification within a service plan. Given a song (title + author, sometimes CCLI) and the service structure, call the classify_song tool with:
-1. 1–3 short slot-position labels — lowercase noun phrases drawn from the structure prompt's vocabulary (e.g. "opener", "mid-service", "closer"). Not sentences.
-2. An OPTIONAL chorus snippet. The tool's chorusSnippet field has detailed rules — read them. Empty is acceptable and often correct.`
+export const CLASSIFY_SONG_SYSTEM = `You analyze worship songs for placement within a service plan. Given a song (title + author, sometimes CCLI) and the service structure, call the classify_song tool with 1–3 short slot-position labels — lowercase noun phrases drawn from the structure prompt's vocabulary (e.g. "opener", "mid-service", "closer"). Not sentences.`
 
 // 1-hour cache TTL on the system + stable user prefixes. Worship-leader
 // sessions routinely span 30-90 minutes of bursty work — the default
@@ -105,7 +75,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: 'propose_songs',
     description:
-      "Add one or more new song suggestions to the candidate pool. Each suggestion needs a title; author, chorusSnippet, and slots are optional but recommended. The user sees these as new cards in the AI candidates list.",
+      "Add one or more new song suggestions to the candidate pool. Each suggestion needs a title; author and slots are optional but recommended. The user sees these as new cards in the AI candidates list.",
     input_schema: {
       type: 'object',
       properties: {
@@ -116,7 +86,6 @@ export const TOOLS: Anthropic.Tool[] = [
             properties: {
               title: { type: 'string' },
               author: { type: 'string' },
-              chorusSnippet: CHORUS_SNIPPET_FIELD,
               slots: SONG_SLOTS_FIELD,
             },
             required: ['title'],
@@ -353,7 +322,7 @@ export class AnthropicProvider implements AiProvider {
 
     for (const block of response.content) {
       if (block.type !== 'tool_use' || block.name !== 'classify_song') continue
-      const input = block.input as { slots?: unknown; chorusSnippet?: unknown }
+      const input = block.input as { slots?: unknown }
       const slots = Array.isArray(input.slots)
         ? input.slots
             .filter((s): s is string => typeof s === 'string')
@@ -361,12 +330,8 @@ export class AnthropicProvider implements AiProvider {
             .filter((s) => s.length > 0)
             .slice(0, 3)
         : []
-      const chorusSnippet =
-        typeof input.chorusSnippet === 'string' && input.chorusSnippet.trim()
-          ? input.chorusSnippet.trim().slice(0, 200)
-          : undefined
-      if (slots.length > 0 || chorusSnippet) {
-        return chorusSnippet ? { slots, chorusSnippet } : { slots }
+      if (slots.length > 0) {
+        return { slots }
       }
     }
     // Forced tool call should always produce a result, but be defensive
@@ -463,8 +428,6 @@ function parsePropose(obj: Record<string, unknown>): ProposeAction | null {
     suggestions.push({
       title: r.title.trim(),
       author: typeof r.author === 'string' ? r.author : undefined,
-      chorusSnippet:
-        typeof r.chorusSnippet === 'string' ? r.chorusSnippet : undefined,
       slots: Array.isArray(r.slots)
         ? r.slots.filter((s): s is string => typeof s === 'string')
         : undefined,

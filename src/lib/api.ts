@@ -259,10 +259,8 @@ export const getSong = httpsCallable<{ songId: string }, { song: Song }>(
 )
 
 /** Haiku-backed per-song classification. Returns slot-position
- *  labels (vocabulary from the structure prompt) plus an optional
- *  chorus snippet. Haiku is instructed to OMIT the snippet when
- *  uncertain rather than fabricate one — worship songs are easy to
- *  hallucinate plausibly. Used for the eviction-mint enrichment path. */
+ *  labels (vocabulary from the structure prompt). Used for the
+ *  eviction-mint enrichment path. */
 export const classifySongSlots = httpsCallable<
   {
     planId?: string
@@ -273,7 +271,7 @@ export const classifySongSlots = httpsCallable<
     planNotes?: string
     serviceOrder?: string
   },
-  { slots: string[]; chorusSnippet?: string }
+  { slots: string[] }
 >(functions, 'classifySongSlots')
 
 /** Bulk variant for the AI propose flow. Each input query maps to
@@ -451,11 +449,6 @@ export interface AdminPromptConfig {
       systemPrompt: string
       tool: { name: string; description: string; inputSchema: unknown }
     }
-    /** Shared chorus-snippet discipline embedded in both
-     *  propose_songs and classify_song tool field descriptions.
-     *  Surfaced separately on the admin page so admins can edit one
-     *  place and see where it lands. */
-    chorusSnippetGuidance: string
     /** composeSystemPrompt(DEFAULT_ROLE_PROMPT) — what the suggester's
      *  system message actually looks like when the hardcoded role
      *  default applies. Admins can substitute their own role

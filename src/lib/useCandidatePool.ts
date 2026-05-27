@@ -485,11 +485,6 @@ export function useCandidatePool(
       }))
     })
 
-    // Haiku classification — adds slot labels + optional chorus
-    // snippet. Independent of getSong (no PCO state involved) so fires
-    // immediately. Haiku is prompted to OMIT the snippet rather than
-    // fabricate, so an empty chorusSnippet means "Haiku wasn't sure"
-    // not "song has no chorus."
     classifySongSlots({
       planId,
       songTitle: evicted.title,
@@ -500,14 +495,13 @@ export function useCandidatePool(
       serviceOrder: ctx.serviceOrder,
     })
       .then((r) => {
-        const { slots, chorusSnippet } = r.data
-        if (slots.length === 0 && !chorusSnippet) return
+        const { slots } = r.data
+        if (slots.length === 0) return
         patchBySongId((c) => ({
           ...c,
           suggestion: {
             ...c.suggestion,
-            ...(slots.length > 0 ? { slots } : {}),
-            ...(chorusSnippet ? { chorusSnippet } : {}),
+            slots,
           },
         }))
       })
@@ -711,17 +705,14 @@ export function useCandidatePool(
         if (it.songId) slotIndexBySongId.set(it.songId, idx + 1)
       })
 
-      const knownCandidateIds = lastSentCandidateIdsRef.current
       const aiCandidates: AiCandidate[] = candidates.map((c) => {
         const slotIndex = c.song?.id
           ? slotIndexBySongId.get(c.song.id)
           : undefined
-        const isKnownToAi = knownCandidateIds.has(c.id)
         return {
           id: c.id,
           title: c.suggestion.title,
           author: c.suggestion.author,
-          chorusSnippet: isKnownToAi ? undefined : c.suggestion.chorusSnippet,
           slots:
             c.suggestion.slots && c.suggestion.slots.length > 0
               ? c.suggestion.slots
