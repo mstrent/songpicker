@@ -369,8 +369,9 @@ export const enrichSnippets = onCall(
   { secrets: [ANTHROPIC_API_KEY] },
   async (req) => {
     await requireAllowed(req)
-    const { songs } = req.data as {
+    const { songs, forceRefresh } = req.data as {
       songs?: Array<{ title?: string; author?: string }>
+      forceRefresh?: boolean
     }
     if (!Array.isArray(songs) || songs.length === 0) {
       throw new HttpsError('invalid-argument', 'songs array required')
@@ -392,7 +393,9 @@ export const enrichSnippets = onCall(
       }))
     const db = getFirestore()
     const deps = defaultEnrichDeps(db, ANTHROPIC_API_KEY.value())
-    const results = await enrichSnippetsBatch(validated, deps)
+    const results = await enrichSnippetsBatch(validated, deps, {
+      forceRefresh: forceRefresh === true,
+    })
     return { results }
   },
 )

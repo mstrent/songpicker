@@ -10,6 +10,7 @@ import {
 import { createLyricsDisambiguator } from './disambiguate'
 import {
   enrichSnippets as enrichSnippetsCore,
+  type EnrichOptions,
   type EnrichSnippetsDeps,
   type SnippetQuery,
   type SnippetResult,
@@ -160,4 +161,4 @@ export function defaultEnrichDeps(
 }
 
 export { enrichSnippetsCore as enrichSnippetsBatch }
-export type { SnippetQuery, SnippetResult }
+export type { EnrichOptions, SnippetQuery, SnippetResult }

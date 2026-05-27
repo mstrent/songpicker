@@ -273,7 +273,10 @@ export interface CandidatePoolApi {
    *  (otherwise PCO returns today's plan as "last scheduled"). Tests
    *  may omit it; production wires it through performIntent. */
   ensureCandidate: (evicted: EvictedSong, pcoSettled?: Promise<unknown>) => void
-  reEnrichSnippet: (title: string) => void
+  reEnrichSnippet: (title: string, author: string | null) => Promise<{
+    plainLyrics: string | null
+    artistName: string | null
+  } | null>
 }
 
 export function useCandidatePool(
@@ -961,28 +964,49 @@ export function useCandidatePool(
     }
   }
 
-  function reEnrichSnippet(title: string) {
+  async function reEnrichSnippet(
+    title: string,
+    author: string | null,
+  ): Promise<{ plainLyrics: string | null; artistName: string | null } | null> {
     const titleLower = title.toLowerCase()
-    setCandidates((prev) => {
-      const updated = prev.map((c) => {
+    setCandidates((prev) =>
+      prev.map((c) => {
         const cTitle = (c.song?.title ?? c.suggestion.title).toLowerCase()
         if (cTitle !== titleLower) return c
-        return {
-          ...c,
-          suggestion: {
-            ...c.suggestion,
-            chorusSnippet: undefined,
-            snippetSource: undefined,
-          },
-        }
+        return { ...c, enrichmentPending: true }
+      }),
+    )
+    try {
+      const res = await enrichSnippets({
+        songs: [{ title, author: author ?? undefined }],
+        forceRefresh: true,
       })
-      const toEnrich = updated.filter((c) => {
-        const cTitle = (c.song?.title ?? c.suggestion.title).toLowerCase()
-        return cTitle === titleLower && !c.suggestion.snippetSource
-      })
-      if (toEnrich.length > 0) triggerEnrichment(toEnrich)
-      return updated
-    })
+      const r = res.data.results[0]
+      if (!r) return null
+      setCandidates((prev) =>
+        prev.map((c) => {
+          const cTitle = (c.song?.title ?? c.suggestion.title).toLowerCase()
+          if (cTitle !== titleLower) return c
+          return {
+            ...c,
+            enrichmentPending: false,
+            suggestion: {
+              ...c.suggestion,
+              chorusSnippet: r.snippet ?? undefined,
+              ...(r.source ? { snippetSource: r.source } : {}),
+            },
+          }
+        }),
+      )
+      return { plainLyrics: r.plainLyrics, artistName: r.artistName }
+    } catch {
+      setCandidates((prev) =>
+        prev.map((c) =>
+          c.enrichmentPending ? { ...c, enrichmentPending: false } : c,
+        ),
+      )
+      return null
+    }
   }
 
   return {

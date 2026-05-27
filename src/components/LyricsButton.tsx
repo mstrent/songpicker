@@ -114,7 +114,7 @@ export function LyricsTrigger({
 interface LyricsPopoverProps {
   song: ActiveLyrics
   onClose: () => void
-  onRecheck?: () => void
+  onRecheck?: () => Promise<{ plainLyrics: string | null; artistName: string | null } | null>
 }
 
 export function LyricsPopover({ song, onClose, onRecheck }: LyricsPopoverProps) {
@@ -151,10 +151,7 @@ export function LyricsPopover({ song, onClose, onRecheck }: LyricsPopoverProps) 
           author: song.author ?? undefined,
           forceRefresh,
         })
-        if (currentId.current === song.id) {
-          setResult(res.data)
-          if (forceRefresh) onRecheck?.()
-        }
+        if (currentId.current === song.id) setResult(res.data)
       } catch (err) {
         if (currentId.current === song.id) {
           setError(err instanceof Error ? err.message : 'Failed to fetch lyrics')
@@ -163,7 +160,7 @@ export function LyricsPopover({ song, onClose, onRecheck }: LyricsPopoverProps) 
         if (currentId.current === song.id) setLoading(false)
       }
     },
-    [song.id, song.title, song.author, onRecheck],
+    [song.id, song.title, song.author],
   )
 
   // Re-fetch whenever the song changes (including initial mount).
@@ -347,7 +344,34 @@ export function LyricsPopover({ song, onClose, onRecheck }: LyricsPopoverProps) 
             <button
               type="button"
               className="btn-link"
-              onClick={() => void load(true)}
+              onClick={() => {
+                if (onRecheck) {
+                  setLoading(true)
+                  setResult(null)
+                  onRecheck().then((r) => {
+                    if (currentId.current !== song.id) return
+                    if (r) {
+                      setResult({
+                        found: !!r.plainLyrics,
+                        plainLyrics: r.plainLyrics,
+                        instrumental: false,
+                        artistName: r.artistName,
+                        source: 'lrclib',
+                        fetchedAt: Date.now(),
+                        fromCache: false,
+                      })
+                    }
+                    setLoading(false)
+                  }).catch(() => {
+                    if (currentId.current === song.id) {
+                      setError('Re-check failed')
+                      setLoading(false)
+                    }
+                  })
+                } else {
+                  void load(true)
+                }
+              }}
               disabled={loading}
             >
               Re-check

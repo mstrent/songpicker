@@ -11,6 +11,8 @@ export type SnippetSource = 'lrclib' | 'haiku-extract' | 'haiku-generate'
 export interface SnippetResult {
   snippet: string | null
   source: SnippetSource | null
+  plainLyrics: string | null
+  artistName: string | null
 }
 
 export interface EnrichSnippetsDeps {
@@ -56,30 +58,55 @@ function parseHaikuResponse(
   return results
 }
 
+export interface EnrichOptions {
+  forceRefresh?: boolean
+}
+
 export async function enrichSnippets(
   queries: SnippetQuery[],
   deps: EnrichSnippetsDeps,
+  options?: EnrichOptions,
 ): Promise<SnippetResult[]> {
   if (queries.length === 0) return []
 
-  const cached = await deps.batchReadLyricsCache(queries)
-
   const lyrics: Array<string | null> = []
+  const artists: Array<string | null> = []
   const fetchPromises: Array<Promise<void>> = []
-  for (let i = 0; i < queries.length; i++) {
-    const entry = cached[i]
-    if (entry?.found && entry.plainLyrics) {
-      lyrics[i] = entry.plainLyrics
-    } else {
+
+  if (options?.forceRefresh) {
+    for (let i = 0; i < queries.length; i++) {
       lyrics[i] = null
+      artists[i] = null
       fetchPromises.push(
         deps
           .fetchAndCacheLyrics(queries[i])
           .then((r) => {
             if (r.found && r.plainLyrics) lyrics[i] = r.plainLyrics
+            artists[i] = r.artistName
           })
           .catch(() => {}),
       )
+    }
+  } else {
+    const cached = await deps.batchReadLyricsCache(queries)
+    for (let i = 0; i < queries.length; i++) {
+      const entry = cached[i]
+      if (entry?.found && entry.plainLyrics) {
+        lyrics[i] = entry.plainLyrics
+        artists[i] = entry.artistName
+      } else {
+        lyrics[i] = null
+        artists[i] = null
+        fetchPromises.push(
+          deps
+            .fetchAndCacheLyrics(queries[i])
+            .then((r) => {
+              if (r.found && r.plainLyrics) lyrics[i] = r.plainLyrics
+              artists[i] = r.artistName
+            })
+            .catch(() => {}),
+        )
+      }
     }
   }
   await Promise.all(fetchPromises)
@@ -100,23 +127,25 @@ export async function enrichSnippets(
   }
 
   return queries.map((_, i): SnippetResult => {
+    const pl = lyrics[i] ?? null
+    const ar = artists[i] ?? null
     const snippet = haikuSnippets[i] ?? null
-    if (!snippet && lyrics[i]) {
-      const fallback = lyrics[i]!
+    if (!snippet && pl) {
+      const fallback = pl
         .split('\n')
         .filter((l) => l.trim())
         .slice(0, 4)
         .join('\n')
       return fallback
-        ? { snippet: fallback, source: 'lrclib' }
-        : { snippet: null, source: null }
+        ? { snippet: fallback, source: 'lrclib', plainLyrics: pl, artistName: ar }
+        : { snippet: null, source: null, plainLyrics: pl, artistName: ar }
     }
     if (!snippet) {
-      return { snippet: null, source: null }
+      return { snippet: null, source: null, plainLyrics: pl, artistName: ar }
     }
-    if (lyrics[i]) {
-      return { snippet, source: 'lrclib' }
+    if (pl) {
+      return { snippet, source: 'lrclib', plainLyrics: pl, artistName: ar }
     }
-    return { snippet, source: 'haiku-generate' }
+    return { snippet, source: 'haiku-generate', plainLyrics: null, artistName: null }
   })
 }

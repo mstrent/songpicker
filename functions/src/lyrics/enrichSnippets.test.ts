@@ -50,13 +50,16 @@ describe('enrichSnippets', () => {
     )
 
     expect(results).toHaveLength(2)
-    expect(results[0]).toEqual({
+    expect(results[0]).toMatchObject({
       snippet: 'I count on one thing\nThe same God who never fails',
       source: 'lrclib',
+      artistName: 'Vertical Worship',
     })
-    expect(results[1]).toEqual({
+    expect(results[0].plainLyrics).toContain('I count on one thing')
+    expect(results[1]).toMatchObject({
       snippet: 'Come let us worship our King\nCome let us bow at His feet',
       source: 'lrclib',
+      artistName: 'Phil Wickham',
     })
   })
 
@@ -82,6 +85,8 @@ describe('enrichSnippets', () => {
     expect(results[0]).toEqual({
       snippet: 'Amazing grace how sweet the sound',
       source: 'haiku-generate',
+      plainLyrics: null,
+      artistName: null,
     })
   })
 
@@ -112,13 +117,16 @@ describe('enrichSnippets', () => {
       deps,
     )
 
-    expect(results[0]).toEqual({
+    expect(results[0]).toMatchObject({
       snippet: 'Spirit lead me where my trust is without borders',
       source: 'lrclib',
+      artistName: 'Hillsong',
     })
     expect(results[1]).toEqual({
       snippet: null,
       source: null,
+      plainLyrics: null,
+      artistName: null,
     })
   })
 
@@ -127,7 +135,8 @@ describe('enrichSnippets', () => {
       batchReadLyricsCache: vi.fn().mockResolvedValue([
         {
           found: true,
-          plainLyrics: 'The battle rages on\nAs storms and tempests roar\nWe cannot win this fight',
+          plainLyrics:
+            'The battle rages on\nAs storms and tempests roar\nWe cannot win this fight',
           artistName: 'Chris Tomlin',
         },
       ]),
@@ -136,9 +145,11 @@ describe('enrichSnippets', () => {
 
     const results = await enrichSnippets([{ title: 'White Flag' }], deps)
 
-    expect(results[0]).toEqual({
-      snippet: 'The battle rages on\nAs storms and tempests roar\nWe cannot win this fight',
+    expect(results[0]).toMatchObject({
+      snippet:
+        'The battle rages on\nAs storms and tempests roar\nWe cannot win this fight',
       source: 'lrclib',
+      artistName: 'Chris Tomlin',
     })
   })
 
@@ -156,9 +167,10 @@ describe('enrichSnippets', () => {
 
     const results = await enrichSnippets([{ title: 'Some Song' }], deps)
 
-    expect(results[0]).toEqual({
+    expect(results[0]).toMatchObject({
       snippet: 'Line one\nLine two\nLine three\nLine four',
       source: 'lrclib',
+      artistName: 'Artist',
     })
   })
 
@@ -166,14 +178,22 @@ describe('enrichSnippets', () => {
     const deps = makeDeps({
       batchReadLyricsCache: vi.fn().mockResolvedValue([null]),
       fetchAndCacheLyrics: vi.fn().mockResolvedValue({
-        found: false, plainLyrics: null, instrumental: false, artistName: null,
+        found: false,
+        plainLyrics: null,
+        instrumental: false,
+        artistName: null,
       }),
       callHaiku: vi.fn().mockRejectedValue(new Error('API down')),
     })
 
     const results = await enrichSnippets([{ title: 'Unknown Song' }], deps)
 
-    expect(results[0]).toEqual({ snippet: null, source: null })
+    expect(results[0]).toEqual({
+      snippet: null,
+      source: null,
+      plainLyrics: null,
+      artistName: null,
+    })
   })
 
   it('returns empty array for empty input', async () => {
@@ -207,8 +227,37 @@ describe('enrichSnippets', () => {
       title: 'Way Maker',
       author: 'Sinach',
     })
-    expect(results[0]).toEqual({
+    expect(results[0]).toMatchObject({
       snippet: 'Way maker miracle worker',
+      source: 'lrclib',
+      artistName: 'Sinach',
+    })
+  })
+
+  it('skips cache and re-fetches when forceRefresh is true', async () => {
+    const deps = makeDeps({
+      fetchAndCacheLyrics: vi.fn().mockResolvedValue({
+        found: true,
+        plainLyrics: 'Fresh lyrics from LRCLIB',
+        instrumental: false,
+        lrclibId: 1,
+        artistName: 'Artist',
+      }),
+      callHaiku: vi.fn().mockResolvedValue({
+        '0': 'Fresh lyrics from LRCLIB',
+      }),
+    })
+
+    const results = await enrichSnippets(
+      [{ title: 'Song' }],
+      deps,
+      { forceRefresh: true },
+    )
+
+    expect(deps.batchReadLyricsCache).not.toHaveBeenCalled()
+    expect(deps.fetchAndCacheLyrics).toHaveBeenCalled()
+    expect(results[0]).toMatchObject({
+      snippet: 'Fresh lyrics from LRCLIB',
       source: 'lrclib',
     })
   })

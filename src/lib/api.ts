@@ -315,10 +315,12 @@ export type SnippetSource = 'lrclib' | 'haiku-extract' | 'haiku-generate'
 export interface SnippetEnrichResult {
   snippet: string | null
   source: SnippetSource | null
+  plainLyrics: string | null
+  artistName: string | null
 }
 
 export const enrichSnippets = httpsCallable<
-  { songs: Array<{ title: string; author?: string }> },
+  { songs: Array<{ title: string; author?: string }>; forceRefresh?: boolean },
   { results: SnippetEnrichResult[] }
 >(functions, 'enrichSnippets')
 
