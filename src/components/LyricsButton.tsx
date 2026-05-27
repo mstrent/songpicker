@@ -114,9 +114,10 @@ export function LyricsTrigger({
 interface LyricsPopoverProps {
   song: ActiveLyrics
   onClose: () => void
+  onRecheck?: () => void
 }
 
-export function LyricsPopover({ song, onClose }: LyricsPopoverProps) {
+export function LyricsPopover({ song, onClose, onRecheck }: LyricsPopoverProps) {
   const [loading, setLoading] = useState(true)
   const [result, setResult] = useState<LyricsResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -150,7 +151,10 @@ export function LyricsPopover({ song, onClose }: LyricsPopoverProps) {
           author: song.author ?? undefined,
           forceRefresh,
         })
-        if (currentId.current === song.id) setResult(res.data)
+        if (currentId.current === song.id) {
+          setResult(res.data)
+          if (forceRefresh) onRecheck?.()
+        }
       } catch (err) {
         if (currentId.current === song.id) {
           setError(err instanceof Error ? err.message : 'Failed to fetch lyrics')
@@ -159,7 +163,7 @@ export function LyricsPopover({ song, onClose }: LyricsPopoverProps) {
         if (currentId.current === song.id) setLoading(false)
       }
     },
-    [song.id, song.title, song.author],
+    [song.id, song.title, song.author, onRecheck],
   )
 
   // Re-fetch whenever the song changes (including initial mount).

@@ -273,6 +273,7 @@ export interface CandidatePoolApi {
    *  (otherwise PCO returns today's plan as "last scheduled"). Tests
    *  may omit it; production wires it through performIntent. */
   ensureCandidate: (evicted: EvictedSong, pcoSettled?: Promise<unknown>) => void
+  reEnrichSnippet: (title: string) => void
 }
 
 export function useCandidatePool(
@@ -960,6 +961,27 @@ export function useCandidatePool(
     }
   }
 
+  function reEnrichSnippet(title: string) {
+    const titleLower = title.toLowerCase()
+    setCandidates((prev) => {
+      const cleared = prev.map((c) => {
+        const cTitle = (c.song?.title ?? c.suggestion.title).toLowerCase()
+        if (cTitle !== titleLower) return c
+        return {
+          ...c,
+          suggestion: {
+            ...c.suggestion,
+            chorusSnippet: undefined,
+            snippetSource: undefined,
+          },
+        }
+      })
+      const needsEnrich = cleared.filter((c) => !c.suggestion.snippetSource)
+      if (needsEnrich.length > 0) triggerEnrichment(needsEnrich)
+      return cleared
+    })
+  }
+
   return {
     candidates,
     messages,
@@ -978,5 +1000,6 @@ export function useCandidatePool(
     appendSystemMessage,
     isCandidateCommitted,
     ensureCandidate,
+    reEnrichSnippet,
   }
 }

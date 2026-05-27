@@ -90,6 +90,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     clearCandidates,
     isCandidateCommitted,
     ensureCandidate,
+    reEnrichSnippet,
   } = useCandidatePool(planId, planData)
 
   // Wire slot-eviction notifications into the candidate pool. When a
@@ -1119,6 +1120,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         <LyricsPopover
           song={activeLyrics}
           onClose={() => setActiveLyrics(null)}
+          onRecheck={() => reEnrichSnippet(activeLyrics.title)}
         />
       )}
     </div>
