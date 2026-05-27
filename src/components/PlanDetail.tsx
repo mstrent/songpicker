@@ -35,6 +35,10 @@ interface Props {
   planId: string
 }
 
+function formatSnippet(text: string): string {
+  return text.replace(/\n+/g, ' / ')
+}
+
 function snippetTooltip(
   source: string | undefined,
 ): string | undefined {
@@ -713,7 +717,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       className="rejected-snippet"
                       title={snippetTooltip(c.suggestion.snippetSource)}
                     >
-                      &ldquo;{c.suggestion.chorusSnippet}&rdquo;
+                      &ldquo;{formatSnippet(c.suggestion.chorusSnippet)}&rdquo;
                       <LyricsTrigger
                         variant="chip"
                         title={c.song?.title ?? c.suggestion.title}
@@ -963,8 +967,18 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       title={snippetTooltip(c.suggestion.snippetSource)}
                     >
                       <span className="snippet-quote" aria-hidden>"</span>
-                      {c.suggestion.chorusSnippet}
+                      {formatSnippet(c.suggestion.chorusSnippet)}
                       <span className="snippet-quote" aria-hidden>"</span>
+                      <LyricsTrigger
+                        variant="chip"
+                        title={c.song?.title ?? c.suggestion.title}
+                        author={c.song?.author ?? c.suggestion.author ?? null}
+                        onActivate={setActiveLyrics}
+                      />
+                    </div>
+                  ) : c.suggestion.snippetSource ? (
+                    <div className="snippet-unavailable">
+                      Lyrics not found
                       <LyricsTrigger
                         variant="chip"
                         title={c.song?.title ?? c.suggestion.title}
