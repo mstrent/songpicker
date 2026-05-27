@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   classifySongSlots,
+  enrichSnippets,
   getSong,
   loadSession,
   saveSession,
@@ -290,6 +291,62 @@ export function useCandidatePool(
   const unservedRejectsRef = useRef(0)
   const generatingRef = useRef(false)
   const lastSentCandidateIdsRef = useRef<Set<string>>(new Set())
+  const enrichInFlightRef = useRef(false)
+
+  const triggerEnrichment = useCallback(
+    async (pool: CandidateMatch[]) => {
+      if (enrichInFlightRef.current) return
+      const needsEnrich = pool.filter((c) => !c.suggestion.snippetSource)
+      if (needsEnrich.length === 0) return
+
+      enrichInFlightRef.current = true
+      setCandidates((prev) =>
+        prev.map((c) =>
+          !c.suggestion.snippetSource
+            ? { ...c, enrichmentPending: true }
+            : c,
+        ),
+      )
+
+      try {
+        const res = await enrichSnippets({
+          songs: needsEnrich.map((c) => ({
+            title: c.song?.title ?? c.suggestion.title,
+            author: c.song?.author ?? c.suggestion.author ?? undefined,
+          })),
+        })
+        const enrichResults = res.data.results
+        setCandidates((prev) =>
+          prev.map((c) => {
+            if (c.suggestion.snippetSource) return c
+            const idx = needsEnrich.findIndex((n) => n.id === c.id)
+            if (idx === -1 || !enrichResults[idx]) {
+              return { ...c, enrichmentPending: false }
+            }
+            const { snippet, source } = enrichResults[idx]
+            return {
+              ...c,
+              enrichmentPending: false,
+              suggestion: {
+                ...c.suggestion,
+                chorusSnippet: snippet ?? undefined,
+                snippetSource: source,
+              },
+            }
+          }),
+        )
+      } catch {
+        setCandidates((prev) =>
+          prev.map((c) =>
+            c.enrichmentPending ? { ...c, enrichmentPending: false } : c,
+          ),
+        )
+      } finally {
+        enrichInFlightRef.current = false
+      }
+    },
+    [],
+  )
 
   // Wire planData's chat-log + error sinks to point at this hook's
   // setters. planData runs slot-state operations and emits
@@ -338,16 +395,18 @@ export function useCandidatePool(
     loadSession({ planId })
       .then((res) => {
         if (cancelled) return
-        setCandidates(res.data.candidates.map(fromPersisted))
+        const loaded = res.data.candidates.map(fromPersisted)
+        setCandidates(loaded)
         setMessages(res.data.messages)
         setSessionLoaded(true)
+        triggerEnrichment(loaded)
       })
       .catch(() => !cancelled && setSessionLoaded(true))
 
     return () => {
       cancelled = true
     }
-  }, [planId])
+  }, [planId, triggerEnrichment])
 
   useEffect(() => {
     generatingRef.current = generating
@@ -803,6 +862,7 @@ export function useCandidatePool(
             appendSystemMessage(
               `🤖 AI proposed ${minted.length} new song${minted.length === 1 ? '' : 's'}`,
             )
+            triggerEnrichment(minted)
           }
         } else if (action.kind === 'remove') {
           const result = applyDecisionChange(
