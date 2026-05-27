@@ -69,6 +69,7 @@ function toPersisted(c: CandidateMatch): PersistedCandidate {
     title: c.suggestion.title,
     author: c.suggestion.author ?? null,
     chorusSnippet: c.suggestion.chorusSnippet ?? null,
+    snippetSource: c.suggestion.snippetSource ?? null,
     slots: c.suggestion.slots ?? [],
     matchStatus:
       c.matchStatus === 'checking' ? 'unmatched' : c.matchStatus,
@@ -98,6 +99,10 @@ function fromPersisted(p: PersistedCandidate): CandidateMatch {
       title: p.title,
       author: p.author ?? undefined,
       chorusSnippet: p.chorusSnippet ?? undefined,
+      snippetSource:
+        typeof p.snippetSource === 'string'
+          ? (p.snippetSource as SongSuggestion['snippetSource'])
+          : undefined,
       slots: p.slots,
     },
     matchStatus: p.matchStatus,

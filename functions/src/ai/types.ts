@@ -1,9 +1,8 @@
 export interface SongSuggestion {
   title: string
   author?: string
-  /** 1–2 line snippet from the chorus to help the user identify the song
-   *  at a glance (different "Surrender"s have different lyrics). */
   chorusSnippet?: string
+  snippetSource?: 'lrclib' | 'haiku-extract' | 'haiku-generate'
   slots?: string[]
 }
 

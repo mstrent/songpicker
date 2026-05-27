@@ -66,6 +66,7 @@ export interface SongSuggestion {
   title: string
   author?: string
   chorusSnippet?: string
+  snippetSource?: 'lrclib' | 'haiku-extract' | 'haiku-generate'
   slots?: string[]
 }
 
@@ -140,6 +141,7 @@ export interface PersistedCandidate {
   title: string
   author: string | null
   chorusSnippet: string | null
+  snippetSource: string | null
   slots: string[]
   matchStatus: MatchStatus
   song: PersistedSongRef | null

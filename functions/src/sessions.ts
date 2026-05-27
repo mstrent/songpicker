@@ -15,6 +15,7 @@ export interface PersistedCandidate {
   title: string
   author: string | null
   chorusSnippet: string | null
+  snippetSource: string | null
   slots: string[]
   matchStatus: MatchStatus
   song: PersistedSongRef | null
@@ -71,6 +72,8 @@ function sanitizeCandidate(raw: unknown): PersistedCandidate | null {
         : typeof c.reasoning === 'string'
           ? c.reasoning
           : null,
+    snippetSource:
+      typeof c.snippetSource === 'string' ? c.snippetSource : null,
     slots: Array.isArray(c.slots)
       ? c.slots.filter((s): s is string => typeof s === 'string')
       : [],
