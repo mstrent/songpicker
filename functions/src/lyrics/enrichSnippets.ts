@@ -101,8 +101,16 @@ export async function enrichSnippets(
 
   return queries.map((_, i): SnippetResult => {
     const snippet = haikuSnippets[i] ?? null
+    if (!snippet && lyrics[i]) {
+      const fallback = lyrics[i]!
+        .split('\n')
+        .filter((l) => l.trim())
+        .slice(0, 4)
+        .join('\n')
+      return { snippet: fallback || null, source: 'lrclib' }
+    }
     if (!snippet) {
-      return { snippet: null, source: lyrics[i] ? 'lrclib' : 'haiku-generate' }
+      return { snippet: null, source: 'haiku-generate' }
     }
     if (lyrics[i]) {
       return { snippet, source: 'lrclib' }

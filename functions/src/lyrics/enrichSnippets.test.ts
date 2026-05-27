@@ -122,21 +122,58 @@ describe('enrichSnippets', () => {
     })
   })
 
-  it('returns null snippets when Haiku call fails entirely', async () => {
+  it('falls back to first lines of lyrics when Haiku call fails', async () => {
     const deps = makeDeps({
       batchReadLyricsCache: vi.fn().mockResolvedValue([
         {
           found: true,
-          plainLyrics: 'Some lyrics',
-          artistName: 'Artist',
+          plainLyrics: 'The battle rages on\nAs storms and tempests roar\nWe cannot win this fight',
+          artistName: 'Chris Tomlin',
         },
       ]),
       callHaiku: vi.fn().mockRejectedValue(new Error('API down')),
     })
 
+    const results = await enrichSnippets([{ title: 'White Flag' }], deps)
+
+    expect(results[0]).toEqual({
+      snippet: 'The battle rages on\nAs storms and tempests roar\nWe cannot win this fight',
+      source: 'lrclib',
+    })
+  })
+
+  it('falls back to first lines when Haiku omits a song from its response', async () => {
+    const deps = makeDeps({
+      batchReadLyricsCache: vi.fn().mockResolvedValue([
+        {
+          found: true,
+          plainLyrics: 'Line one\nLine two\nLine three\nLine four\nLine five',
+          artistName: 'Artist',
+        },
+      ]),
+      callHaiku: vi.fn().mockResolvedValue({}),
+    })
+
     const results = await enrichSnippets([{ title: 'Some Song' }], deps)
 
-    expect(results[0]).toEqual({ snippet: null, source: 'lrclib' })
+    expect(results[0]).toEqual({
+      snippet: 'Line one\nLine two\nLine three\nLine four',
+      source: 'lrclib',
+    })
+  })
+
+  it('returns null for LRCLIB miss when Haiku also fails', async () => {
+    const deps = makeDeps({
+      batchReadLyricsCache: vi.fn().mockResolvedValue([null]),
+      fetchAndCacheLyrics: vi.fn().mockResolvedValue({
+        found: false, plainLyrics: null, instrumental: false, artistName: null,
+      }),
+      callHaiku: vi.fn().mockRejectedValue(new Error('API down')),
+    })
+
+    const results = await enrichSnippets([{ title: 'Unknown Song' }], deps)
+
+    expect(results[0]).toEqual({ snippet: null, source: 'haiku-generate' })
   })
 
   it('returns empty array for empty input', async () => {
