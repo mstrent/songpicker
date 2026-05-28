@@ -66,6 +66,7 @@ export interface SongSuggestion {
   title: string
   author?: string
   chorusSnippet?: string
+  snippetSource?: 'lrclib' | 'haiku-extract' | 'haiku-generate'
   slots?: string[]
 }
 
@@ -140,6 +141,7 @@ export interface PersistedCandidate {
   title: string
   author: string | null
   chorusSnippet: string | null
+  snippetSource: string | null
   slots: string[]
   matchStatus: MatchStatus
   song: PersistedSongRef | null
@@ -257,10 +259,8 @@ export const getSong = httpsCallable<{ songId: string }, { song: Song }>(
 )
 
 /** Haiku-backed per-song classification. Returns slot-position
- *  labels (vocabulary from the structure prompt) plus an optional
- *  chorus snippet. Haiku is instructed to OMIT the snippet when
- *  uncertain rather than fabricate one — worship songs are easy to
- *  hallucinate plausibly. Used for the eviction-mint enrichment path. */
+ *  labels (vocabulary from the structure prompt). Used for the
+ *  eviction-mint enrichment path. */
 export const classifySongSlots = httpsCallable<
   {
     planId?: string
@@ -271,7 +271,7 @@ export const classifySongSlots = httpsCallable<
     planNotes?: string
     serviceOrder?: string
   },
-  { slots: string[]; chorusSnippet?: string }
+  { slots: string[] }
 >(functions, 'classifySongSlots')
 
 /** Bulk variant for the AI propose flow. Each input query maps to
@@ -310,6 +310,23 @@ export const getLyrics = httpsCallable<
   LyricsResult
 >(functions, 'getLyrics')
 
+export type SnippetSource = 'lrclib' | 'haiku-extract' | 'haiku-generate'
+
+/** Mirror of SnippetResult in functions/src/lyrics/enrichSnippets.ts.
+ *  Kept in sync manually because functions and SPA are separate TS
+ *  builds. */
+export interface SnippetResult {
+  snippet: string | null
+  source: SnippetSource | null
+  plainLyrics: string | null
+  artistName: string | null
+}
+
+export const enrichSnippets = httpsCallable<
+  { songs: Array<{ title: string; author?: string }>; forceRefresh?: boolean },
+  { results: SnippetResult[] }
+>(functions, 'enrichSnippets')
+
 export type PromptType = 'structure' | 'role'
 export type PromptSource = 'plan' | 'user' | 'system'
 
@@ -327,7 +344,6 @@ export interface AiCandidate {
   id: string
   title: string
   author?: string
-  chorusSnippet?: string
   slots?: string[]
   decision: Decision
   assignedSlot?: { index: number; total: number }
@@ -437,8 +453,8 @@ export interface AdminPromptConfig {
   tooling: {
     /** Each tool's name + top-level description + the full JSON
      *  Schema for its input. The inputSchema exposes the nested
-     *  field descriptions (slots / chorusSnippet / candidateId etc.)
-     *  that the top-level description listing doesn't show. */
+     *  field descriptions (slots / candidateId etc.) that the
+     *  top-level description listing doesn't show. */
     tools: {
       name: string
       description: string
@@ -449,11 +465,6 @@ export interface AdminPromptConfig {
       systemPrompt: string
       tool: { name: string; description: string; inputSchema: unknown }
     }
-    /** Shared chorus-snippet discipline embedded in both
-     *  propose_songs and classify_song tool field descriptions.
-     *  Surfaced separately on the admin page so admins can edit one
-     *  place and see where it lands. */
-    chorusSnippetGuidance: string
     /** composeSystemPrompt(DEFAULT_ROLE_PROMPT) — what the suggester's
      *  system message actually looks like when the hardcoded role
      *  default applies. Admins can substitute their own role

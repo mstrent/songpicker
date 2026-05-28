@@ -123,9 +123,6 @@ function renderCandidate(c: AiCandidate): string {
   if (c.slots && c.slots.length > 0) {
     parts.push(`— tagged: ${c.slots.join(', ')}`)
   }
-  if (c.chorusSnippet) {
-    parts.push(`— chorus: "${c.chorusSnippet}"`)
-  }
   return parts.join(' ')
 }
 
@@ -149,7 +146,6 @@ export function buildSampleUserMessage(): BuiltUserMessage {
         id: 'c_sample_pending',
         title: 'Sample Pending Song',
         author: 'Sample Author',
-        chorusSnippet: 'A representative chorus snippet here',
         slots: ['opener', 'mid-service'],
         decision: 'pending',
         assignedSlot: { index: 2, total: 2 },

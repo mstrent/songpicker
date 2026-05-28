@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   classifySongSlots,
+  enrichSnippets,
   getSong,
   loadSession,
   saveSession,
@@ -69,6 +70,7 @@ function toPersisted(c: CandidateMatch): PersistedCandidate {
     title: c.suggestion.title,
     author: c.suggestion.author ?? null,
     chorusSnippet: c.suggestion.chorusSnippet ?? null,
+    snippetSource: c.suggestion.snippetSource ?? null,
     slots: c.suggestion.slots ?? [],
     matchStatus:
       c.matchStatus === 'checking' ? 'unmatched' : c.matchStatus,
@@ -98,6 +100,10 @@ function fromPersisted(p: PersistedCandidate): CandidateMatch {
       title: p.title,
       author: p.author ?? undefined,
       chorusSnippet: p.chorusSnippet ?? undefined,
+      snippetSource:
+        typeof p.snippetSource === 'string'
+          ? (p.snippetSource as SongSuggestion['snippetSource'])
+          : undefined,
       slots: p.slots,
     },
     matchStatus: p.matchStatus,
@@ -267,6 +273,19 @@ export interface CandidatePoolApi {
    *  (otherwise PCO returns today's plan as "last scheduled"). Tests
    *  may omit it; production wires it through performIntent. */
   ensureCandidate: (evicted: EvictedSong, pcoSettled?: Promise<unknown>) => void
+  reEnrichSnippet: (title: string, author: string | null) => Promise<{
+    plainLyrics: string | null
+    artistName: string | null
+  } | null>
+  /** Look up cached full lyrics for an enriched candidate by title.
+   *  Populated when triggerEnrichment / reEnrichSnippet land. In-
+   *  memory only (not persisted) so the popover can render instantly
+   *  for candidates the user has already had enriched without firing
+   *  another LRCLIB lookup. Returns null when no enriched data is
+   *  available — caller falls back to the on-demand getLyrics path. */
+  getEnrichedLyrics: (
+    title: string,
+  ) => { plainLyrics: string | null; artistName: string | null } | null
 }
 
 export function useCandidatePool(
@@ -284,7 +303,80 @@ export function useCandidatePool(
   const autoRefineTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const unservedRejectsRef = useRef(0)
   const generatingRef = useRef(false)
-  const lastSentCandidateIdsRef = useRef<Set<string>>(new Set())
+  // Per-candidate in-flight tracking. A Map keyed by candidate id lets
+  // multiple candidates enrich in parallel without one finishing pre-
+  // empting another. Replaces a global "batch in flight" flag — that
+  // made the whole pool feel synchronous (cards waited for the slowest
+  // song to land). Now each card fills in independently as its single-
+  // song enrichSnippets call returns.
+  const enrichInFlightRef = useRef<Set<string>>(new Set())
+  const enrichedLyricsRef = useRef<
+    Map<string, { plainLyrics: string | null; artistName: string | null }>
+  >(new Map())
+
+  const triggerEnrichment = useCallback(
+    async (pool: CandidateMatch[]) => {
+      const needsEnrich = pool.filter(
+        (c) =>
+          !c.suggestion.snippetSource && !enrichInFlightRef.current.has(c.id),
+      )
+      if (needsEnrich.length === 0) return
+
+      for (const c of needsEnrich) enrichInFlightRef.current.add(c.id)
+      const enrichingIds = new Set(needsEnrich.map((c) => c.id))
+      setCandidates((prev) =>
+        prev.map((c) =>
+          enrichingIds.has(c.id) ? { ...c, enrichmentPending: true } : c,
+        ),
+      )
+
+      // Fire one single-song enrichSnippets call per candidate, in
+      // parallel. Each completes independently — settle each result
+      // back into state as soon as its call returns.
+      await Promise.all(
+        needsEnrich.map(async (c) => {
+          const title = c.song?.title ?? c.suggestion.title
+          const author = c.song?.author ?? c.suggestion.author ?? undefined
+          try {
+            const res = await enrichSnippets({ songs: [{ title, author }] })
+            const r = res.data.results[0]
+            if (r) {
+              enrichedLyricsRef.current.set(title.toLowerCase(), {
+                plainLyrics: r.plainLyrics,
+                artistName: r.artistName,
+              })
+            }
+            setCandidates((prev) =>
+              prev.map((other) => {
+                if (other.id !== c.id) return other
+                if (!r) return { ...other, enrichmentPending: false }
+                return {
+                  ...other,
+                  enrichmentPending: false,
+                  suggestion: {
+                    ...other.suggestion,
+                    chorusSnippet: r.snippet ?? undefined,
+                    ...(r.source ? { snippetSource: r.source } : {}),
+                  },
+                }
+              }),
+            )
+          } catch {
+            setCandidates((prev) =>
+              prev.map((other) =>
+                other.id === c.id
+                  ? { ...other, enrichmentPending: false }
+                  : other,
+              ),
+            )
+          } finally {
+            enrichInFlightRef.current.delete(c.id)
+          }
+        }),
+      )
+    },
+    [],
+  )
 
   // Wire planData's chat-log + error sinks to point at this hook's
   // setters. planData runs slot-state operations and emits
@@ -328,21 +420,22 @@ export function useCandidatePool(
       autoRefineTimer.current = null
     }
     unservedRejectsRef.current = 0
-    lastSentCandidateIdsRef.current = new Set()
 
     loadSession({ planId })
       .then((res) => {
         if (cancelled) return
-        setCandidates(res.data.candidates.map(fromPersisted))
+        const loaded = res.data.candidates.map(fromPersisted)
+        setCandidates(loaded)
         setMessages(res.data.messages)
         setSessionLoaded(true)
+        triggerEnrichment(loaded)
       })
       .catch(() => !cancelled && setSessionLoaded(true))
 
     return () => {
       cancelled = true
     }
-  }, [planId])
+  }, [planId, triggerEnrichment])
 
   useEffect(() => {
     generatingRef.current = generating
@@ -480,11 +573,6 @@ export function useCandidatePool(
       }))
     })
 
-    // Haiku classification — adds slot labels + optional chorus
-    // snippet. Independent of getSong (no PCO state involved) so fires
-    // immediately. Haiku is prompted to OMIT the snippet rather than
-    // fabricate, so an empty chorusSnippet means "Haiku wasn't sure"
-    // not "song has no chorus."
     classifySongSlots({
       planId,
       songTitle: evicted.title,
@@ -495,14 +583,13 @@ export function useCandidatePool(
       serviceOrder: ctx.serviceOrder,
     })
       .then((r) => {
-        const { slots, chorusSnippet } = r.data
-        if (slots.length === 0 && !chorusSnippet) return
+        const { slots } = r.data
+        if (slots.length === 0) return
         patchBySongId((c) => ({
           ...c,
           suggestion: {
             ...c.suggestion,
-            ...(slots.length > 0 ? { slots } : {}),
-            ...(chorusSnippet ? { chorusSnippet } : {}),
+            slots,
           },
         }))
       })
@@ -574,7 +661,6 @@ export function useCandidatePool(
   function clearCandidates(): void {
     setCandidates([])
     setMessages([])
-    lastSentCandidateIdsRef.current = new Set()
     if (autoRefineTimer.current) {
       clearTimeout(autoRefineTimer.current)
       autoRefineTimer.current = null
@@ -706,17 +792,14 @@ export function useCandidatePool(
         if (it.songId) slotIndexBySongId.set(it.songId, idx + 1)
       })
 
-      const knownCandidateIds = lastSentCandidateIdsRef.current
       const aiCandidates: AiCandidate[] = candidates.map((c) => {
         const slotIndex = c.song?.id
           ? slotIndexBySongId.get(c.song.id)
           : undefined
-        const isKnownToAi = knownCandidateIds.has(c.id)
         return {
           id: c.id,
           title: c.suggestion.title,
           author: c.suggestion.author,
-          chorusSnippet: isKnownToAi ? undefined : c.suggestion.chorusSnippet,
           slots:
             c.suggestion.slots && c.suggestion.slots.length > 0
               ? c.suggestion.slots
@@ -801,12 +884,10 @@ export function useCandidatePool(
           if (minted.length > 0) {
             setCandidates((prev) => [...prev, ...minted])
             attachLibraryMatchesBatch(minted)
-            for (const c of minted) {
-              lastSentCandidateIdsRef.current.add(c.id)
-            }
             appendSystemMessage(
               `🤖 AI proposed ${minted.length} new song${minted.length === 1 ? '' : 's'}`,
             )
+            triggerEnrichment(minted)
           }
         } else if (action.kind === 'remove') {
           const result = applyDecisionChange(
@@ -851,8 +932,6 @@ export function useCandidatePool(
         alreadyInPlan,
         autoRefresh,
       })
-
-      lastSentCandidateIdsRef.current = new Set(aiCandidates.map((c) => c.id))
 
       for await (const chunk of stream) {
         if (chunk.kind === 'text') {
@@ -904,6 +983,61 @@ export function useCandidatePool(
     }
   }
 
+  async function reEnrichSnippet(
+    title: string,
+    author: string | null,
+  ): Promise<{ plainLyrics: string | null; artistName: string | null } | null> {
+    const titleLower = title.toLowerCase()
+    setCandidates((prev) =>
+      prev.map((c) => {
+        const cTitle = (c.song?.title ?? c.suggestion.title).toLowerCase()
+        if (cTitle !== titleLower) return c
+        return { ...c, enrichmentPending: true }
+      }),
+    )
+    try {
+      const res = await enrichSnippets({
+        songs: [{ title, author: author ?? undefined }],
+        forceRefresh: true,
+      })
+      const r = res.data.results[0]
+      if (!r) return null
+      enrichedLyricsRef.current.set(titleLower, {
+        plainLyrics: r.plainLyrics,
+        artistName: r.artistName,
+      })
+      setCandidates((prev) =>
+        prev.map((c) => {
+          const cTitle = (c.song?.title ?? c.suggestion.title).toLowerCase()
+          if (cTitle !== titleLower) return c
+          return {
+            ...c,
+            enrichmentPending: false,
+            suggestion: {
+              ...c.suggestion,
+              chorusSnippet: r.snippet ?? undefined,
+              ...(r.source ? { snippetSource: r.source } : {}),
+            },
+          }
+        }),
+      )
+      return { plainLyrics: r.plainLyrics, artistName: r.artistName }
+    } catch {
+      setCandidates((prev) =>
+        prev.map((c) =>
+          c.enrichmentPending ? { ...c, enrichmentPending: false } : c,
+        ),
+      )
+      return null
+    }
+  }
+
+  function getEnrichedLyrics(
+    title: string,
+  ): { plainLyrics: string | null; artistName: string | null } | null {
+    return enrichedLyricsRef.current.get(title.toLowerCase()) ?? null
+  }
+
   return {
     candidates,
     messages,
@@ -922,5 +1056,7 @@ export function useCandidatePool(
     appendSystemMessage,
     isCandidateCommitted,
     ensureCandidate,
+    reEnrichSnippet,
+    getEnrichedLyrics,
   }
 }

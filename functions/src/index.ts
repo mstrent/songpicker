@@ -13,14 +13,18 @@ import {
 } from './access'
 import { getAiProvider } from './ai'
 import {
-  CHORUS_SNIPPET_GUIDANCE,
   CLASSIFY_SONG_SYSTEM,
   CLASSIFY_SONG_TOOL,
   TOOLS,
 } from './ai/anthropic'
 import { AUTO_REFRESH_NUDGE, buildSampleUserMessage } from './ai/userMessage'
 import type { AiCandidate, StreamChunk } from './ai/types'
-import { defaultLyricsDeps, getLyricsForSong } from './lyrics'
+import {
+  defaultEnrichDeps,
+  defaultLyricsDeps,
+  enrichSnippetsBatch,
+  getLyricsForSong,
+} from './lyrics'
 import { loadAllMetrics, recordMetric } from './metrics'
 import { PcoClient } from './pco/client'
 import { pMap } from './pco/concurrency'
@@ -361,6 +365,41 @@ export const getLyrics = onCall(
   },
 )
 
+export const enrichSnippets = onCall(
+  { secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 180 },
+  async (req) => {
+    await requireAllowed(req)
+    const { songs, forceRefresh } = req.data as {
+      songs?: Array<{ title?: string; author?: string }>
+      forceRefresh?: boolean
+    }
+    if (!Array.isArray(songs) || songs.length === 0) {
+      throw new HttpsError('invalid-argument', 'songs array required')
+    }
+    if (songs.length > 20) {
+      throw new HttpsError('invalid-argument', 'max 20 songs per batch')
+    }
+    const validated = songs
+      .filter(
+        (s): s is { title: string; author?: string } =>
+          typeof s.title === 'string' && s.title.trim().length > 0,
+      )
+      .map((s) => ({
+        title: s.title.trim(),
+        author:
+          typeof s.author === 'string' && s.author.trim()
+            ? s.author.trim()
+            : undefined,
+      }))
+    const db = getFirestore()
+    const deps = defaultEnrichDeps(db, ANTHROPIC_API_KEY.value())
+    const results = await enrichSnippetsBatch(validated, deps, {
+      forceRefresh: forceRefresh === true,
+    })
+    return { results }
+  },
+)
+
 // Streaming callable: streams text deltas and tool actions as the AI
 // produces them, and resolves with the full SuggestResult for callers
 // that prefer the non-streaming shape (or for the final state the SPA
@@ -578,8 +617,8 @@ export const getAdminPromptConfig = onCall(async (req) => {
         name: t.name,
         description: t.description ?? '',
         // Full JSON Schema for each tool's input — exposes the nested
-        // field descriptions (SONG_SLOTS_FIELD, CHORUS_SNIPPET_FIELD,
-        // candidateId descriptions, etc.) that the top-level
+        // field descriptions (SONG_SLOTS_FIELD, candidateId
+        // descriptions, etc.) that the top-level
         // description listing doesn't show. Rendered as pretty JSON.
         inputSchema: t.input_schema,
       })),
@@ -592,7 +631,6 @@ export const getAdminPromptConfig = onCall(async (req) => {
           inputSchema: CLASSIFY_SONG_TOOL.input_schema,
         },
       },
-      chorusSnippetGuidance: CHORUS_SNIPPET_GUIDANCE,
       // Assembled system message admins-side preview: role + technical
       // requirements concatenated as the model receives them. Uses the
       // hardcoded role default; admins can substitute their own role

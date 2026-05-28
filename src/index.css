@@ -2307,6 +2307,34 @@ textarea {
   font-style: normal;
   padding: 0 0.15rem;
 }
+.candidate .snippet-unavailable {
+  font-size: 0.9rem;
+  font-style: italic;
+  color: var(--muted);
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+  padding: 0.4rem 0.7rem;
+  border-radius: 0 6px 6px 0;
+  margin-top: 0.35rem;
+}
+.candidate .snippet-shimmer,
+.rejected-card .snippet-shimmer {
+  height: 2.4em;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--accent-soft) 25%,
+    color-mix(in srgb, var(--accent-soft) 60%, transparent) 50%,
+    var(--accent-soft) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  margin-top: 0.35rem;
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
 
 .candidate .slot-tag {
   font-size: 0.7rem;

@@ -31,7 +31,7 @@ When a "Service structure" is provided, parse it into the distinct conceptual so
 
 Map each "[song slot N of M]" position to a structure role by sequence: slot 1 of M is the opener role, slot M of M is the closer role, and slots in between are the mid-service / middle roles. Any role whose positions are all already filled (marked "— picked: <title>") is DONE — do not propose more songs for it. Focus on roles that still have positions marked "(empty, needs a pick)". For each still-needed role, aim for at least 2-3 options so the user has real choice — unless the user has explicitly asked for something narrower.
 
-When a "Current candidates" section is provided, treat every entry as already on the user's radar — never propose a song whose title already appears there. If a prior candidate genuinely no longer fits, call remove_candidates on it instead of proposing it again under a different framing. Rejected entries: the user said no, so don't re-pitch them. Use existing entries' decisions, committed status, and chorus snippets to understand the direction the user is converging on and let that shape what you propose next.
+When a "Current candidates" section is provided, treat every entry as already on the user's radar — never propose a song whose title already appears there. If a prior candidate genuinely no longer fits, call remove_candidates on it instead of proposing it again under a different framing. Rejected entries: the user said no, so don't re-pitch them. Use existing entries' decisions and committed status to understand the direction the user is converging on and let that shape what you propose next.
 
 The same don't-re-suggest rule applies to titles in "Already in plan" — those songs are taken.
 

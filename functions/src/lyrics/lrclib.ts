@@ -1,32 +1,27 @@
 import { normalizeText } from '../normalize'
 
-// LRCLIB is a free, no-API-key lyrics service. Lookup is multi-pass
-// against /api/search:
+// LRCLIB is a free, no-API-key lyrics service. We do a fan-out
+// search to maximize coverage, then disambiguate:
 //
-//   Pass 1 — per-author-token: split PCO's songwriter string by /,
-//   commas, and " and ", then query `?track_name=<title>&
-//   artist_name=<token>` for each token in order. LRCLIB's
-//   artist_name field is fuzzy on a single name (so "Matt Maher"
-//   matches recordings credited to "Matt Maher") but it rejects
-//   the whole PCO slash-list as one unmatched string. Iterating
-//   one token at a time gets around that, and gating by author
-//   token avoids title collisions (the worship "Lord I Need You"
-//   vs Kanye's secular track of the same name).
+//   In parallel, query `?track_name=<title>` (title-only) AND
+//   `?track_name=<title>&artist_name=<token>` for each songwriter
+//   token from the PCO author string. LRCLIB's title-only search
+//   has a result cap that can push worship versions off the page
+//   when popular secular songs share the title — author-token
+//   queries surface those hidden entries. Running them in parallel
+//   keeps latency to one round-trip.
 //
-//   Pass 2 — title-only fallback with AI disambiguation: for songs
-//   whose songwriters aren't also recording artists (e.g., "Oceans"
-//   by Crocker / Houston / Ligthelm, recorded by Hillsong UNITED),
-//   fall back to `?track_name=<title>`. When multiple distinct songs
-//   share the title (the worship "Yes I Will" vs Michael Franti's
-//   unrelated track), results are grouped by lyrics fingerprint and
-//   a Haiku classifier picks the correct worship version. Adds ~0.5s
-//   only when there's genuine ambiguity — single-song results skip
-//   the AI call entirely.
+//   All results are deduplicated by id, filtered through
+//   titlesMatchTolerantly (parenthetical-suffix + light punctuation
+//   tolerant) so fuzzy LRCLIB ranking can't sneak in unrelated tracks
+//   ("Beat Surrender" for "Surrender"), and grouped by lyrics
+//   fingerprint so cover versions of the same composition collapse
+//   into one group.
 //
-// Both passes filter the API results through titlesMatchTolerantly
-// (parenthetical-suffix + light punctuation tolerant) so that fuzzy
-// LRCLIB ranking can't sneak in unrelated tracks whose titles only
-// loosely contain the search term ("Beat Surrender" for "Surrender").
+//   When multiple distinct songs share the title, a Haiku classifier
+//   picks the correct worship version. Haiku can also signal "none
+//   of these is the worship song" → we return notFound rather than
+//   guessing.
 
 const LRCLIB_SEARCH_URL = 'https://lrclib.net/api/search'
 
@@ -79,11 +74,6 @@ function titlesMatchTolerantly(a: string, b: string): boolean {
   return na.length > 0 && na === nb
 }
 
-// Split PCO's songwriter credit string ("Daniel Carson, Matt Maher,
-// Christy Nockels, and Jesse Reeves" / "Brett Younker / Karl Martin /
-// Pat Barrett") into individual names. The 2-char minimum drops
-// degenerate fragments. Names are returned trimmed but un-normalized
-// — the LRCLIB API endpoint matches case-insensitively on its end.
 function authorTokens(author: string): string[] {
   return author
     .split(/[/,]|\sand\s/gi)
@@ -97,31 +87,76 @@ export interface DisambiguationCandidate {
   lyricsPreview: string
 }
 
+/**
+ * Returns the index of the best-matching candidate, or -1 to signal
+ * "none of these is the correct song" (we'll return notFound).
+ */
 export type LyricsDisambiguator = (
   query: LrclibQuery,
   candidates: DisambiguationCandidate[],
 ) => Promise<number>
 
-function lyricsFingerprint(lyrics: string | null): string {
-  if (!lyrics) return ''
-  return lyrics
-    .slice(0, 200)
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '')
+// Build a word set from lyrics. Lowercased, alphanumeric-tokenized,
+// short tokens (<= 2 chars: "a", "is", "to", "i") dropped because they
+// dominate the overlap calculation without carrying meaning. Used by
+// lyricsSimilarity to compare two recordings.
+function wordBag(lyrics: string | null): Set<string> {
+  if (!lyrics) return new Set()
+  return new Set(
+    lyrics
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 2),
+  )
 }
 
+// Overlap ratio: |A ∩ B| / min(|A|, |B|). 1.0 means the smaller set is
+// fully contained in the larger; 0 means no shared words. We use min
+// rather than union so a shorter cover version (one verse missing) can
+// still match the longer original — Jaccard would punish that.
+function lyricsSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0
+  let intersection = 0
+  const smaller = a.size <= b.size ? a : b
+  const larger = a.size <= b.size ? b : a
+  for (const word of smaller) {
+    if (larger.has(word)) intersection++
+  }
+  return intersection / smaller.size
+}
+
+// Threshold tuned for worship covers: live/acoustic/studio versions of
+// the same composition typically share 80-95% of their words; entirely
+// different songs that happen to share a title (e.g., the worship "Lay
+// Me Down" vs Sam Smith's) share well under 30%. 0.6 puts the line
+// safely between those.
+const SIMILAR_LYRICS_THRESHOLD = 0.6
+
+// Cluster title-matched recordings into groups where each group is
+// "the same song." Uses word-bag overlap rather than a strict prefix
+// fingerprint so minor variations (live ad-libs, intro lines, verse
+// reordering, transcription typos) don't fragment one composition into
+// multiple groups. Recordings without lyrics are skipped — they can't
+// be grouped reliably.
 function groupByLyrics(
   results: LrclibTrackResponse[],
 ): LrclibTrackResponse[][] {
-  const groups = new Map<string, LrclibTrackResponse[]>()
+  const groups: Array<{ rep: Set<string>; items: LrclibTrackResponse[] }> = []
   for (const r of results) {
-    const fp = lyricsFingerprint(r.plainLyrics)
-    if (!fp) continue
-    const group = groups.get(fp) ?? []
-    group.push(r)
-    groups.set(fp, group)
+    const bag = wordBag(r.plainLyrics)
+    if (bag.size === 0) continue
+    let placed = false
+    for (const g of groups) {
+      if (lyricsSimilarity(bag, g.rep) >= SIMILAR_LYRICS_THRESHOLD) {
+        g.items.push(r)
+        placed = true
+        break
+      }
+    }
+    if (!placed) groups.push({ rep: bag, items: [r] })
   }
-  return Array.from(groups.values())
+  return groups.map((g) => g.items)
 }
 
 function notFound(): LrclibResult {
@@ -144,67 +179,156 @@ function toFoundResult(r: LrclibTrackResponse): LrclibResult {
   }
 }
 
+// Bound the number of in-flight LRCLIB HTTP requests across the whole
+// process. LRCLIB is a free service and we've seen response times balloon
+// to 8-20s per call when we hit it with 5 concurrent requests — they
+// appear to throttle by slowing responses rather than returning 429.
+// Keeping concurrency low keeps each call fast (~500ms-1s) and produces
+// better overall throughput than firing 5+ requests that each take 10s.
+const LRCLIB_CONCURRENCY = 2
+let lrclibActive = 0
+const lrclibWaiters: Array<() => void> = []
+
+async function withLrclibSlot<T>(fn: () => Promise<T>): Promise<T> {
+  while (lrclibActive >= LRCLIB_CONCURRENCY) {
+    await new Promise<void>((resolve) => lrclibWaiters.push(resolve))
+  }
+  lrclibActive++
+  try {
+    return await fn()
+  } finally {
+    lrclibActive--
+    const next = lrclibWaiters.shift()
+    if (next) next()
+  }
+}
+
+function parseRetryAfterMs(header: string | null): number {
+  if (!header) return 0
+  const n = parseInt(header, 10)
+  if (!Number.isFinite(n) || n < 0) return 0
+  return Math.min(n * 1000, 5000)
+}
+
 async function searchLrclib(
   params: Record<string, string>,
 ): Promise<LrclibTrackResponse[]> {
   const search = new URLSearchParams(params)
   const url = `${LRCLIB_SEARCH_URL}?${search.toString()}`
-  const res = await fetch(url, { method: 'GET' })
-  if (!res.ok) {
-    throw new Error(`LRCLIB request failed: HTTP ${res.status}`)
-  }
-  const data = await res.json()
-  return Array.isArray(data) ? (data as LrclibTrackResponse[]) : []
+
+  const queueDepth = lrclibActive + lrclibWaiters.length
+  const tQueued = Date.now()
+  return withLrclibSlot(async () => {
+    const waited = Date.now() - tQueued
+    // Single retry on transient errors (429, 5xx). Honors Retry-After
+    // when present; otherwise backs off 500ms. After the retry, a
+    // continuing failure throws so the caller can decide whether to
+    // cache notFound or skip caching.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const tFetch = Date.now()
+      const res = await fetch(url, { method: 'GET' })
+      if (res.ok) {
+        const data = await res.json()
+        const n = Array.isArray(data) ? data.length : 0
+        console.log(
+          `[lrclib] ${params.artist_name ? `artist=${params.artist_name}` : 'title-only'} "${params.track_name}" → ${n} results in ${Date.now() - tFetch}ms (queue wait ${waited}ms, depth was ${queueDepth})`,
+        )
+        return Array.isArray(data) ? (data as LrclibTrackResponse[]) : []
+      }
+      const transient = res.status === 429 || res.status >= 500
+      if (transient && attempt === 0) {
+        const wait =
+          parseRetryAfterMs(res.headers.get('Retry-After')) || 500
+        console.warn(
+          `[lrclib] HTTP ${res.status} for ${url} — retrying in ${wait}ms`,
+        )
+        await new Promise((r) => setTimeout(r, wait))
+        continue
+      }
+      throw new Error(`LRCLIB request failed: HTTP ${res.status}`)
+    }
+    throw new Error('LRCLIB request failed: retries exhausted')
+  })
 }
 
 export async function fetchFromLrclib(
   query: LrclibQuery,
   disambiguate?: LyricsDisambiguator,
 ): Promise<LrclibResult> {
-  // Pass 1: try each author token as an artist_name hint, in order.
-  // First search that returns a title-matched track wins.
+  const queries: Array<Record<string, string>> = [
+    { track_name: query.title },
+  ]
   if (query.author) {
     for (const token of authorTokens(query.author)) {
-      const results = await searchLrclib({
-        track_name: query.title,
-        artist_name: token,
-      })
-      const titleMatched = results.filter((r) =>
-        titlesMatchTolerantly(query.title, r.trackName),
-      )
-      if (titleMatched.length > 0) return toFoundResult(titleMatched[0])
+      queries.push({ track_name: query.title, artist_name: token })
     }
   }
 
-  // Pass 2: title-only fallback. For songs whose songwriters aren't
-  // also recording artists (Oceans, etc.), search by title alone.
-  // When multiple distinct songs share the title ("Yes I Will" the
-  // worship song vs Michael Franti's "Yes I Will"), use the AI
-  // disambiguator to pick the correct worship version.
-  const results = await searchLrclib({ track_name: query.title })
-  const titleMatched = results.filter((r) =>
+  const settled = await Promise.allSettled(queries.map((q) => searchLrclib(q)))
+
+  const errorCount = settled.filter((s) => s.status === 'rejected').length
+  if (errorCount > 0) {
+    const sample = settled.find((s) => s.status === 'rejected')
+    const reason = sample && sample.status === 'rejected' ? sample.reason : ''
+    console.warn(
+      `[lrclib] ${errorCount}/${queries.length} fan-out queries failed for "${query.title}" (sample: ${reason})`,
+    )
+  }
+  // If every fan-out query failed, this is a transient outage — throw
+  // so the caller skips caching notFound. Partial failure with at least
+  // one successful response is treated as a real (if narrower) result.
+  if (errorCount === queries.length) {
+    throw new Error(
+      `LRCLIB unavailable: all ${queries.length} queries failed for "${query.title}"`,
+    )
+  }
+
+  const byId = new Map<number, LrclibTrackResponse>()
+  for (const s of settled) {
+    if (s.status !== 'fulfilled') continue
+    for (const r of s.value) {
+      if (!byId.has(r.id)) byId.set(r.id, r)
+    }
+  }
+  const combined = Array.from(byId.values())
+  const titleMatched = combined.filter((r) =>
     titlesMatchTolerantly(query.title, r.trackName),
   )
-  if (titleMatched.length > 0) {
-    const groups = groupByLyrics(titleMatched)
-    if (groups.length > 1 && disambiguate) {
-      const representatives = groups.map((g) => ({
-        artistName: g[0].artistName,
-        albumName: g[0].albumName,
-        lyricsPreview:
-          g[0].plainLyrics?.split('\n').slice(0, 2).join(' / ') ?? '',
-      }))
-      try {
-        const pick = await disambiguate(query, representatives)
-        if (pick >= 0 && pick < groups.length) {
-          return toFoundResult(groups[pick][0])
-        }
-      } catch {
-        // Disambiguation failed — fall through to first result
-      }
-    }
-    return toFoundResult(titleMatched[0])
+  if (titleMatched.length === 0) return notFound()
+
+  // Direct artist match: if any title-matched result has a recording
+  // artist whose name contains a songwriter token (e.g., PCO lists
+  // "Phil Wickham, Chris McClarney" and the result is recorded by
+  // "Phil Wickham"), the song is the right one — return it without
+  // bothering the disambiguator. Skips a Haiku call AND avoids the
+  // disambiguator-too-strict failure mode where Haiku would return -1
+  // because the songwriter list doesn't exactly match the recording
+  // artist.
+  if (query.author) {
+    const tokens = authorTokens(query.author).map((t) => t.toLowerCase())
+    const direct = titleMatched.find((r) =>
+      tokens.some((t) => r.artistName.toLowerCase().includes(t)),
+    )
+    if (direct) return toFoundResult(direct)
   }
 
-  return notFound()
+  const groups = groupByLyrics(titleMatched)
+  if (groups.length > 1 && disambiguate) {
+    const representatives = groups.map((g) => ({
+      artistName: g[0].artistName,
+      albumName: g[0].albumName,
+      lyricsPreview:
+        g[0].plainLyrics?.split('\n').slice(0, 2).join(' / ') ?? '',
+    }))
+    try {
+      const pick = await disambiguate(query, representatives)
+      if (pick === -1) return notFound()
+      if (pick >= 0 && pick < groups.length) {
+        return toFoundResult(groups[pick][0])
+      }
+    } catch {
+      // Disambiguation failed — fall through to first result
+    }
+  }
+  return toFoundResult(titleMatched[0])
 }

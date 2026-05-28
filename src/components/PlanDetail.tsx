@@ -35,6 +35,19 @@ interface Props {
   planId: string
 }
 
+function formatSnippet(text: string): string {
+  return text.replace(/\n+/g, ' / ')
+}
+
+function snippetTooltip(
+  source: string | undefined,
+): string | undefined {
+  if (source === 'lrclib' || source === 'haiku-extract') return undefined
+  if (source === 'haiku-generate')
+    return 'Lyrics recalled from AI — may be inaccurate.'
+  return 'AI-sourced lyrics. May be inaccurate.'
+}
+
 export function PlanDetail({ serviceTypeId, planId }: Props) {
   // The "model" lives in two hooks reflecting the PCO/candidate
   // split (see CLAUDE.md). PlanDetail composes them; everything
@@ -77,6 +90,8 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     clearCandidates,
     isCandidateCommitted,
     ensureCandidate,
+    reEnrichSnippet,
+    getEnrichedLyrics,
   } = useCandidatePool(planId, planData)
 
   // Wire slot-eviction notifications into the candidate pool. When a
@@ -702,9 +717,9 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                   {c.suggestion.chorusSnippet && (
                     <div
                       className="rejected-snippet"
-                      title="AI-sourced lyrics. May be inaccurate."
+                      title={snippetTooltip(c.suggestion.snippetSource)}
                     >
-                      “{c.suggestion.chorusSnippet}”
+                      &ldquo;{formatSnippet(c.suggestion.chorusSnippet)}&rdquo;
                       <LyricsTrigger
                         variant="chip"
                         title={c.song?.title ?? c.suggestion.title}
@@ -946,14 +961,16 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       </span>
                     )}
                   </div>
-                  {c.suggestion.chorusSnippet && (
+                  {c.enrichmentPending && !c.suggestion.chorusSnippet ? (
+                    <div className="snippet-shimmer" />
+                  ) : c.suggestion.chorusSnippet ? (
                     <div
                       className="chorus-snippet"
-                      title="AI-sourced lyrics. May be inaccurate."
+                      title={snippetTooltip(c.suggestion.snippetSource)}
                     >
-                      <span className="snippet-quote" aria-hidden>“</span>
-                      {c.suggestion.chorusSnippet}
-                      <span className="snippet-quote" aria-hidden>”</span>
+                      <span className="snippet-quote" aria-hidden>"</span>
+                      {formatSnippet(c.suggestion.chorusSnippet)}
+                      <span className="snippet-quote" aria-hidden>"</span>
                       <LyricsTrigger
                         variant="chip"
                         title={c.song?.title ?? c.suggestion.title}
@@ -961,7 +978,17 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                         onActivate={setActiveLyrics}
                       />
                     </div>
-                  )}
+                  ) : c.suggestion.snippetSource ? (
+                    <div className="snippet-unavailable">
+                      Lyrics not found
+                      <LyricsTrigger
+                        variant="chip"
+                        title={c.song?.title ?? c.suggestion.title}
+                        author={c.song?.author ?? c.suggestion.author ?? null}
+                        onActivate={setActiveLyrics}
+                      />
+                    </div>
+                  ) : null}
                   <div className="decision-row">
                     {/* Outbound listen/lookup buttons — square icon-only,
                         brand-colored on hover. Provider list lives in
@@ -1094,6 +1121,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         <LyricsPopover
           song={activeLyrics}
           onClose={() => setActiveLyrics(null)}
+          onRecheck={() =>
+            reEnrichSnippet(activeLyrics.title, activeLyrics.author)
+          }
+          precomputed={getEnrichedLyrics(activeLyrics.title) ?? undefined}
         />
       )}
     </div>
