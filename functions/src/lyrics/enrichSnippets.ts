@@ -68,14 +68,20 @@ export async function enrichSnippets(
 ): Promise<SnippetResult[]> {
   if (queries.length === 0) return []
 
+  const t0 = Date.now()
+  const tag = `[enrichSnippets] n=${queries.length}${options?.forceRefresh ? ' (forceRefresh)' : ''}`
+
   const lyrics: Array<string | null> = []
   const artists: Array<string | null> = []
   const fetchPromises: Array<Promise<void>> = []
+  let cacheHits = 0
+  let lrclibFetches = 0
 
   if (options?.forceRefresh) {
     for (let i = 0; i < queries.length; i++) {
       lyrics[i] = null
       artists[i] = null
+      lrclibFetches++
       fetchPromises.push(
         deps
           .fetchAndCacheLyrics(queries[i])
@@ -87,15 +93,21 @@ export async function enrichSnippets(
       )
     }
   } else {
+    const tCacheStart = Date.now()
     const cached = await deps.batchReadLyricsCache(queries)
+    console.log(
+      `${tag} cache read: ${Date.now() - tCacheStart}ms`,
+    )
     for (let i = 0; i < queries.length; i++) {
       const entry = cached[i]
       if (entry?.found && entry.plainLyrics) {
         lyrics[i] = entry.plainLyrics
         artists[i] = entry.artistName
+        cacheHits++
       } else {
         lyrics[i] = null
         artists[i] = null
+        lrclibFetches++
         fetchPromises.push(
           deps
             .fetchAndCacheLyrics(queries[i])
@@ -108,7 +120,14 @@ export async function enrichSnippets(
       }
     }
   }
+
+  const tFetchStart = Date.now()
   await Promise.all(fetchPromises)
+  const fetchMs = Date.now() - tFetchStart
+  const songsWithLyrics = lyrics.filter((l) => l).length
+  console.log(
+    `${tag} fetches: ${fetchMs}ms (cache hits: ${cacheHits}, LRCLIB fetches: ${lrclibFetches}, lyrics resolved: ${songsWithLyrics}/${queries.length})`,
+  )
 
   const haikuInput = queries.map((q, i) => ({
     index: i,
@@ -117,13 +136,24 @@ export async function enrichSnippets(
     lyrics: lyrics[i],
   }))
 
+  const promptTokensApprox = Math.round(buildHaikuPrompt(haikuInput).length / 4)
   let haikuSnippets: Array<string | null>
+  const tHaikuStart = Date.now()
   try {
     const raw = await deps.callHaiku(buildHaikuPrompt(haikuInput))
     haikuSnippets = parseHaikuResponse(raw, queries.length)
-  } catch {
+    console.log(
+      `${tag} haiku extraction: ${Date.now() - tHaikuStart}ms (~${promptTokensApprox} input tokens)`,
+    )
+  } catch (err) {
+    console.warn(
+      `${tag} haiku extraction failed after ${Date.now() - tHaikuStart}ms (~${promptTokensApprox} input tokens):`,
+      err,
+    )
     haikuSnippets = queries.map(() => null)
   }
+
+  console.log(`${tag} total: ${Date.now() - t0}ms`)
 
   return queries.map((_, i): SnippetResult => {
     const pl = lyrics[i] ?? null
