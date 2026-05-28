@@ -186,6 +186,47 @@ describe('fetchFromLrclib', () => {
     })
   })
 
+  it('treats cover versions with slight lyric variations as one song (no disambiguator)', async () => {
+    // "Christ Be All Around Me" — multiple worship covers (Michael W.
+    // Smith, Leeland, All Sons & Daughters) with the same song but
+    // slight transcription differences (intro lines, punctuation,
+    // line breaks). The word-bag similarity should collapse them to
+    // one group → no disambiguator → return the first.
+    mockFetch.mockResolvedValue(jsonResponse([
+      track({
+        id: 1,
+        trackName: 'Christ Be All Around Me',
+        artistName: 'Michael W. Smith',
+        plainLyrics:
+          'Above me, below me, before me, behind me\nIn me, beneath me, above me, behind me\nChrist be all around me, Christ be all around me',
+      }),
+      track({
+        id: 2,
+        trackName: 'Christ Be All Around Me',
+        artistName: 'Leeland',
+        plainLyrics:
+          'Are you ready?\nAbove me below me before me behind me\nIn me beneath me above me behind me\nChrist be all around me',
+      }),
+      track({
+        id: 3,
+        trackName: 'Christ Be All Around Me',
+        artistName: 'All Sons & Daughters',
+        plainLyrics:
+          'Above me below me before me behind me\nChrist be all around me Christ be all around me\nIn me beneath me above me behind me',
+      }),
+    ]))
+
+    const disambiguate = vi.fn()
+
+    const result = await fetchFromLrclib(
+      { title: 'Christ Be All Around Me', author: 'Anna Golden' },
+      disambiguate,
+    )
+
+    expect(result.found).toBe(true)
+    expect(disambiguate).not.toHaveBeenCalled()
+  })
+
   it('skips disambiguator when a result is recorded by a songwriter (artist-match shortcut)', async () => {
     // "Your Love Awakens Me" — PCO lists "Phil Wickham, Chris McClarney"
     // as songwriters; LRCLIB has multiple Phil Wickham recordings with

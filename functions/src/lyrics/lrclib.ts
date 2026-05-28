@@ -96,26 +96,67 @@ export type LyricsDisambiguator = (
   candidates: DisambiguationCandidate[],
 ) => Promise<number>
 
-function lyricsFingerprint(lyrics: string | null): string {
-  if (!lyrics) return ''
-  return lyrics
-    .slice(0, 200)
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '')
+// Build a word set from lyrics. Lowercased, alphanumeric-tokenized,
+// short tokens (<= 2 chars: "a", "is", "to", "i") dropped because they
+// dominate the overlap calculation without carrying meaning. Used by
+// lyricsSimilarity to compare two recordings.
+function wordBag(lyrics: string | null): Set<string> {
+  if (!lyrics) return new Set()
+  return new Set(
+    lyrics
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 2),
+  )
 }
 
+// Overlap ratio: |A ∩ B| / min(|A|, |B|). 1.0 means the smaller set is
+// fully contained in the larger; 0 means no shared words. We use min
+// rather than union so a shorter cover version (one verse missing) can
+// still match the longer original — Jaccard would punish that.
+function lyricsSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0
+  let intersection = 0
+  const smaller = a.size <= b.size ? a : b
+  const larger = a.size <= b.size ? b : a
+  for (const word of smaller) {
+    if (larger.has(word)) intersection++
+  }
+  return intersection / smaller.size
+}
+
+// Threshold tuned for worship covers: live/acoustic/studio versions of
+// the same composition typically share 80-95% of their words; entirely
+// different songs that happen to share a title (e.g., the worship "Lay
+// Me Down" vs Sam Smith's) share well under 30%. 0.6 puts the line
+// safely between those.
+const SIMILAR_LYRICS_THRESHOLD = 0.6
+
+// Cluster title-matched recordings into groups where each group is
+// "the same song." Uses word-bag overlap rather than a strict prefix
+// fingerprint so minor variations (live ad-libs, intro lines, verse
+// reordering, transcription typos) don't fragment one composition into
+// multiple groups. Recordings without lyrics are skipped — they can't
+// be grouped reliably.
 function groupByLyrics(
   results: LrclibTrackResponse[],
 ): LrclibTrackResponse[][] {
-  const groups = new Map<string, LrclibTrackResponse[]>()
+  const groups: Array<{ rep: Set<string>; items: LrclibTrackResponse[] }> = []
   for (const r of results) {
-    const fp = lyricsFingerprint(r.plainLyrics)
-    if (!fp) continue
-    const group = groups.get(fp) ?? []
-    group.push(r)
-    groups.set(fp, group)
+    const bag = wordBag(r.plainLyrics)
+    if (bag.size === 0) continue
+    let placed = false
+    for (const g of groups) {
+      if (lyricsSimilarity(bag, g.rep) >= SIMILAR_LYRICS_THRESHOLD) {
+        g.items.push(r)
+        placed = true
+        break
+      }
+    }
+    if (!placed) groups.push({ rep: bag, items: [r] })
   }
-  return Array.from(groups.values())
+  return groups.map((g) => g.items)
 }
 
 function notFound(): LrclibResult {
