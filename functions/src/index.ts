@@ -366,7 +366,23 @@ export const getLyrics = onCall(
 )
 
 export const enrichSnippets = onCall(
-  { secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 180 },
+  {
+    secrets: [ANTHROPIC_API_KEY],
+    timeoutSeconds: 180,
+    // One request per instance. The LRCLIB fan-out uses a module-
+    // level semaphore to be polite to LRCLIB's free API; with the
+    // default concurrency (80), multiple parallel candidate requests
+    // share that semaphore and stack queue waits to 100+ seconds.
+    // Forcing concurrency=1 makes the semaphore per-request (each
+    // instance gets its own module scope) and lets Cloud Functions
+    // auto-scale to handle parallel candidate enrichment.
+    concurrency: 1,
+    // Override the global maxInstances=10 — a single Suggest can
+    // produce 12+ candidates that all enrich in parallel, and at
+    // concurrency=1 each needs its own instance. 20 gives headroom
+    // while still capping cost exposure.
+    maxInstances: 20,
+  },
   async (req) => {
     await requireAllowed(req)
     const { songs, forceRefresh } = req.data as {
