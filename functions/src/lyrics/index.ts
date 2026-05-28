@@ -135,10 +135,15 @@ export function defaultEnrichDeps(
     },
 
     async fetchAndCacheLyrics(query: SnippetQuery): Promise<LrclibResult> {
+      const t0 = Date.now()
       try {
         const fresh = await fetchFromLrclib(
           { title: query.title, author: query.author },
           disambiguate,
+        )
+        const ms = Date.now() - t0
+        console.log(
+          `[lyrics] fetched "${query.title}" in ${ms}ms (found=${fresh.found}, artist=${fresh.artistName ?? 'n/a'})`,
         )
         // Only cache when fetchFromLrclib actually returned a definitive
         // answer (found:true or a legitimate not-found). Transient
@@ -149,7 +154,7 @@ export function defaultEnrichDeps(
         return fresh
       } catch (err) {
         console.warn(
-          `[lyrics] LRCLIB fetch failed for "${query.title}" by "${query.author ?? '(none)'}" — not caching`,
+          `[lyrics] LRCLIB fetch failed for "${query.title}" by "${query.author ?? '(none)'}" after ${Date.now() - t0}ms — not caching`,
           err,
         )
         throw err

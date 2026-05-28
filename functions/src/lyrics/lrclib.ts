@@ -174,15 +174,23 @@ async function searchLrclib(
   const search = new URLSearchParams(params)
   const url = `${LRCLIB_SEARCH_URL}?${search.toString()}`
 
+  const queueDepth = lrclibActive + lrclibWaiters.length
+  const tQueued = Date.now()
   return withLrclibSlot(async () => {
+    const waited = Date.now() - tQueued
     // Single retry on transient errors (429, 5xx). Honors Retry-After
     // when present; otherwise backs off 500ms. After the retry, a
     // continuing failure throws so the caller can decide whether to
     // cache notFound or skip caching.
     for (let attempt = 0; attempt < 2; attempt++) {
+      const tFetch = Date.now()
       const res = await fetch(url, { method: 'GET' })
       if (res.ok) {
         const data = await res.json()
+        const n = Array.isArray(data) ? data.length : 0
+        console.log(
+          `[lrclib] ${params.artist_name ? `artist=${params.artist_name}` : 'title-only'} "${params.track_name}" → ${n} results in ${Date.now() - tFetch}ms (queue wait ${waited}ms, depth was ${queueDepth})`,
+        )
         return Array.isArray(data) ? (data as LrclibTrackResponse[]) : []
       }
       const transient = res.status === 429 || res.status >= 500
