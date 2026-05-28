@@ -18,22 +18,9 @@ import type {
 
 const MODEL = 'claude-sonnet-4-6'
 
-// Shared chorus-snippet discipline embedded in the tool descriptions
-// that can produce a snippet: propose_songs (main suggester) and
-// classify_song (eviction-mint). The classifier's system prompt used
-// to ALSO embed this; we removed that duplication because:
-//   1. system + tool description was redundant, and
-//   2. concrete song names in the negative examples were
-//      pattern-priming the model to bleed those very names into its
-//      output (Sonnet was emitting "Withholding nothing" — a phrase
-//      from our negative example — as a snippet for unrelated songs).
-// Rules now stay abstract: no concrete song titles or author names
-// that can become positive cues by accident. Single source of truth
-// — update here, both flows pick it up. Surfaced read-only on the
-// Admin page via the existing tooling payload.
-// Chorus snippets are no longer AI-sourced — they come from LRCLIB
-// via the enrichSnippets callable. The classifier only returns slot
-// labels now; Haiku is sufficient for that task.
+// Chorus snippets are sourced from LRCLIB via enrichSnippets — the AI
+// is never asked to recall lyrics. The classifier only returns slot
+// labels, so Haiku is sufficient.
 const CLASSIFIER_MODEL = 'claude-haiku-4-5-20251001'
 
 const SONG_SLOTS_FIELD = {

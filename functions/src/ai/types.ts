@@ -21,8 +21,6 @@ export interface AiCandidate {
   id: string
   title: string
   author?: string
-  /** 1–2 line snippet from the chorus, when the AI returned one. */
-  chorusSnippet?: string
   /** Conceptual roles the AI tagged this candidate with at suggest
    *  time (e.g. "opener", "closer"). */
   slots?: string[]
@@ -156,12 +154,11 @@ export type StreamChunk =
 
 /** One-shot per-song classification call. Used when a song lands in
  *  the candidate pool via slot eviction (not via AI proposal) — we
- *  have title/author from Planning Center but no AI-derived metadata
- *  (slot tags, chorus snippet). The classifier reads the same plan
- *  context the main suggester sees and returns:
- *   - 1-3 short slot-position labels (vocabulary from structure prompt)
- *   - an optional 1-2 line chorus snippet (omitted when Haiku is
- *     uncertain rather than fabricated). */
+ *  have title/author from Planning Center but no slot tags. The
+ *  classifier reads the same plan context the main suggester sees
+ *  and returns 1-3 short slot-position labels (vocabulary from the
+ *  structure prompt). Chorus snippets are sourced separately via the
+ *  enrichSnippets path (LRCLIB + Haiku extraction), not the AI. */
 export interface ClassifySongRequest {
   songTitle: string
   songAuthor?: string

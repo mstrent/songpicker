@@ -277,6 +277,15 @@ export interface CandidatePoolApi {
     plainLyrics: string | null
     artistName: string | null
   } | null>
+  /** Look up cached full lyrics for an enriched candidate by title.
+   *  Populated when triggerEnrichment / reEnrichSnippet land. In-
+   *  memory only (not persisted) so the popover can render instantly
+   *  for candidates the user has already had enriched without firing
+   *  another LRCLIB lookup. Returns null when no enriched data is
+   *  available — caller falls back to the on-demand getLyrics path. */
+  getEnrichedLyrics: (
+    title: string,
+  ) => { plainLyrics: string | null; artistName: string | null } | null
 }
 
 export function useCandidatePool(
@@ -294,8 +303,10 @@ export function useCandidatePool(
   const autoRefineTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const unservedRejectsRef = useRef(0)
   const generatingRef = useRef(false)
-  const lastSentCandidateIdsRef = useRef<Set<string>>(new Set())
   const enrichInFlightRef = useRef(false)
+  const enrichedLyricsRef = useRef<
+    Map<string, { plainLyrics: string | null; artistName: string | null }>
+  >(new Map())
 
   const triggerEnrichment = useCallback(
     async (pool: CandidateMatch[]) => {
@@ -320,6 +331,15 @@ export function useCandidatePool(
           })),
         })
         const enrichResults = res.data.results
+        needsEnrich.forEach((c, i) => {
+          const r = enrichResults[i]
+          if (!r) return
+          const key = (c.song?.title ?? c.suggestion.title).toLowerCase()
+          enrichedLyricsRef.current.set(key, {
+            plainLyrics: r.plainLyrics,
+            artistName: r.artistName,
+          })
+        })
         setCandidates((prev) =>
           prev.map((c) => {
             const idx = needsEnrich.findIndex((n) => n.id === c.id)
@@ -394,7 +414,6 @@ export function useCandidatePool(
       autoRefineTimer.current = null
     }
     unservedRejectsRef.current = 0
-    lastSentCandidateIdsRef.current = new Set()
 
     loadSession({ planId })
       .then((res) => {
@@ -636,7 +655,6 @@ export function useCandidatePool(
   function clearCandidates(): void {
     setCandidates([])
     setMessages([])
-    lastSentCandidateIdsRef.current = new Set()
     if (autoRefineTimer.current) {
       clearTimeout(autoRefineTimer.current)
       autoRefineTimer.current = null
@@ -860,9 +878,6 @@ export function useCandidatePool(
           if (minted.length > 0) {
             setCandidates((prev) => [...prev, ...minted])
             attachLibraryMatchesBatch(minted)
-            for (const c of minted) {
-              lastSentCandidateIdsRef.current.add(c.id)
-            }
             appendSystemMessage(
               `🤖 AI proposed ${minted.length} new song${minted.length === 1 ? '' : 's'}`,
             )
@@ -911,8 +926,6 @@ export function useCandidatePool(
         alreadyInPlan,
         autoRefresh,
       })
-
-      lastSentCandidateIdsRef.current = new Set(aiCandidates.map((c) => c.id))
 
       for await (const chunk of stream) {
         if (chunk.kind === 'text') {
@@ -983,6 +996,10 @@ export function useCandidatePool(
       })
       const r = res.data.results[0]
       if (!r) return null
+      enrichedLyricsRef.current.set(titleLower, {
+        plainLyrics: r.plainLyrics,
+        artistName: r.artistName,
+      })
       setCandidates((prev) =>
         prev.map((c) => {
           const cTitle = (c.song?.title ?? c.suggestion.title).toLowerCase()
@@ -1009,6 +1026,12 @@ export function useCandidatePool(
     }
   }
 
+  function getEnrichedLyrics(
+    title: string,
+  ): { plainLyrics: string | null; artistName: string | null } | null {
+    return enrichedLyricsRef.current.get(title.toLowerCase()) ?? null
+  }
+
   return {
     candidates,
     messages,
@@ -1028,5 +1051,6 @@ export function useCandidatePool(
     isCandidateCommitted,
     ensureCandidate,
     reEnrichSnippet,
+    getEnrichedLyrics,
   }
 }

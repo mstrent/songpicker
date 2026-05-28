@@ -91,6 +91,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     isCandidateCommitted,
     ensureCandidate,
     reEnrichSnippet,
+    getEnrichedLyrics,
   } = useCandidatePool(planId, planData)
 
   // Wire slot-eviction notifications into the candidate pool. When a
@@ -1123,6 +1124,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           onRecheck={() =>
             reEnrichSnippet(activeLyrics.title, activeLyrics.author)
           }
+          precomputed={getEnrichedLyrics(activeLyrics.title) ?? undefined}
         />
       )}
     </div>

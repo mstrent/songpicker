@@ -312,7 +312,10 @@ export const getLyrics = httpsCallable<
 
 export type SnippetSource = 'lrclib' | 'haiku-extract' | 'haiku-generate'
 
-export interface SnippetEnrichResult {
+/** Mirror of SnippetResult in functions/src/lyrics/enrichSnippets.ts.
+ *  Kept in sync manually because functions and SPA are separate TS
+ *  builds. */
+export interface SnippetResult {
   snippet: string | null
   source: SnippetSource | null
   plainLyrics: string | null
@@ -321,7 +324,7 @@ export interface SnippetEnrichResult {
 
 export const enrichSnippets = httpsCallable<
   { songs: Array<{ title: string; author?: string }>; forceRefresh?: boolean },
-  { results: SnippetEnrichResult[] }
+  { results: SnippetResult[] }
 >(functions, 'enrichSnippets')
 
 export type PromptType = 'structure' | 'role'
@@ -341,7 +344,6 @@ export interface AiCandidate {
   id: string
   title: string
   author?: string
-  chorusSnippet?: string
   slots?: string[]
   decision: Decision
   assignedSlot?: { index: number; total: number }
@@ -451,8 +453,8 @@ export interface AdminPromptConfig {
   tooling: {
     /** Each tool's name + top-level description + the full JSON
      *  Schema for its input. The inputSchema exposes the nested
-     *  field descriptions (slots / chorusSnippet / candidateId etc.)
-     *  that the top-level description listing doesn't show. */
+     *  field descriptions (slots / candidateId etc.) that the
+     *  top-level description listing doesn't show. */
     tools: {
       name: string
       description: string

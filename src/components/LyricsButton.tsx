@@ -19,10 +19,9 @@ interface LyricsTriggerProps {
   title: string
   author?: string | null
   /** Visual treatment — `chip` is a labeled pill ("Lyrics" + icon),
-   *  `icon` is icon-only at iconbtn-sm size. The chip variant carries
-   *  its label because it replaces the chorus-snippet text that
-   *  active candidate cards used to show — keeping a label there
-   *  preserves recognizability where the row used to have prose. */
+   *  `icon` is icon-only at iconbtn-sm size. The chip variant sits
+   *  inline at the end of the candidate's chorus-snippet text, so the
+   *  label keeps it readable alongside the snippet. */
   variant: 'chip' | 'icon'
   /** Called with the song to display. Parent owns the popover state
    *  so the same popover instance can swap content between songs
@@ -115,11 +114,35 @@ interface LyricsPopoverProps {
   song: ActiveLyrics
   onClose: () => void
   onRecheck?: () => Promise<{ plainLyrics: string | null; artistName: string | null } | null>
+  /** Pre-fetched lyrics from the enriched candidate pool. When
+   *  provided, the popover renders these directly and skips its own
+   *  getLyrics fetch — every candidate has been through enrichSnippets
+   *  by the time its Lyrics chip is clickable, so this is the common
+   *  case. Slot-row popovers (PCO songs not in the candidate pool)
+   *  pass undefined and fall back to getLyrics. */
+  precomputed?: { plainLyrics: string | null; artistName: string | null }
 }
 
-export function LyricsPopover({ song, onClose, onRecheck }: LyricsPopoverProps) {
-  const [loading, setLoading] = useState(true)
-  const [result, setResult] = useState<LyricsResult | null>(null)
+export function LyricsPopover({
+  song,
+  onClose,
+  onRecheck,
+  precomputed,
+}: LyricsPopoverProps) {
+  const [loading, setLoading] = useState(!precomputed)
+  const [result, setResult] = useState<LyricsResult | null>(() =>
+    precomputed
+      ? {
+          found: !!precomputed.plainLyrics,
+          plainLyrics: precomputed.plainLyrics,
+          instrumental: false,
+          artistName: precomputed.artistName,
+          source: 'lrclib',
+          fetchedAt: Date.now(),
+          fromCache: true,
+        }
+      : null,
+  )
   const [error, setError] = useState<string | null>(null)
   /** Tracks the song the in-flight callable is for. If the user clicks
    *  a different chip while one fetch is mid-flight, we discard its
@@ -163,14 +186,28 @@ export function LyricsPopover({ song, onClose, onRecheck }: LyricsPopoverProps) 
     [song.id, song.title, song.author],
   )
 
-  // Re-fetch whenever the song changes (including initial mount).
-  // load() updates loading/result/error state as the fetch unfolds;
-  // the lint rule flags transitive setState through called functions
-  // but the standard fetch-on-effect pattern is exactly what we want.
+  // Fetch on mount / song change. When the parent supplied precomputed
+  // lyrics (the candidate pool case), skip the network call and seed
+  // result from the props.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (precomputed) {
+      currentId.current = song.id
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setResult({
+        found: !!precomputed.plainLyrics,
+        plainLyrics: precomputed.plainLyrics,
+        instrumental: false,
+        artistName: precomputed.artistName,
+        source: 'lrclib',
+        fetchedAt: Date.now(),
+        fromCache: true,
+      })
+      setLoading(false)
+      setError(null)
+      return
+    }
     void load(false)
-  }, [song.id, load])
+  }, [song.id, load, precomputed])
 
   // Escape closes. Clicks outside the popover ALSO close — except
   // clicks on a .lyrics-chip / .iconbtn-lyrics, which swap the

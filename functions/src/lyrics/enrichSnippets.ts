@@ -38,10 +38,9 @@ function buildHaikuPrompt(
     return `${s.index}. "${s.title}"${s.author ? ` by ${s.author}` : ''}\n\n(No lyrics available — recall from knowledge if confident)`
   })
 
-  return `Extract a 2–4 line chorus or representative snippet from each song. For songs with lyrics provided, extract the most recognizable repeated section. For songs without lyrics, recall the chorus if you are confident you know it — otherwise return null.
+  return `For each song below, extract a 2–4 line chorus from the provided lyrics. If lyrics are missing, recall the chorus only if you're confident — otherwise use null.
 
-Reply as JSON only: {"0": "snippet or null", "1": "snippet or null", ...}
-Use the numeric keys shown below. Return null (not the string "null") for songs you cannot extract or recall.
+Reply as JSON keyed by the numeric index: {"0": "...", "1": null, ...}
 
 ${parts.join('\n\n---\n\n')}`
 }
