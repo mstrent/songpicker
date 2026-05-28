@@ -186,6 +186,40 @@ describe('fetchFromLrclib', () => {
     })
   })
 
+  it('skips disambiguator when a result is recorded by a songwriter (artist-match shortcut)', async () => {
+    // "Your Love Awakens Me" — PCO lists "Phil Wickham, Chris McClarney"
+    // as songwriters; LRCLIB has multiple Phil Wickham recordings with
+    // subtly different lyrics formatting (studio vs acoustic vs lyric
+    // video). Without the shortcut, lyrics-fingerprint grouping would
+    // split them, the disambiguator would fire, and Haiku might return
+    // -1 confused by the songwriter-vs-recording-artist mismatch.
+    mockFetch.mockResolvedValue(jsonResponse([
+      track({
+        id: 1,
+        trackName: 'Your Love Awakens Me',
+        artistName: 'Phil Wickham',
+        plainLyrics: 'Your love awakens me / Out of the dust I rise',
+      }),
+      track({
+        id: 2,
+        trackName: 'Your Love Awakens Me (Acoustic)',
+        artistName: 'Phil Wickham',
+        plainLyrics: 'Your love awakens me // Out of the dust I rise',
+      }),
+    ]))
+
+    const disambiguate = vi.fn()
+
+    const result = await fetchFromLrclib(
+      { title: 'Your Love Awakens Me', author: 'Phil Wickham, Chris McClarney' },
+      disambiguate,
+    )
+
+    expect(result.found).toBe(true)
+    expect(result.artistName).toBe('Phil Wickham')
+    expect(disambiguate).not.toHaveBeenCalled()
+  })
+
   it('returns notFound when the disambiguator signals -1 (no candidate is the worship song)', async () => {
     // All results are secular pop songs — Haiku correctly says "none"
     mockFetch.mockResolvedValue(jsonResponse([

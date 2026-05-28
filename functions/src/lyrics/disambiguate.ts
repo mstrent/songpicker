@@ -26,13 +26,17 @@ export function createLyricsDisambiguator(
       messages: [
         {
           role: 'user',
-          content: `Which of these is the worship song "${query.title}" by ${query.author ?? 'unknown songwriter'}?
+          content: `Which is the worship song titled "${query.title}"?
 
 ${list}
 
-If one of these IS the worship song with the matching songwriters, reply with its number.
-If NONE of these appears to be the worship song (e.g., all are secular pop/rock songs that happen to share the title), reply with 0.
-Reply with only the number — no other text.`,
+Note: the recording artist shown next to each option often differs from the songwriter credits ("${query.author ?? 'unknown'}") — that's normal for cover recordings, and is NOT a reason to reject a candidate.
+
+Pick the number of the candidate that best matches a worship version of "${query.title}".
+
+Reply with 0 ONLY if these are clearly not the worship song the user wants — for example, all candidates are secular pop/rock songs that happen to share the title, OR they are several completely different worship songs whose lyrics share no recognizable theme.
+
+Reply with only the number, no other text.`,
         },
       ],
     })

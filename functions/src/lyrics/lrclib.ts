@@ -255,6 +255,22 @@ export async function fetchFromLrclib(
   )
   if (titleMatched.length === 0) return notFound()
 
+  // Direct artist match: if any title-matched result has a recording
+  // artist whose name contains a songwriter token (e.g., PCO lists
+  // "Phil Wickham, Chris McClarney" and the result is recorded by
+  // "Phil Wickham"), the song is the right one — return it without
+  // bothering the disambiguator. Skips a Haiku call AND avoids the
+  // disambiguator-too-strict failure mode where Haiku would return -1
+  // because the songwriter list doesn't exactly match the recording
+  // artist.
+  if (query.author) {
+    const tokens = authorTokens(query.author).map((t) => t.toLowerCase())
+    const direct = titleMatched.find((r) =>
+      tokens.some((t) => r.artistName.toLowerCase().includes(t)),
+    )
+    if (direct) return toFoundResult(direct)
+  }
+
   const groups = groupByLyrics(titleMatched)
   if (groups.length > 1 && disambiguate) {
     const representatives = groups.map((g) => ({
