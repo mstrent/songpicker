@@ -10,5 +10,10 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: false,
+    // Suppress console output from product code (e.g., enrichSnippets
+    // and lrclib timing logs) so test runs stay readable. Test code
+    // can still use console.* via vi.spyOn if a test needs to assert
+    // on it; this only mutes what production code emits.
+    silent: 'passed-only',
   },
 })
