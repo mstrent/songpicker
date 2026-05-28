@@ -135,12 +135,25 @@ export function defaultEnrichDeps(
     },
 
     async fetchAndCacheLyrics(query: SnippetQuery): Promise<LrclibResult> {
-      const fresh = await fetchFromLrclib(
-        { title: query.title, author: query.author },
-        disambiguate,
-      )
-      await writeLyricsCache(db, query.title, query.author, fresh)
-      return fresh
+      try {
+        const fresh = await fetchFromLrclib(
+          { title: query.title, author: query.author },
+          disambiguate,
+        )
+        // Only cache when fetchFromLrclib actually returned a definitive
+        // answer (found:true or a legitimate not-found). Transient
+        // failures throw and we fall through — surface them upstream so
+        // the next enrichment retries fresh instead of being poisoned
+        // with a fake "not found" entry.
+        await writeLyricsCache(db, query.title, query.author, fresh)
+        return fresh
+      } catch (err) {
+        console.warn(
+          `[lyrics] LRCLIB fetch failed for "${query.title}" by "${query.author ?? '(none)'}" — not caching`,
+          err,
+        )
+        throw err
+      }
     },
 
     async callHaiku(

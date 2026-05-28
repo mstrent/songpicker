@@ -138,17 +138,67 @@ function toFoundResult(r: LrclibTrackResponse): LrclibResult {
   }
 }
 
+// Bound the number of in-flight LRCLIB HTTP requests across the whole
+// process. Without this, a single enrichSnippets call for ~10 candidates
+// can fan out to 30-50 simultaneous LRCLIB requests (each song x title-
+// only + per-author-token searches), which is likely to trip rate limits
+// or transient throttling. 5 keeps us polite and parallel.
+const LRCLIB_CONCURRENCY = 5
+let lrclibActive = 0
+const lrclibWaiters: Array<() => void> = []
+
+async function withLrclibSlot<T>(fn: () => Promise<T>): Promise<T> {
+  while (lrclibActive >= LRCLIB_CONCURRENCY) {
+    await new Promise<void>((resolve) => lrclibWaiters.push(resolve))
+  }
+  lrclibActive++
+  try {
+    return await fn()
+  } finally {
+    lrclibActive--
+    const next = lrclibWaiters.shift()
+    if (next) next()
+  }
+}
+
+function parseRetryAfterMs(header: string | null): number {
+  if (!header) return 0
+  const n = parseInt(header, 10)
+  if (!Number.isFinite(n) || n < 0) return 0
+  return Math.min(n * 1000, 5000)
+}
+
 async function searchLrclib(
   params: Record<string, string>,
 ): Promise<LrclibTrackResponse[]> {
   const search = new URLSearchParams(params)
   const url = `${LRCLIB_SEARCH_URL}?${search.toString()}`
-  const res = await fetch(url, { method: 'GET' })
-  if (!res.ok) {
-    throw new Error(`LRCLIB request failed: HTTP ${res.status}`)
-  }
-  const data = await res.json()
-  return Array.isArray(data) ? (data as LrclibTrackResponse[]) : []
+
+  return withLrclibSlot(async () => {
+    // Single retry on transient errors (429, 5xx). Honors Retry-After
+    // when present; otherwise backs off 500ms. After the retry, a
+    // continuing failure throws so the caller can decide whether to
+    // cache notFound or skip caching.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const res = await fetch(url, { method: 'GET' })
+      if (res.ok) {
+        const data = await res.json()
+        return Array.isArray(data) ? (data as LrclibTrackResponse[]) : []
+      }
+      const transient = res.status === 429 || res.status >= 500
+      if (transient && attempt === 0) {
+        const wait =
+          parseRetryAfterMs(res.headers.get('Retry-After')) || 500
+        console.warn(
+          `[lrclib] HTTP ${res.status} for ${url} — retrying in ${wait}ms`,
+        )
+        await new Promise((r) => setTimeout(r, wait))
+        continue
+      }
+      throw new Error(`LRCLIB request failed: HTTP ${res.status}`)
+    }
+    throw new Error('LRCLIB request failed: retries exhausted')
+  })
 }
 
 export async function fetchFromLrclib(
@@ -164,13 +214,29 @@ export async function fetchFromLrclib(
     }
   }
 
-  const settled = await Promise.all(
-    queries.map((q) => searchLrclib(q).catch(() => [] as LrclibTrackResponse[])),
-  )
+  const settled = await Promise.allSettled(queries.map((q) => searchLrclib(q)))
+
+  const errorCount = settled.filter((s) => s.status === 'rejected').length
+  if (errorCount > 0) {
+    const sample = settled.find((s) => s.status === 'rejected')
+    const reason = sample && sample.status === 'rejected' ? sample.reason : ''
+    console.warn(
+      `[lrclib] ${errorCount}/${queries.length} fan-out queries failed for "${query.title}" (sample: ${reason})`,
+    )
+  }
+  // If every fan-out query failed, this is a transient outage — throw
+  // so the caller skips caching notFound. Partial failure with at least
+  // one successful response is treated as a real (if narrower) result.
+  if (errorCount === queries.length) {
+    throw new Error(
+      `LRCLIB unavailable: all ${queries.length} queries failed for "${query.title}"`,
+    )
+  }
 
   const byId = new Map<number, LrclibTrackResponse>()
-  for (const batch of settled) {
-    for (const r of batch) {
+  for (const s of settled) {
+    if (s.status !== 'fulfilled') continue
+    for (const r of s.value) {
       if (!byId.has(r.id)) byId.set(r.id, r)
     }
   }

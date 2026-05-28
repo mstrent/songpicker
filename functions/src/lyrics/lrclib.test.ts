@@ -252,14 +252,15 @@ describe('fetchFromLrclib', () => {
     expect(result.lrclibId).toBe(70)
   })
 
-  it('swallows individual search errors so one failure does not kill the whole lookup', async () => {
-    // Title-only succeeds, but the author-token search throws.
+  it('proceeds with partial results when one search throws', async () => {
+    // Title-only succeeds, but the author-token search returns 404.
     // We should still return the title-only match.
     mockFetch.mockImplementation(async (url: string) => {
       if (url.includes('artist_name')) {
         return {
           ok: false,
-          status: 503,
+          status: 404,
+          headers: new Headers(),
           json: async () => ({}),
         } as Response
       }
@@ -280,6 +281,22 @@ describe('fetchFromLrclib', () => {
 
     expect(result.found).toBe(true)
     expect(result.lrclibId).toBe(1)
+  })
+
+  it('throws when ALL fan-out queries fail (transient outage)', async () => {
+    // Every query returns 404 — fetchFromLrclib should throw so the
+    // caller can skip caching (otherwise we poison the cache with a
+    // false "not found" that persists until forceRefresh).
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 404,
+      headers: new Headers(),
+      json: async () => ({}),
+    } as Response)
+
+    await expect(
+      fetchFromLrclib({ title: 'Some Song', author: 'Some Author' }),
+    ).rejects.toThrow(/LRCLIB unavailable/)
   })
 
   it('calls the disambiguator when results contain multiple distinct songs', async () => {
