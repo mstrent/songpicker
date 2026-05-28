@@ -26,7 +26,13 @@ export function createLyricsDisambiguator(
       messages: [
         {
           role: 'user',
-          content: `Which is the worship song "${query.title}" by ${query.author ?? 'unknown songwriter'}?\n\n${list}\n\nReply with only the number.`,
+          content: `Which of these is the worship song "${query.title}" by ${query.author ?? 'unknown songwriter'}?
+
+${list}
+
+If one of these IS the worship song with the matching songwriters, reply with its number.
+If NONE of these appears to be the worship song (e.g., all are secular pop/rock songs that happen to share the title), reply with 0.
+Reply with only the number — no other text.`,
         },
       ],
     })
@@ -35,6 +41,7 @@ export function createLyricsDisambiguator(
       response.content[0]?.type === 'text' ? response.content[0].text : ''
     const num = parseInt(text.trim(), 10)
     if (num >= 1 && num <= candidates.length) return num - 1
-    return 0
+    if (num === 0) return -1
+    return -1
   }
 }

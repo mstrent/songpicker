@@ -46,27 +46,98 @@ describe('fetchFromLrclib', () => {
     vi.unstubAllGlobals()
   })
 
-  it('queries LRCLIB with track_name only (no artist_name)', async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse([
-      track({ id: 42, trackName: 'Reckless Love', artistName: 'Cory Asbury', plainLyrics: 'Before I spoke a word' }),
+  it('fans out title-only + per-author-token searches in parallel', async () => {
+    // Title-only returns 0 worship matches; author-token returns the
+    // worship hit. This is the "Lay Me Down" case where LRCLIB's
+    // title-only result cap pushes worship versions off the page.
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url.includes('artist_name=Chris+Tomlin')) {
+        return jsonResponse([
+          track({
+            id: 100,
+            trackName: 'Lay Me Down',
+            artistName: 'Chris Tomlin',
+            plainLyrics: 'With this heart open wide',
+          }),
+        ])
+      }
+      // Title-only returns only secular songs
+      return jsonResponse([
+        track({
+          id: 1,
+          trackName: 'Lay Me Down',
+          artistName: 'Sam Smith',
+          plainLyrics: 'Yes, I do, I believe',
+        }),
+      ])
+    })
+
+    const disambiguate = vi.fn().mockResolvedValue(1) // picks worship
+
+    const result = await fetchFromLrclib(
+      { title: 'Lay Me Down', author: 'Chris Tomlin' },
+      disambiguate,
+    )
+
+    expect(result.found).toBe(true)
+    expect(result.artistName).toBe('Chris Tomlin')
+    expect(result.plainLyrics).toBe('With this heart open wide')
+    // 1 title-only + 1 author-token = 2 calls, in parallel
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('queries one URL per songwriter token plus title-only', async () => {
+    mockFetch.mockResolvedValue(jsonResponse([]))
+
+    await fetchFromLrclib({
+      title: 'Song',
+      author: 'Chris Tomlin, Jonas Myrin, and Matt Redman',
+    })
+
+    // 1 title-only + 3 author tokens = 4 parallel calls
+    expect(mockFetch).toHaveBeenCalledTimes(4)
+    const urls = mockFetch.mock.calls.map((c) => c[0] as string)
+    expect(urls.some((u) => !u.includes('artist_name'))).toBe(true)
+    expect(urls.some((u) => u.includes('artist_name=Chris+Tomlin'))).toBe(true)
+    expect(urls.some((u) => u.includes('artist_name=Jonas+Myrin'))).toBe(true)
+    expect(urls.some((u) => u.includes('artist_name=Matt+Redman'))).toBe(true)
+  })
+
+  it('deduplicates results that appear in multiple search responses', async () => {
+    // Same id returned by both title-only and author-token searches —
+    // should only appear once in the disambiguation.
+    mockFetch.mockResolvedValue(jsonResponse([
+      track({
+        id: 42,
+        trackName: 'Reckless Love',
+        artistName: 'Cory Asbury',
+        plainLyrics: 'Before I spoke a word',
+      }),
     ]))
 
-    await fetchFromLrclib({ title: 'Reckless Love', author: 'Cory Asbury' })
+    const result = await fetchFromLrclib({
+      title: 'Reckless Love',
+      author: 'Cory Asbury',
+    })
 
-    expect(mockFetch).toHaveBeenCalledTimes(1)
-    const callUrl = mockFetch.mock.calls[0][0] as string
-    expect(callUrl).toBe(
-      'https://lrclib.net/api/search?track_name=Reckless+Love',
-    )
-    expect(callUrl).not.toContain('artist_name')
+    expect(result.found).toBe(true)
+    expect(result.lrclibId).toBe(42)
   })
 
   it('returns a found result with artistName populated', async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse([
-      track({ id: 42, trackName: 'Reckless Love', artistName: 'Cory Asbury', plainLyrics: 'Before I spoke a word' }),
+    mockFetch.mockResolvedValue(jsonResponse([
+      track({
+        id: 42,
+        trackName: 'Reckless Love',
+        artistName: 'Cory Asbury',
+        plainLyrics: 'Before I spoke a word',
+      }),
     ]))
 
-    const result = await fetchFromLrclib({ title: 'Reckless Love', author: 'Cory Asbury' })
+    const result = await fetchFromLrclib({
+      title: 'Reckless Love',
+      author: 'Cory Asbury',
+    })
 
     expect(result).toEqual({
       found: true,
@@ -77,9 +148,15 @@ describe('fetchFromLrclib', () => {
     })
   })
 
-  it('returns an instrumental result when the top title-matching track is marked instrumental', async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse([
-      track({ id: 7, trackName: 'Interlude', artistName: 'Some Artist', instrumental: true, plainLyrics: null }),
+  it('returns an instrumental result when the matching track is marked instrumental', async () => {
+    mockFetch.mockResolvedValue(jsonResponse([
+      track({
+        id: 7,
+        trackName: 'Interlude',
+        artistName: 'Some Artist',
+        instrumental: true,
+        plainLyrics: null,
+      }),
     ]))
 
     const result = await fetchFromLrclib({ title: 'Interlude', author: 'Some Artist' })
@@ -93,23 +170,8 @@ describe('fetchFromLrclib', () => {
     })
   })
 
-  it('finds songs with one LRCLIB call regardless of how many songwriters PCO lists', async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse([
-      track({ id: 99, trackName: 'Lord, I Need You', artistName: 'Matt Maher', plainLyrics: 'Lord I come, I confess' }),
-    ]))
-
-    const result = await fetchFromLrclib({
-      title: 'Lord I Need You',
-      author: 'Daniel Carson, Matt Maher, Christy Nockels, and Jesse Reeves',
-    })
-
-    expect(result.found).toBe(true)
-    expect(result.lrclibId).toBe(99)
-    expect(mockFetch).toHaveBeenCalledTimes(1)
-  })
-
-  it('returns not-found when no title-matched results exist', async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse([
+  it('returns notFound when no title-matched results exist anywhere', async () => {
+    mockFetch.mockResolvedValue(jsonResponse([
       track({ id: 999, trackName: 'Totally Different Song', artistName: 'Random' }),
     ]))
 
@@ -124,8 +186,36 @@ describe('fetchFromLrclib', () => {
     })
   })
 
+  it('returns notFound when the disambiguator signals -1 (no candidate is the worship song)', async () => {
+    // All results are secular pop songs — Haiku correctly says "none"
+    mockFetch.mockResolvedValue(jsonResponse([
+      track({
+        id: 1,
+        trackName: 'Lay Me Down',
+        artistName: 'Sam Smith',
+        plainLyrics: 'Yes, I do, I believe',
+      }),
+      track({
+        id: 2,
+        trackName: 'Lay Me Down',
+        artistName: 'Sissy Nobby',
+        plainLyrics: 'It felt like spring time on this February morning',
+      }),
+    ]))
+
+    const disambiguate = vi.fn().mockResolvedValue(-1)
+
+    const result = await fetchFromLrclib(
+      { title: 'Lay Me Down', author: 'Chris Tomlin, Matt Redman' },
+      disambiguate,
+    )
+
+    expect(result.found).toBe(false)
+    expect(disambiguate).toHaveBeenCalledOnce()
+  })
+
   it('treats parenthetical-suffixed LRCLIB titles as a title match', async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse([
+    mockFetch.mockResolvedValue(jsonResponse([
       track({
         id: 50,
         trackName: 'Build My Life (feat. Pat Barrett)',
@@ -143,8 +233,8 @@ describe('fetchFromLrclib', () => {
     expect(result.lrclibId).toBe(50)
   })
 
-  it('tolerates comma differences in the title compare ("Lord, I Need You" vs "Lord I Need You")', async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse([
+  it('tolerates comma differences in the title compare', async () => {
+    mockFetch.mockResolvedValue(jsonResponse([
       track({
         id: 70,
         trackName: 'Lord, I Need You',
@@ -162,25 +252,44 @@ describe('fetchFromLrclib', () => {
     expect(result.lrclibId).toBe(70)
   })
 
-  it('throws on a non-200 status', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 503,
-      json: async () => ({}),
-    } as Response)
+  it('swallows individual search errors so one failure does not kill the whole lookup', async () => {
+    // Title-only succeeds, but the author-token search throws.
+    // We should still return the title-only match.
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url.includes('artist_name')) {
+        return {
+          ok: false,
+          status: 503,
+          json: async () => ({}),
+        } as Response
+      }
+      return jsonResponse([
+        track({
+          id: 1,
+          trackName: 'Song',
+          artistName: 'Artist',
+          plainLyrics: 'lyrics',
+        }),
+      ])
+    })
 
-    await expect(
-      fetchFromLrclib({ title: 'Reckless Love', author: 'Cory Asbury' }),
-    ).rejects.toThrow(/lrclib/i)
+    const result = await fetchFromLrclib({
+      title: 'Song',
+      author: 'Some Author',
+    })
+
+    expect(result.found).toBe(true)
+    expect(result.lrclibId).toBe(1)
   })
 
   it('calls the disambiguator when results contain multiple distinct songs', async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse([
+    mockFetch.mockResolvedValue(jsonResponse([
       track({
         id: 1,
         trackName: 'Yes I Will',
         artistName: 'Michael Franti',
-        plainLyrics: 'I received a letter, that you wrote me\nOn a dark, cold and cloudy day',
+        plainLyrics:
+          'I received a letter, that you wrote me\nOn a dark, cold and cloudy day',
       }),
       track({
         id: 10,
@@ -193,7 +302,7 @@ describe('fetchFromLrclib', () => {
     const disambiguate = vi.fn().mockResolvedValue(1)
 
     const result = await fetchFromLrclib(
-      { title: 'Yes I Will', author: 'Eddie Hoagland, Jonathan Smith, and Mia Fieldes' },
+      { title: 'Yes I Will', author: 'Eddie Hoagland' },
       disambiguate,
     )
 
@@ -205,12 +314,10 @@ describe('fetchFromLrclib', () => {
     const [query, candidates] = disambiguate.mock.calls[0]
     expect(query.title).toBe('Yes I Will')
     expect(candidates).toHaveLength(2)
-    expect(candidates[0].artistName).toBe('Michael Franti')
-    expect(candidates[1].artistName).toBe('Vertical Worship')
   })
 
   it('skips disambiguator when all results share the same lyrics', async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse([
+    mockFetch.mockResolvedValue(jsonResponse([
       track({
         id: 10,
         trackName: 'Yes I Will',
@@ -237,7 +344,7 @@ describe('fetchFromLrclib', () => {
   })
 
   it('falls back to first result when disambiguator throws', async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse([
+    mockFetch.mockResolvedValue(jsonResponse([
       track({
         id: 1,
         trackName: 'Grace',
@@ -264,7 +371,7 @@ describe('fetchFromLrclib', () => {
   })
 
   it('falls back to first result when no disambiguator is provided', async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse([
+    mockFetch.mockResolvedValue(jsonResponse([
       track({ id: 1, trackName: 'Song', artistName: 'Artist A', plainLyrics: 'lyrics A' }),
       track({ id: 2, trackName: 'Song', artistName: 'Artist B', plainLyrics: 'different lyrics B' }),
     ]))

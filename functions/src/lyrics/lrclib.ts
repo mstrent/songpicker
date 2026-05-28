@@ -1,21 +1,27 @@
 import { normalizeText } from '../normalize'
 
-// LRCLIB is a free, no-API-key lyrics service. Single-pass lookup
-// against /api/search:
+// LRCLIB is a free, no-API-key lyrics service. We do a fan-out
+// search to maximize coverage, then disambiguate:
 //
-//   Search `?track_name=<title>` and filter through
+//   In parallel, query `?track_name=<title>` (title-only) AND
+//   `?track_name=<title>&artist_name=<token>` for each songwriter
+//   token from the PCO author string. LRCLIB's title-only search
+//   has a result cap that can push worship versions off the page
+//   when popular secular songs share the title — author-token
+//   queries surface those hidden entries. Running them in parallel
+//   keeps latency to one round-trip.
+//
+//   All results are deduplicated by id, filtered through
 //   titlesMatchTolerantly (parenthetical-suffix + light punctuation
 //   tolerant) so fuzzy LRCLIB ranking can't sneak in unrelated tracks
-//   ("Beat Surrender" for "Surrender"). When multiple distinct songs
-//   share the title (worship "Yes I Will" vs Michael Franti's
-//   unrelated track), results are grouped by lyrics fingerprint and
-//   a Haiku classifier picks the correct worship version. The AI call
-//   only fires when there's genuine ambiguity — single-song results
-//   skip it entirely.
+//   ("Beat Surrender" for "Surrender"), and grouped by lyrics
+//   fingerprint so cover versions of the same composition collapse
+//   into one group.
 //
-//   PCO passes songwriter names, not recording artists, so we don't
-//   use artist_name in the LRCLIB query. Haiku disambiguation handles
-//   the title-collision case that author filtering used to address.
+//   When multiple distinct songs share the title, a Haiku classifier
+//   picks the correct worship version. Haiku can also signal "none
+//   of these is the worship song" → we return notFound rather than
+//   guessing.
 
 const LRCLIB_SEARCH_URL = 'https://lrclib.net/api/search'
 
@@ -68,12 +74,23 @@ function titlesMatchTolerantly(a: string, b: string): boolean {
   return na.length > 0 && na === nb
 }
 
+function authorTokens(author: string): string[] {
+  return author
+    .split(/[/,]|\sand\s/gi)
+    .map((t) => t.trim())
+    .filter((t) => normalizeText(t).length >= 2)
+}
+
 export interface DisambiguationCandidate {
   artistName: string
   albumName: string | null
   lyricsPreview: string
 }
 
+/**
+ * Returns the index of the best-matching candidate, or -1 to signal
+ * "none of these is the correct song" (we'll return notFound).
+ */
 export type LyricsDisambiguator = (
   query: LrclibQuery,
   candidates: DisambiguationCandidate[],
@@ -138,30 +155,48 @@ export async function fetchFromLrclib(
   query: LrclibQuery,
   disambiguate?: LyricsDisambiguator,
 ): Promise<LrclibResult> {
-  const results = await searchLrclib({ track_name: query.title })
-  const titleMatched = results.filter((r) =>
-    titlesMatchTolerantly(query.title, r.trackName),
-  )
-  if (titleMatched.length > 0) {
-    const groups = groupByLyrics(titleMatched)
-    if (groups.length > 1 && disambiguate) {
-      const representatives = groups.map((g) => ({
-        artistName: g[0].artistName,
-        albumName: g[0].albumName,
-        lyricsPreview:
-          g[0].plainLyrics?.split('\n').slice(0, 2).join(' / ') ?? '',
-      }))
-      try {
-        const pick = await disambiguate(query, representatives)
-        if (pick >= 0 && pick < groups.length) {
-          return toFoundResult(groups[pick][0])
-        }
-      } catch {
-        // Disambiguation failed — fall through to first result
-      }
+  const queries: Array<Record<string, string>> = [
+    { track_name: query.title },
+  ]
+  if (query.author) {
+    for (const token of authorTokens(query.author)) {
+      queries.push({ track_name: query.title, artist_name: token })
     }
-    return toFoundResult(titleMatched[0])
   }
 
-  return notFound()
+  const settled = await Promise.all(
+    queries.map((q) => searchLrclib(q).catch(() => [] as LrclibTrackResponse[])),
+  )
+
+  const byId = new Map<number, LrclibTrackResponse>()
+  for (const batch of settled) {
+    for (const r of batch) {
+      if (!byId.has(r.id)) byId.set(r.id, r)
+    }
+  }
+  const combined = Array.from(byId.values())
+  const titleMatched = combined.filter((r) =>
+    titlesMatchTolerantly(query.title, r.trackName),
+  )
+  if (titleMatched.length === 0) return notFound()
+
+  const groups = groupByLyrics(titleMatched)
+  if (groups.length > 1 && disambiguate) {
+    const representatives = groups.map((g) => ({
+      artistName: g[0].artistName,
+      albumName: g[0].albumName,
+      lyricsPreview:
+        g[0].plainLyrics?.split('\n').slice(0, 2).join(' / ') ?? '',
+    }))
+    try {
+      const pick = await disambiguate(query, representatives)
+      if (pick === -1) return notFound()
+      if (pick >= 0 && pick < groups.length) {
+        return toFoundResult(groups[pick][0])
+      }
+    } catch {
+      // Disambiguation failed — fall through to first result
+    }
+  }
+  return toFoundResult(titleMatched[0])
 }
