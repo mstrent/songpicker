@@ -38,7 +38,7 @@ function buildHaikuPrompt(
     return `${s.index}. "${s.title}"${s.author ? ` by ${s.author}` : ''}\n\n(No lyrics available — recall from knowledge if confident)`
   })
 
-  return `For each song below, extract a 2–4 line chorus from the provided lyrics. If lyrics are missing, recall the chorus only if you're confident — otherwise use null.
+  return `For each song below, extract a 2–3 line chorus from the provided lyrics — never more than 3 lines. If lyrics are missing, recall the chorus only if you're confident — otherwise use null.
 
 Reply as JSON keyed by the numeric index: {"0": "...", "1": null, ...}
 
@@ -158,12 +158,22 @@ export async function enrichSnippets(
   return queries.map((_, i): SnippetResult => {
     const pl = lyrics[i] ?? null
     const ar = artists[i] ?? null
-    const snippet = haikuSnippets[i] ?? null
+    const rawSnippet = haikuSnippets[i] ?? null
+    // Hard cap at 3 non-blank lines regardless of what Haiku produced.
+    // The prompt asks for 2-3 lines but Haiku sometimes returns more,
+    // which leads to wall-of-text snippets on the card.
+    const snippet = rawSnippet
+      ? rawSnippet
+          .split('\n')
+          .filter((l) => l.trim())
+          .slice(0, 3)
+          .join('\n') || null
+      : null
     if (!snippet && pl) {
       const fallback = pl
         .split('\n')
         .filter((l) => l.trim())
-        .slice(0, 4)
+        .slice(0, 3)
         .join('\n')
       return fallback
         ? { snippet: fallback, source: 'lrclib', plainLyrics: pl, artistName: ar }

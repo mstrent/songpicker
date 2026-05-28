@@ -168,10 +168,34 @@ describe('enrichSnippets', () => {
     const results = await enrichSnippets([{ title: 'Some Song' }], deps)
 
     expect(results[0]).toMatchObject({
-      snippet: 'Line one\nLine two\nLine three\nLine four',
+      snippet: 'Line one\nLine two\nLine three',
       source: 'lrclib',
       artistName: 'Artist',
     })
+  })
+
+  it('caps Haiku-returned snippets at 3 lines', async () => {
+    // Even when prompted for 2-3 lines, Haiku sometimes returns 4+
+    // and the card ends up a wall of text. The server-side cap is
+    // belt-and-suspenders.
+    const deps = makeDeps({
+      batchReadLyricsCache: vi.fn().mockResolvedValue([
+        {
+          found: true,
+          plainLyrics: 'whatever lyrics here',
+          artistName: 'Artist',
+        },
+      ]),
+      callHaiku: vi.fn().mockResolvedValue({
+        '0': 'Oh the overwhelming\nNever-ending reckless love\nIt chases me down\nFights til I am found',
+      }),
+    })
+
+    const results = await enrichSnippets([{ title: 'Reckless Love' }], deps)
+
+    expect(results[0].snippet).toBe(
+      'Oh the overwhelming\nNever-ending reckless love\nIt chases me down',
+    )
   })
 
   it('returns null for LRCLIB miss when Haiku also fails', async () => {
