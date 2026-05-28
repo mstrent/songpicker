@@ -139,11 +139,12 @@ function toFoundResult(r: LrclibTrackResponse): LrclibResult {
 }
 
 // Bound the number of in-flight LRCLIB HTTP requests across the whole
-// process. Without this, a single enrichSnippets call for ~10 candidates
-// can fan out to 30-50 simultaneous LRCLIB requests (each song x title-
-// only + per-author-token searches), which is likely to trip rate limits
-// or transient throttling. 5 keeps us polite and parallel.
-const LRCLIB_CONCURRENCY = 5
+// process. LRCLIB is a free service and we've seen response times balloon
+// to 8-20s per call when we hit it with 5 concurrent requests — they
+// appear to throttle by slowing responses rather than returning 429.
+// Keeping concurrency low keeps each call fast (~500ms-1s) and produces
+// better overall throughput than firing 5+ requests that each take 10s.
+const LRCLIB_CONCURRENCY = 2
 let lrclibActive = 0
 const lrclibWaiters: Array<() => void> = []
 

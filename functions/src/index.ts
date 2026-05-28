@@ -366,7 +366,7 @@ export const getLyrics = onCall(
 )
 
 export const enrichSnippets = onCall(
-  { secrets: [ANTHROPIC_API_KEY] },
+  { secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 180 },
   async (req) => {
     await requireAllowed(req)
     const { songs, forceRefresh } = req.data as {

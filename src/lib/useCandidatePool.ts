@@ -303,71 +303,77 @@ export function useCandidatePool(
   const autoRefineTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const unservedRejectsRef = useRef(0)
   const generatingRef = useRef(false)
-  const enrichInFlightRef = useRef(false)
+  // Per-candidate in-flight tracking. A Map keyed by candidate id lets
+  // multiple candidates enrich in parallel without one finishing pre-
+  // empting another. Replaces a global "batch in flight" flag — that
+  // made the whole pool feel synchronous (cards waited for the slowest
+  // song to land). Now each card fills in independently as its single-
+  // song enrichSnippets call returns.
+  const enrichInFlightRef = useRef<Set<string>>(new Set())
   const enrichedLyricsRef = useRef<
     Map<string, { plainLyrics: string | null; artistName: string | null }>
   >(new Map())
 
   const triggerEnrichment = useCallback(
     async (pool: CandidateMatch[]) => {
-      if (enrichInFlightRef.current) return
-      const needsEnrich = pool.filter((c) => !c.suggestion.snippetSource)
+      const needsEnrich = pool.filter(
+        (c) =>
+          !c.suggestion.snippetSource && !enrichInFlightRef.current.has(c.id),
+      )
       if (needsEnrich.length === 0) return
 
-      enrichInFlightRef.current = true
+      for (const c of needsEnrich) enrichInFlightRef.current.add(c.id)
+      const enrichingIds = new Set(needsEnrich.map((c) => c.id))
       setCandidates((prev) =>
         prev.map((c) =>
-          !c.suggestion.snippetSource
-            ? { ...c, enrichmentPending: true }
-            : c,
+          enrichingIds.has(c.id) ? { ...c, enrichmentPending: true } : c,
         ),
       )
 
-      try {
-        const res = await enrichSnippets({
-          songs: needsEnrich.map((c) => ({
-            title: c.song?.title ?? c.suggestion.title,
-            author: c.song?.author ?? c.suggestion.author ?? undefined,
-          })),
-        })
-        const enrichResults = res.data.results
-        needsEnrich.forEach((c, i) => {
-          const r = enrichResults[i]
-          if (!r) return
-          const key = (c.song?.title ?? c.suggestion.title).toLowerCase()
-          enrichedLyricsRef.current.set(key, {
-            plainLyrics: r.plainLyrics,
-            artistName: r.artistName,
-          })
-        })
-        setCandidates((prev) =>
-          prev.map((c) => {
-            const idx = needsEnrich.findIndex((n) => n.id === c.id)
-            if (idx === -1) return c
-            if (!enrichResults[idx]) {
-              return { ...c, enrichmentPending: false }
+      // Fire one single-song enrichSnippets call per candidate, in
+      // parallel. Each completes independently — settle each result
+      // back into state as soon as its call returns.
+      await Promise.all(
+        needsEnrich.map(async (c) => {
+          const title = c.song?.title ?? c.suggestion.title
+          const author = c.song?.author ?? c.suggestion.author ?? undefined
+          try {
+            const res = await enrichSnippets({ songs: [{ title, author }] })
+            const r = res.data.results[0]
+            if (r) {
+              enrichedLyricsRef.current.set(title.toLowerCase(), {
+                plainLyrics: r.plainLyrics,
+                artistName: r.artistName,
+              })
             }
-            const { snippet, source } = enrichResults[idx]
-            return {
-              ...c,
-              enrichmentPending: false,
-              suggestion: {
-                ...c.suggestion,
-                chorusSnippet: snippet ?? undefined,
-                ...(source ? { snippetSource: source } : {}),
-              },
-            }
-          }),
-        )
-      } catch {
-        setCandidates((prev) =>
-          prev.map((c) =>
-            c.enrichmentPending ? { ...c, enrichmentPending: false } : c,
-          ),
-        )
-      } finally {
-        enrichInFlightRef.current = false
-      }
+            setCandidates((prev) =>
+              prev.map((other) => {
+                if (other.id !== c.id) return other
+                if (!r) return { ...other, enrichmentPending: false }
+                return {
+                  ...other,
+                  enrichmentPending: false,
+                  suggestion: {
+                    ...other.suggestion,
+                    chorusSnippet: r.snippet ?? undefined,
+                    ...(r.source ? { snippetSource: r.source } : {}),
+                  },
+                }
+              }),
+            )
+          } catch {
+            setCandidates((prev) =>
+              prev.map((other) =>
+                other.id === c.id
+                  ? { ...other, enrichmentPending: false }
+                  : other,
+              ),
+            )
+          } finally {
+            enrichInFlightRef.current.delete(c.id)
+          }
+        }),
+      )
     },
     [],
   )
