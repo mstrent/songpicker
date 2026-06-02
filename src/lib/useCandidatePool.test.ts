@@ -18,6 +18,7 @@ vi.mock('./api', () => {
     suggestSongs: { stream: vi.fn() },
     getSong: vi.fn(),
     classifySongSlots: vi.fn(),
+    batchGetLyrics: vi.fn(() => Promise.resolve({ data: { results: [] } })),
   }
 })
 

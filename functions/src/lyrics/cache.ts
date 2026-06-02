@@ -24,6 +24,11 @@ export interface LyricsCacheEntry {
   artistName: string | null
   source: 'lrclib'
   fetchedAt: number
+  /** Chorus snippet extracted by Haiku (2-3 lines). Undefined means
+   *  not yet extracted; null means extraction was attempted but
+   *  produced nothing. Cached globally so Haiku is called once per
+   *  song across all users and sessions. */
+  snippet?: string | null
 }
 
 interface LyricsCacheDoc extends LyricsCacheEntry {
@@ -58,6 +63,23 @@ export async function readLyricsCache(
     source: data.source,
     fetchedAt: data.fetchedAt,
   }
+}
+
+export async function updateLyricsSnippets(
+  db: Firestore,
+  updates: Array<{ title: string; author?: string; snippet: string | null }>,
+): Promise<void> {
+  if (updates.length === 0) return
+  await Promise.all(
+    updates.map(({ title, author, snippet }) => {
+      const key = lyricsCacheKey(title, author)
+      return db
+        .collection(COLLECTION)
+        .doc(key)
+        .update({ snippet })
+        .catch(() => {}) // doc may not exist for transient LRCLIB failures
+    }),
+  )
 }
 
 export async function writeLyricsCache(

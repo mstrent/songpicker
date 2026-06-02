@@ -365,6 +365,52 @@ export const getLyrics = onCall(
   },
 )
 
+// Batched lyrics lookup for proactive slot-row enrichment. Shares the
+// same Firestore cache as getLyrics — this is just a batch wrapper so
+// the SPA can pre-fetch lyrics for all committed slot songs in one
+// round-trip at plan load rather than on each individual popover open.
+// No snippet extraction — only plainLyrics + artistName are returned.
+export const batchGetLyrics = onCall(
+  { secrets: [ANTHROPIC_API_KEY] },
+  async (req) => {
+    await requireAllowed(req)
+    const { songs } = req.data as {
+      songs?: Array<{ title?: string; author?: string }>
+    }
+    if (!Array.isArray(songs) || songs.length === 0) {
+      throw new HttpsError('invalid-argument', 'songs array required')
+    }
+    if (songs.length > 20) {
+      throw new HttpsError('invalid-argument', 'max 20 songs per batch')
+    }
+    const db = getFirestore()
+    const deps = defaultLyricsDeps(db, ANTHROPIC_API_KEY.value())
+    const results = await pMap(
+      songs,
+      async (s) => {
+        const title = typeof s.title === 'string' ? s.title.trim() : ''
+        if (!title) return null
+        const result = await getLyricsForSong(
+          {
+            title,
+            author:
+              typeof s.author === 'string' && s.author.trim()
+                ? s.author.trim()
+                : undefined,
+          },
+          deps,
+        )
+        return {
+          found: result.found,
+          plainLyrics: result.plainLyrics,
+          artistName: result.artistName,
+        }
+      },
+    )
+    return { results }
+  },
+)
+
 export const enrichSnippets = onCall(
   {
     secrets: [ANTHROPIC_API_KEY],

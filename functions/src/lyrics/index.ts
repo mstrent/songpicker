@@ -4,6 +4,7 @@ import type { Firestore } from 'firebase-admin/firestore'
 import {
   lyricsCacheKey,
   readLyricsCache,
+  updateLyricsSnippets,
   writeLyricsCache,
   type LyricsCacheEntry,
 } from './cache'
@@ -174,6 +175,17 @@ export function defaultEnrichDeps(
       const jsonMatch = text.match(/\{[\s\S]*\}/)
       if (!jsonMatch) return {}
       return JSON.parse(jsonMatch[0])
+    },
+
+    async writeSnippets(updates) {
+      await updateLyricsSnippets(
+        db,
+        updates.map(({ query, snippet }) => ({
+          title: query.title,
+          author: query.author,
+          snippet,
+        })),
+      )
     },
   }
 }

@@ -327,6 +327,19 @@ export const enrichSnippets = httpsCallable<
   { results: SnippetResult[] }
 >(functions, 'enrichSnippets')
 
+export interface LyricsSummary {
+  found: boolean
+  plainLyrics: string | null
+  artistName: string | null
+}
+
+/** Batch lyrics lookup for proactive enrichment of committed slot songs.
+ *  Uses the same server-side cache as getLyrics — no snippet extraction. */
+export const batchGetLyrics = httpsCallable<
+  { songs: Array<{ title: string; author?: string }> },
+  { results: Array<LyricsSummary | null> }
+>(functions, 'batchGetLyrics')
+
 export type PromptType = 'structure' | 'role'
 export type PromptSource = 'plan' | 'user' | 'system'
 

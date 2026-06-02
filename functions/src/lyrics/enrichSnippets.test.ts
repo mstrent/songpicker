@@ -14,6 +14,7 @@ function makeDeps(
       artistName: null,
     }),
     callHaiku: vi.fn().mockResolvedValue({}),
+    writeSnippets: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
 }
@@ -256,6 +257,103 @@ describe('enrichSnippets', () => {
       source: 'lrclib',
       artistName: 'Sinach',
     })
+  })
+
+  it('skips Haiku when all songs have cached snippets', async () => {
+    const deps = makeDeps({
+      batchReadLyricsCache: vi.fn().mockResolvedValue([
+        {
+          found: true,
+          plainLyrics: 'Already extracted lyrics',
+          artistName: 'Artist',
+          snippet: 'Cached chorus line one\nCached chorus line two',
+        },
+      ]),
+    })
+
+    const results = await enrichSnippets([{ title: 'Cached Song' }], deps)
+
+    expect(deps.callHaiku).not.toHaveBeenCalled()
+    expect(deps.writeSnippets).not.toHaveBeenCalled()
+    expect(results[0]).toMatchObject({
+      snippet: 'Cached chorus line one\nCached chorus line two',
+      source: 'lrclib',
+      artistName: 'Artist',
+    })
+  })
+
+  it('uses cached snippet for some songs and calls Haiku only for the rest', async () => {
+    const deps = makeDeps({
+      batchReadLyricsCache: vi.fn().mockResolvedValue([
+        {
+          found: true,
+          plainLyrics: 'lyrics one',
+          artistName: 'Artist A',
+          snippet: 'Cached snippet for song one',
+        },
+        {
+          found: true,
+          plainLyrics: 'lyrics two',
+          artistName: 'Artist B',
+          // no snippet field — needs Haiku
+        },
+      ]),
+      callHaiku: vi.fn().mockResolvedValue({ '0': 'Haiku snippet for song two' }),
+    })
+
+    const results = await enrichSnippets(
+      [{ title: 'Song One' }, { title: 'Song Two' }],
+      deps,
+    )
+
+    expect(deps.callHaiku).toHaveBeenCalledTimes(1)
+    // Haiku only received the one song that needed extraction (index 0 in the sub-batch)
+    const haikuPrompt = (deps.callHaiku as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(haikuPrompt).toContain('Song Two')
+    expect(haikuPrompt).not.toContain('Song One')
+
+    expect(results[0]).toMatchObject({
+      snippet: 'Cached snippet for song one',
+      source: 'lrclib',
+    })
+    expect(results[1]).toMatchObject({
+      snippet: 'Haiku snippet for song two',
+      source: 'lrclib',
+    })
+
+    expect(deps.writeSnippets).toHaveBeenCalledWith([
+      { query: { title: 'Song Two' }, snippet: 'Haiku snippet for song two' },
+    ])
+  })
+
+  it('writes extracted snippets back to cache after Haiku runs', async () => {
+    const deps = makeDeps({
+      batchReadLyricsCache: vi.fn().mockResolvedValue([
+        { found: true, plainLyrics: 'some lyrics', artistName: 'Artist' },
+      ]),
+      callHaiku: vi.fn().mockResolvedValue({ '0': 'Extracted chorus' }),
+    })
+
+    await enrichSnippets([{ title: 'Song', author: 'Author' }], deps)
+
+    expect(deps.writeSnippets).toHaveBeenCalledWith([
+      { query: { title: 'Song', author: 'Author' }, snippet: 'Extracted chorus' },
+    ])
+  })
+
+  it('writes null snippet to cache when Haiku extraction fails', async () => {
+    const deps = makeDeps({
+      batchReadLyricsCache: vi.fn().mockResolvedValue([
+        { found: true, plainLyrics: 'some lyrics', artistName: 'Artist' },
+      ]),
+      callHaiku: vi.fn().mockRejectedValue(new Error('API down')),
+    })
+
+    await enrichSnippets([{ title: 'Song' }], deps)
+
+    expect(deps.writeSnippets).toHaveBeenCalledWith([
+      { query: { title: 'Song' }, snippet: null },
+    ])
   })
 
   it('skips cache and re-fetches when forceRefresh is true', async () => {
