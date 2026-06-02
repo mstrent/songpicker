@@ -21,6 +21,11 @@ export interface EnrichSnippetsDeps {
   ): Promise<Array<LyricsCacheEntry | null>>
   fetchAndCacheLyrics(query: SnippetQuery): Promise<LrclibResult>
   callHaiku(prompt: string): Promise<Record<string, string | null>>
+  /** Persist extracted snippets back into the lyrics cache so future
+   *  calls for the same songs skip the Haiku extraction entirely. */
+  writeSnippets(
+    updates: Array<{ query: SnippetQuery; snippet: string | null }>,
+  ): Promise<void>
 }
 
 function buildHaikuPrompt(
@@ -74,6 +79,10 @@ export async function enrichSnippets(
   const lyrics: Array<string | null> = []
   const artists: Array<string | null> = []
   const fetchPromises: Array<Promise<void>> = []
+  // undefined = not in cache / not yet checked; string | null = cached value
+  const cachedSnippets: Array<string | null | undefined> = queries.map(
+    () => undefined,
+  )
   let cacheHits = 0
   let lrclibFetches = 0
 
@@ -100,6 +109,9 @@ export async function enrichSnippets(
     )
     for (let i = 0; i < queries.length; i++) {
       const entry = cached[i]
+      if (entry !== null && 'snippet' in entry && entry.snippet !== undefined) {
+        cachedSnippets[i] = entry.snippet
+      }
       if (entry?.found && entry.plainLyrics) {
         lyrics[i] = entry.plainLyrics
         artists[i] = entry.artistName
@@ -129,28 +141,55 @@ export async function enrichSnippets(
     `${tag} fetches: ${fetchMs}ms (cache hits: ${cacheHits}, LRCLIB fetches: ${lrclibFetches}, lyrics resolved: ${songsWithLyrics}/${queries.length})`,
   )
 
-  const haikuInput = queries.map((q, i) => ({
-    index: i,
-    title: q.title,
-    author: q.author,
-    lyrics: lyrics[i],
-  }))
+  // Indices that don't have a cached snippet yet — these need Haiku.
+  const needsHaiku = queries
+    .map((_, i) => i)
+    .filter((i) => cachedSnippets[i] === undefined)
 
-  const promptTokensApprox = Math.round(buildHaikuPrompt(haikuInput).length / 4)
-  let haikuSnippets: Array<string | null>
-  const tHaikuStart = Date.now()
-  try {
-    const raw = await deps.callHaiku(buildHaikuPrompt(haikuInput))
-    haikuSnippets = parseHaikuResponse(raw, queries.length)
-    console.log(
-      `${tag} haiku extraction: ${Date.now() - tHaikuStart}ms (~${promptTokensApprox} input tokens)`,
+  // haikuSnippets[i] holds the result for query i (cached or extracted).
+  const haikuSnippets: Array<string | null> = queries.map((_, i) =>
+    cachedSnippets[i] !== undefined ? (cachedSnippets[i] ?? null) : null,
+  )
+
+  if (needsHaiku.length > 0) {
+    const haikuInput = needsHaiku.map((qi, j) => ({
+      index: j,
+      title: queries[qi].title,
+      author: queries[qi].author,
+      lyrics: lyrics[qi],
+    }))
+    const promptTokensApprox = Math.round(
+      buildHaikuPrompt(haikuInput).length / 4,
     )
-  } catch (err) {
-    console.warn(
-      `${tag} haiku extraction failed after ${Date.now() - tHaikuStart}ms (~${promptTokensApprox} input tokens):`,
-      err,
-    )
-    haikuSnippets = queries.map(() => null)
+    const tHaikuStart = Date.now()
+    let extracted: Array<string | null>
+    try {
+      const raw = await deps.callHaiku(buildHaikuPrompt(haikuInput))
+      extracted = parseHaikuResponse(raw, needsHaiku.length)
+      console.log(
+        `${tag} haiku extraction: ${Date.now() - tHaikuStart}ms (~${promptTokensApprox} input tokens, ${needsHaiku.length}/${queries.length} songs)`,
+      )
+    } catch (err) {
+      console.warn(
+        `${tag} haiku extraction failed after ${Date.now() - tHaikuStart}ms (~${promptTokensApprox} input tokens):`,
+        err,
+      )
+      extracted = needsHaiku.map(() => null)
+    }
+    for (let j = 0; j < needsHaiku.length; j++) {
+      haikuSnippets[needsHaiku[j]] = extracted[j]
+    }
+    // Write back extracted snippets so future calls skip Haiku for these songs.
+    deps
+      .writeSnippets(
+        needsHaiku.map((qi, j) => ({
+          query: queries[qi],
+          snippet: extracted[j] ?? null,
+        })),
+      )
+      .catch(() => {})
+  } else {
+    console.log(`${tag} all snippets from cache — skipped Haiku`)
   }
 
   console.log(`${tag} total: ${Date.now() - t0}ms`)

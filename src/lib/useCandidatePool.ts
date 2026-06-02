@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  batchGetLyrics,
   classifySongSlots,
   enrichSnippets,
   getSong,
@@ -310,6 +311,9 @@ export function useCandidatePool(
   // song to land). Now each card fills in independently as its single-
   // song enrichSnippets call returns.
   const enrichInFlightRef = useRef<Set<string>>(new Set())
+  // Tracks titles (lowercased) of slot songs currently being fetched so
+  // we don't fire duplicate batchGetLyrics calls as items update.
+  const slotLyricsInFlightRef = useRef<Set<string>>(new Set())
   const enrichedLyricsRef = useRef<
     Map<string, { plainLyrics: string | null; artistName: string | null }>
   >(new Map())
@@ -436,6 +440,48 @@ export function useCandidatePool(
       cancelled = true
     }
   }, [planId, triggerEnrichment])
+
+  // Pre-fetch lyrics for committed slot songs at plan load so the
+  // lyrics popover is instant. Uses batchGetLyrics (lyrics-only, no
+  // Haiku) and stores into enrichedLyricsRef alongside candidate lyrics.
+  useEffect(() => {
+    const items = planData.items
+    if (!items) return
+
+    const toFetch = items
+      .filter(
+        (it) =>
+          isSongSlot(it) &&
+          it.songId &&
+          it.songTitle &&
+          !enrichedLyricsRef.current.has(it.songTitle.toLowerCase()) &&
+          !slotLyricsInFlightRef.current.has(it.songTitle.toLowerCase()),
+      )
+      .map((it) => ({
+        title: it.songTitle!,
+        author: it.songAuthor ?? undefined,
+      }))
+
+    if (toFetch.length === 0) return
+
+    for (const s of toFetch) slotLyricsInFlightRef.current.add(s.title.toLowerCase())
+
+    batchGetLyrics({ songs: toFetch })
+      .then((res) => {
+        res.data.results.forEach((r, i) => {
+          if (!r) return
+          const key = toFetch[i].title.toLowerCase()
+          enrichedLyricsRef.current.set(key, {
+            plainLyrics: r.plainLyrics,
+            artistName: r.artistName,
+          })
+        })
+      })
+      .catch(() => {})
+      .finally(() => {
+        for (const s of toFetch) slotLyricsInFlightRef.current.delete(s.title.toLowerCase())
+      })
+  }, [planData.items])
 
   useEffect(() => {
     generatingRef.current = generating
