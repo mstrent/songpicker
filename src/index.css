@@ -1601,6 +1601,15 @@ textarea {
   background: var(--accent);
   box-shadow: 0 0 6px var(--accent-soft-2);
 }
+/* While a candidate is being dragged, extend a droppable runway below the
+   last card. The grid uses align-items:start, so without this the section
+   ends flush with the last card and releasing in the empty space below it
+   lands on the page body — outside the drop zone. The runway keeps that
+   area inside the section so dropping below the list resolves to the end.
+   Only present mid-drag, so it never adds idle whitespace. */
+.candidates.reordering {
+  padding-bottom: 30vh;
+}
 .candidate {
   background: var(--surface);
   border: 1px solid var(--border);
