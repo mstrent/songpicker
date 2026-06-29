@@ -1581,6 +1581,16 @@ textarea {
   display: grid;
   gap: 0.55rem;
 }
+/* Drag-to-reorder insertion indicator — a thin accent bar at the gap
+   where the dragged card will land. Negative margins pull it into the
+   grid gap so it reads as a line between cards, not a new row. */
+.candidates ul .reorder-line {
+  height: 3px;
+  margin: -0.275rem 0;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent-soft-2);
+}
 .candidate {
   background: var(--surface);
   border: 1px solid var(--border);

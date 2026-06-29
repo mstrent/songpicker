@@ -21,7 +21,7 @@ import {
   type SongSuggestion,
 } from './api'
 import { isSongSlot } from './songSlots'
-import { isCommittedSong } from './candidateView'
+import { isCommittedSong, reorderCandidates } from './candidateView'
 import { translateAiAssignments } from './planActions/aiTranslate'
 import {
   applyDecisionChange,
@@ -252,6 +252,10 @@ export interface CandidatePoolApi {
   setRejectedPoolOpen: (open: boolean) => void
   handleSuggest: (opts?: { autoRefresh?: boolean }) => Promise<void>
   setDecision: (id: string, next: Decision) => void
+  /** Manually reorder the pool: move `draggedId` to immediately before
+   *  `beforeId` (or to the end when `beforeId` is null). Persisted via
+   *  the array order. */
+  reorderCandidate: (draggedId: string, beforeId: string | null) => void
   /** Re-run the Planning Center library lookup for a single candidate.
    *  Used when the user added the song to PCO after we first reported
    *  it as missing — flips matchStatus from `unmatched`/`error` to
@@ -685,6 +689,13 @@ export function useCandidatePool(
     )
   }
 
+  // Manual drag-to-reorder of the pool. Order is the candidates array
+  // order itself; the debounced session save persists it. Candidate-
+  // pool-only — never touches plan/slot state.
+  function reorderCandidate(draggedId: string, beforeId: string | null): void {
+    setCandidates((prev) => reorderCandidates(prev, draggedId, beforeId))
+  }
+
   function scheduleAutoRefine(): void {
     if (autoRefineTimer.current) clearTimeout(autoRefineTimer.current)
     autoRefineTimer.current = setTimeout(() => {
@@ -1093,6 +1104,7 @@ export function useCandidatePool(
     setRejectedPoolOpen,
     handleSuggest,
     setDecision,
+    reorderCandidate,
     recheckCandidate,
     clearCandidates,
     appendSystemMessage,

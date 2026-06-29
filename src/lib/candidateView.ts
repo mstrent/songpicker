@@ -32,3 +32,34 @@ export function selectActiveCandidates(
     (c) => c.decision !== 'reject' && !isCommittedSong(c, items),
   )
 }
+
+/**
+ * Manual reorder of the candidate pool: move `draggedId` to immediately
+ * before `beforeId`, or to the end when `beforeId` is null. Order is the
+ * array order itself (no per-candidate rank field). Because
+ * selectActiveCandidates preserves array order, moving relative to a
+ * visible card produces the right visible order while interleaved
+ * rejected/committed entries keep their relative position.
+ *
+ * No-op (returns a copy) when the dragged id is missing, equals the
+ * target, or the target id isn't found — the drag layer should only
+ * ever pass ids that are present, but guard so a stale id can't drop a
+ * card into a surprising place.
+ */
+export function reorderCandidates(
+  candidates: readonly CandidateMatch[],
+  draggedId: string,
+  beforeId: string | null,
+): CandidateMatch[] {
+  const dragged = candidates.find((c) => c.id === draggedId)
+  if (!dragged) return [...candidates]
+  if (beforeId === draggedId) return [...candidates]
+  if (beforeId !== null && !candidates.some((c) => c.id === beforeId)) {
+    return [...candidates]
+  }
+  const without = candidates.filter((c) => c.id !== draggedId)
+  if (beforeId === null) return [...without, dragged]
+  const at = without.findIndex((c) => c.id === beforeId)
+  without.splice(at, 0, dragged)
+  return without
+}
