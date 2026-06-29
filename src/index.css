@@ -1019,6 +1019,16 @@ textarea {
   background: var(--accent-soft-2);
   outline-style: solid;
 }
+/* Blocked "nope" state — dragging a "not in library" candidate over a
+   song slot, which can't accept it. Red dashed outline + the browser's
+   no-drop cursor (the handler deliberately doesn't accept the drop). */
+.service-order .item.drop-blocked {
+  border-color: var(--error);
+  background: var(--error-soft);
+  outline: 2px dashed var(--error);
+  outline-offset: 2px;
+  cursor: not-allowed;
+}
 /* Reorder targets — every OTHER item while dragging a filled slot.
    Visually quieter than commit-targets so the user knows it's a
    different action: a soft top-border accent that grows into a thick
