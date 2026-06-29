@@ -21,6 +21,7 @@ import {
   type SongSuggestion,
 } from './api'
 import { isSongSlot } from './songSlots'
+import { isCommittedSong } from './candidateView'
 import { translateAiAssignments } from './planActions/aiTranslate'
 import {
   applyDecisionChange,
@@ -645,12 +646,7 @@ export function useCandidatePool(
   function isCandidateCommitted(candidate: {
     song?: { id?: string } | null
   }): boolean {
-    const id = candidate.song?.id
-    if (!id) return false
-    for (const it of planData.items ?? []) {
-      if (it.songId === id) return true
-    }
-    return false
+    return isCommittedSong(candidate, planData.items ?? [])
   }
 
   function committedSongIdsSet(): Set<string> {

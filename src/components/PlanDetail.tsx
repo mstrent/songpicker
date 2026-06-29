@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { isSongSlot } from '../lib/songSlots'
+import { selectActiveCandidates } from '../lib/candidateView'
 import {
   compileClearSlot,
   compileCommitToSlot,
@@ -88,7 +89,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setDecision,
     recheckCandidate,
     clearCandidates,
-    isCandidateCommitted,
     ensureCandidate,
     reEnrichSnippet,
     getEnrichedLyrics,
@@ -229,6 +229,13 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   if (!plan || !notes || !items) return <div>Loading plan…</div>
 
   const subtitle = plan.title && plan.seriesTitle ? plan.seriesTitle : null
+
+  // Active = not rejected and not committed. Committed songs live only
+  // on the schedule (left), so they drop out of the suggestion list;
+  // clearing a slot un-commits the candidate and it reappears here.
+  // Rejected ones go into the collapsed disclosure below.
+  const active = selectActiveCandidates(candidates, items)
+  const rejected = candidates.filter((c) => c.decision === 'reject')
 
   return (
     <div className="plan-detail">
@@ -692,10 +699,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         </div>
       </section>
 
-      {(() => {
-        const rejected = candidates.filter((c) => c.decision === 'reject')
-        if (rejected.length === 0) return null
-        return (
+      {rejected.length > 0 && (
           <details
             className="rejected-pool"
             open={rejectedPoolOpen}
@@ -740,8 +744,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
               ))}
             </ul>
           </details>
-        )
-      })()}
+      )}
 
         </div>
 
@@ -778,29 +781,23 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           <span>Drop to return this song to candidates</span>
         </div>
       )}
-      {candidates.length === 0 && (
+      {active.length === 0 && (
         <EmptyState
           icon="sparkle"
-          title="No suggestions yet"
+          title="No active suggestions"
           body={
             <>
-              Tap <span className="empty-state-emph">Suggest songs</span> to
-              get a fresh round from the AI.
+              Tap <span className="empty-state-emph">Suggest songs</span> for
+              a fresh round from the AI.
             </>
           }
         />
       )}
-      {candidates.length > 0 && (() => {
-        // Active = not-rejected. Rejected ones get tucked into the
-        // collapsed disclosure below to reduce clutter. Committed
-        // candidates stay in the active list too, just with the
-        // committed-badge instead of the slot picker.
-        const active = candidates.filter((c) => c.decision !== 'reject')
+      {active.length > 0 && (() => {
         const emptySongSlots = (items ?? []).filter(
           (it) => isSongSlot(it) && !it.songId,
         )
 
-        if (active.length === 0) return null
         return (
         <section className="candidates">
           <h3 className="ai-heading">
@@ -811,8 +808,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           <ul>
             {active.map((c, i) => {
               const matched = c.matchStatus === 'matched' && c.song
-              const isCommitted = isCandidateCommitted(c)
-              const candidateDraggable = !!matched && !isCommitted
+              // Active candidates are never committed (committed songs
+              // drop out of this list — see selectActiveCandidates), so
+              // every matched card is draggable and offers the slot picker.
+              const candidateDraggable = !!matched
               const candidateBeingDragged =
                 dragKind === 'candidate' && dragSourceId === c.id
               // Stagger entrance — CSS animation reads this delay so
@@ -1003,7 +1002,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                         type="button"
                         className={`decision-btn decision-reject icon-text${c.decision === 'reject' ? ' on' : ''}`}
                         onClick={() => setDecision(c.id, 'reject')}
-                        disabled={isCommitted}
                         title={
                           c.decision === 'reject'
                             ? 'Click again to undo'
@@ -1035,18 +1033,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                         </button>
                       )}
 
-                      {matched && isCommitted && (
-                        // Service order on the left is the source of
-                        // truth for WHICH slot. Showing a slot label
-                        // here was nonsensical anyway — PCO overwrites
-                        // the slot's title with the song name on commit.
-                        <span className="committed-badge icon-text">
-                          <Icon name="check" size={13} />
-                          Committed
-                        </span>
-                      )}
-
-                      {matched && !isCommitted && (() => {
+                      {matched && (() => {
                         // Replaces the old <select> with a button +
                         // popover. The button is the primary "action"
                         // affordance on each card and gets accent

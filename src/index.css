@@ -1654,15 +1654,6 @@ textarea {
   cursor: not-allowed;
 }
 
-.candidate .committed-badge {
-  background: var(--success-soft);
-  color: var(--success);
-  font-size: 0.78rem;
-  font-weight: 700;
-  padding: 0.22rem 0.65rem;
-  border-radius: 999px;
-}
-
 .candidate .ctitle {
   font-weight: 600;
   font-size: 1rem;
