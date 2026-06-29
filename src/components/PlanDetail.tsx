@@ -17,6 +17,7 @@ import { EmptyState } from './EmptyState'
 import { SongLookupLinks } from './SongLookupLinks'
 import { LyricsTrigger, LyricsPopover, type ActiveLyrics } from './LyricsButton'
 import { lastScheduledDisplay } from '../lib/lastScheduled'
+import { edgeScrollDelta } from '../lib/edgeScroll'
 
 type OpenPrompt = 'role' | 'structure' | null
 
@@ -207,6 +208,35 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     // every position update. dragGhost is read inside the effect closure but
     // we deliberately don't depend on its identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragGhostActive])
+
+  // Edge auto-scroll: the page scrolls as one unit, so a drop target
+  // (e.g. a service-order slot) can sit off-screen while you drag a
+  // candidate. While a drag is active, scroll the window when the
+  // pointer nears the top or bottom of the viewport so the target comes
+  // into reach without releasing the drag. dragover only fires on
+  // movement, so a rAF loop reads the latest pointer Y and keeps
+  // scrolling even when the cursor holds still in the edge band.
+  useEffect(() => {
+    if (!dragGhostActive) return
+    const opts = { edge: 90, maxSpeed: 22 }
+    let pointerY = 0
+    let raf = 0
+    const onMove = (e: DragEvent) => {
+      if (e.clientX === 0 && e.clientY === 0) return
+      pointerY = e.clientY
+    }
+    const tick = () => {
+      const delta = edgeScrollDelta(pointerY, 0, window.innerHeight, opts)
+      if (delta !== 0) window.scrollBy(0, delta)
+      raf = requestAnimationFrame(tick)
+    }
+    document.addEventListener('dragover', onMove)
+    raf = requestAnimationFrame(tick)
+    return () => {
+      document.removeEventListener('dragover', onMove)
+      cancelAnimationFrame(raf)
+    }
   }, [dragGhostActive])
 
   // Suppress the browser's default drag image so it doesn't compete
