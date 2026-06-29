@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { PlanItem } from './api'
 import type { CandidateMatch } from './useCandidatePool'
-import { isCommittedSong, selectActiveCandidates } from './candidateView'
+import {
+  isCommittedSong,
+  reorderCandidates,
+  selectActiveCandidates,
+} from './candidateView'
 
 function makeItem(
   partial: Partial<PlanItem> & Pick<PlanItem, 'id'>,
@@ -99,5 +103,61 @@ describe('selectActiveCandidates', () => {
         makeItem({ id: 'i1', songId: null }),
       ]).map((c) => c.id),
     ).toEqual(['a'])
+  })
+})
+
+describe('reorderCandidates', () => {
+  const ids = (list: CandidateMatch[]) => list.map((c) => c.id)
+  const make = (...xs: string[]) => xs.map((id) => makeCandidate({ id }))
+
+  it('moves the dragged candidate to immediately before the target', () => {
+    const list = make('a', 'b', 'c', 'd')
+    expect(ids(reorderCandidates(list, 'd', 'b'))).toEqual(['a', 'd', 'b', 'c'])
+  })
+
+  it('moves a candidate downward (target below it)', () => {
+    const list = make('a', 'b', 'c', 'd')
+    expect(ids(reorderCandidates(list, 'a', 'c'))).toEqual(['b', 'a', 'c', 'd'])
+  })
+
+  it('moves to the end when beforeId is null', () => {
+    const list = make('a', 'b', 'c')
+    expect(ids(reorderCandidates(list, 'a', null))).toEqual(['b', 'c', 'a'])
+  })
+
+  it('preserves interleaved non-active entries by id order', () => {
+    // 'r' is a rejected card rendered elsewhere; reordering the active
+    // cards around it must not lose it.
+    const list = [
+      makeCandidate({ id: 'a' }),
+      makeCandidate({ id: 'r', decision: 'reject' }),
+      makeCandidate({ id: 'b' }),
+      makeCandidate({ id: 'c' }),
+    ]
+    // drag c to before b -> active order a, c, b; r still present
+    const out = reorderCandidates(list, 'c', 'b')
+    expect(ids(out)).toEqual(['a', 'r', 'c', 'b'])
+  })
+
+  it('is a no-op when the dragged id is not found', () => {
+    const list = make('a', 'b', 'c')
+    expect(ids(reorderCandidates(list, 'z', 'a'))).toEqual(['a', 'b', 'c'])
+  })
+
+  it('is a no-op when beforeId equals the dragged id', () => {
+    const list = make('a', 'b', 'c')
+    expect(ids(reorderCandidates(list, 'b', 'b'))).toEqual(['a', 'b', 'c'])
+  })
+
+  it('is a no-op when beforeId is not found', () => {
+    const list = make('a', 'b', 'c')
+    expect(ids(reorderCandidates(list, 'a', 'z'))).toEqual(['a', 'b', 'c'])
+  })
+
+  it('returns a new array (does not mutate the input)', () => {
+    const list = make('a', 'b', 'c')
+    const out = reorderCandidates(list, 'c', 'a')
+    expect(out).not.toBe(list)
+    expect(ids(list)).toEqual(['a', 'b', 'c'])
   })
 })

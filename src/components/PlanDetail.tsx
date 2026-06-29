@@ -18,6 +18,7 @@ import { SongLookupLinks } from './SongLookupLinks'
 import { LyricsTrigger, LyricsPopover, type ActiveLyrics } from './LyricsButton'
 import { lastScheduledDisplay } from '../lib/lastScheduled'
 import { edgeScrollDelta } from '../lib/edgeScroll'
+import { dragLeftElement } from '../lib/dnd'
 
 type OpenPrompt = 'role' | 'structure' | null
 
@@ -88,6 +89,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setRejectedPoolOpen,
     handleSuggest,
     setDecision,
+    reorderCandidate,
     recheckCandidate,
     clearCandidates,
     ensureCandidate,
@@ -165,6 +167,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   // panel clears it and the executor's onSongEvicted returns the
   // displaced song to candidates.
   const [dragOverCandidates, setDragOverCandidates] = useState(false)
+  // Insertion point for drag-to-reorder of the candidate pool: the
+  // index in the active list where the dropped card will land (so the
+  // thin insertion line renders before active[insertIndex], or after
+  // the last card when it equals active.length). Null = no line shown.
+  const [insertIndex, setInsertIndex] = useState<number | null>(null)
 
   // Floating-ghost we render ourselves at the cursor position during a
   // drag. The browser-default drag image was rendering blank, and
@@ -184,6 +191,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     setDragSourceId(null)
     setDragOverItemId(null)
     setDragOverCandidates(false)
+    setInsertIndex(null)
     setDragGhost(null)
   }
 
@@ -266,6 +274,20 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   // Rejected ones go into the collapsed disclosure below.
   const active = selectActiveCandidates(candidates, items)
   const rejected = candidates.filter((c) => c.decision === 'reject')
+
+  // While dragging a candidate, whether it can actually be committed to
+  // a slot (i.e. it's matched in the library). Unmatched cards are
+  // draggable for reordering, but a slot can't accept one — so song
+  // slots show a blocked "nope" state for them instead of pretending to
+  // accept the drop and silently no-opping.
+  const draggedCandidate =
+    dragKind === 'candidate' && dragSourceId
+      ? candidates.find((c) => c.id === dragSourceId)
+      : undefined
+  const draggedCandidateCommittable =
+    !!draggedCandidate &&
+    draggedCandidate.matchStatus === 'matched' &&
+    !!draggedCandidate.song
 
   return (
     <div className="plan-detail">
@@ -357,7 +379,14 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
               // slots commit fresh, filled slots replace the existing
               // song (and return the displaced song to the candidate
               // pool as uncommitted).
-              const isCommitTarget = dragKind === 'candidate' && isSong
+              const isCommitTarget =
+                dragKind === 'candidate' && isSong && draggedCandidateCommittable
+              // Dragging an unmatched candidate over a song slot — can't
+              // commit it, so show a blocked "nope" state instead.
+              const isBlockedTarget =
+                dragKind === 'candidate' &&
+                isSong &&
+                !draggedCandidateCommittable
               // Only song slots (filled OR empty) accept reorder drops —
               // dropping onto a Welcome / Announcements / Sermon item
               // would be confusing because those aren't the "spots"
@@ -377,8 +406,12 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                   className={`${cls}${isDropTarget ? ' drag-target' : ''}${
                     isDropTarget && dragOverItemId === it.id ? ' drag-over' : ''
                   }${isReorderTarget ? ' drag-target-reorder' : ''}${
-                    draggable ? ' is-draggable' : ''
-                  }${isBeingDragged ? ' is-dragging' : ''}`}
+                    isBlockedTarget && dragOverItemId === it.id
+                      ? ' drop-blocked'
+                      : ''
+                  }${draggable ? ' is-draggable' : ''}${
+                    isBeingDragged ? ' is-dragging' : ''
+                  }`}
                   draggable={draggable || undefined}
                   onDragStart={(e) => {
                     if (!draggable) return
@@ -398,13 +431,39 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     if (draggable) endDrag()
                   }}
                   onDragOver={(e) => {
+                    if (isBlockedTarget) {
+                      // Don't preventDefault — that leaves the browser's
+                      // no-drop cursor showing and keeps the drop from
+                      // being accepted. We still mark the slot so it gets
+                      // the blocked highlight.
+                      e.dataTransfer.dropEffect = 'none'
+                      if (dragOverItemId !== it.id) setDragOverItemId(it.id)
+                      return
+                    }
                     if (!isDropTarget) return
                     e.preventDefault()
                     e.dataTransfer.dropEffect = 'move'
                     if (dragOverItemId !== it.id) setDragOverItemId(it.id)
                   }}
-                  onDragLeave={() => {
-                    if (isDropTarget && dragOverItemId === it.id) {
+                  onDragLeave={(e) => {
+                    // dragleave bubbles up from child elements, so moving
+                    // between a slot's children fires it repeatedly;
+                    // clearing the highlight each time made it flicker.
+                    // Only clear when the cursor truly leaves the slot.
+                    if (
+                      !dragLeftElement(
+                        e.currentTarget,
+                        e.relatedTarget as Node | null,
+                      )
+                    )
+                      return
+                    // Clear on leaving a valid drop target OR a blocked
+                    // ("nope") one — otherwise the blocked highlight
+                    // sticks after the cursor moves away.
+                    if (
+                      (isDropTarget || isBlockedTarget) &&
+                      dragOverItemId === it.id
+                    ) {
                       setDragOverItemId(null)
                     }
                   }}
@@ -791,8 +850,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           onDragLeave={(e) => {
             // dragleave fires for every child crossed; only flip off
             // when the cursor actually exits the panel.
-            const related = e.relatedTarget as Node | null
-            if (related && e.currentTarget.contains(related)) return
+            if (
+              !dragLeftElement(e.currentTarget, e.relatedTarget as Node | null)
+            )
+              return
             if (dragOverCandidates) setDragOverCandidates(false)
           }}
           onDrop={(e) => {
@@ -835,13 +896,30 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
             <span className="gradient-text">AI candidates</span>
             <span className="candidates-summary">({active.length})</span>
           </h3>
-          <ul>
+          <ul
+            onDrop={(e) => {
+              // Drop within the list = reorder to the insertion line.
+              if (
+                dragKind !== 'candidate' ||
+                !dragSourceId ||
+                insertIndex === null
+              )
+                return
+              e.preventDefault()
+              const beforeId =
+                insertIndex < active.length ? active[insertIndex].id : null
+              reorderCandidate(dragSourceId, beforeId)
+              endDrag()
+            }}
+          >
             {active.map((c, i) => {
               const matched = c.matchStatus === 'matched' && c.song
-              // Active candidates are never committed (committed songs
-              // drop out of this list — see selectActiveCandidates), so
-              // every matched card is draggable and offers the slot picker.
-              const candidateDraggable = !!matched
+              // Every active card is draggable: matched ones can also be
+              // dropped on a slot to commit, but ALL of them can be
+              // dragged within the list to reorder the pool (the drop
+              // target decides which action — slot = commit, another
+              // card = reorder). Dropping an unmatched card on a slot
+              // safely no-ops (compileDropCandidateOnSlot needs a song).
               const candidateBeingDragged =
                 dragKind === 'candidate' && dragSourceId === c.id
               // Stagger entrance — CSS animation reads this delay so
@@ -849,15 +927,17 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
               // at once. Cap at 12 so a big batch doesn't drag on.
               const enterDelay = `${Math.min(i, 12) * 50}ms`
               return (
+                <React.Fragment key={c.id}>
+                {dragKind === 'candidate' && insertIndex === i && (
+                  <li className="reorder-line" aria-hidden />
+                )}
                 <li
-                  key={c.id}
-                  className={`candidate match-${c.matchStatus} decision-${c.decision}${
-                    candidateDraggable ? ' is-draggable' : ''
-                  }${candidateBeingDragged ? ' is-dragging' : ''}`}
+                  className={`candidate match-${c.matchStatus} decision-${c.decision} is-draggable${
+                    candidateBeingDragged ? ' is-dragging' : ''
+                  }`}
                   style={{ animationDelay: enterDelay }}
-                  draggable={candidateDraggable || undefined}
+                  draggable
                   onDragStart={(e) => {
-                    if (!candidateDraggable) return
                     // text/plain keeps Firefox happy; the real payload
                     // lives in dragKind + dragSourceId.
                     e.dataTransfer.setData('text/plain', c.id)
@@ -871,6 +951,15 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       x: e.clientX,
                       y: e.clientY,
                     })
+                  }}
+                  onDragOver={(e) => {
+                    // Reorder: only when dragging another candidate.
+                    if (dragKind !== 'candidate' || !dragSourceId) return
+                    e.preventDefault()
+                    e.dataTransfer.dropEffect = 'move'
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const after = e.clientY > rect.top + rect.height / 2
+                    setInsertIndex(after ? i + 1 : i)
                   }}
                   onDragEnd={endDrag}
                 >
@@ -1125,8 +1214,12 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     </div>
                   </div>
                 </li>
+                </React.Fragment>
               )
             })}
+            {dragKind === 'candidate' && insertIndex === active.length && (
+              <li className="reorder-line" aria-hidden />
+            )}
           </ul>
           {/* end candidates list */}
         </section>
