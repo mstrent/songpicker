@@ -19,6 +19,7 @@ import { LyricsTrigger, LyricsPopover, type ActiveLyrics } from './LyricsButton'
 import { lastScheduledDisplay } from '../lib/lastScheduled'
 import { edgeScrollDelta } from '../lib/edgeScroll'
 import { dragLeftElement } from '../lib/dnd'
+import { reorderInsertIndex } from '../lib/dndReorder'
 
 type OpenPrompt = 'role' | 'structure' | null
 
@@ -890,28 +891,53 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
         )
 
         return (
-        <section className="candidates">
+        <section
+          className={`candidates${
+            dragKind === 'candidate' ? ' reordering' : ''
+          }`}
+          onDragOver={(e) => {
+            // The whole section is one drop zone and one insertion-index
+            // source. preventDefault makes a drop land anywhere in the
+            // section (cards, the grid gaps, the heading, the padding
+            // above, and the drag-time runway below the last card — see
+            // the .reordering rule in CSS). insertIndex is computed from
+            // the pointer's Y against the card midpoints rather than from
+            // per-card hover, so there are no dead zones: the line tracks
+            // the cursor through gaps and edges, and because the drop
+            // resolves the same index, the card always lands where the
+            // line showed.
+            if (dragKind !== 'candidate' || !dragSourceId) return
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'move'
+            const spans = [
+              ...e.currentTarget.querySelectorAll('.candidate'),
+            ].map((el) => {
+              const r = el.getBoundingClientRect()
+              return { top: r.top, bottom: r.bottom }
+            })
+            setInsertIndex(reorderInsertIndex(e.clientY, spans))
+          }}
+          onDrop={(e) => {
+            // Drop anywhere in the section = reorder to the insertion line.
+            if (
+              dragKind !== 'candidate' ||
+              !dragSourceId ||
+              insertIndex === null
+            )
+              return
+            e.preventDefault()
+            const beforeId =
+              insertIndex < active.length ? active[insertIndex].id : null
+            reorderCandidate(dragSourceId, beforeId)
+            endDrag()
+          }}
+        >
           <h3 className="ai-heading">
             <span className="sparkle" aria-hidden>✨</span>
             <span className="gradient-text">AI candidates</span>
             <span className="candidates-summary">({active.length})</span>
           </h3>
-          <ul
-            onDrop={(e) => {
-              // Drop within the list = reorder to the insertion line.
-              if (
-                dragKind !== 'candidate' ||
-                !dragSourceId ||
-                insertIndex === null
-              )
-                return
-              e.preventDefault()
-              const beforeId =
-                insertIndex < active.length ? active[insertIndex].id : null
-              reorderCandidate(dragSourceId, beforeId)
-              endDrag()
-            }}
-          >
+          <ul>
             {active.map((c, i) => {
               const matched = c.matchStatus === 'matched' && c.song
               // Every active card is draggable: matched ones can also be
@@ -951,15 +977,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       x: e.clientX,
                       y: e.clientY,
                     })
-                  }}
-                  onDragOver={(e) => {
-                    // Reorder: only when dragging another candidate.
-                    if (dragKind !== 'candidate' || !dragSourceId) return
-                    e.preventDefault()
-                    e.dataTransfer.dropEffect = 'move'
-                    const rect = e.currentTarget.getBoundingClientRect()
-                    const after = e.clientY > rect.top + rect.height / 2
-                    setInsertIndex(after ? i + 1 : i)
                   }}
                   onDragEnd={endDrag}
                 >
