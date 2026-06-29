@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { isSongSlot } from '../lib/songSlots'
 import { selectActiveCandidates } from '../lib/candidateView'
+import { edgeScrollDelta } from '../lib/edgeScroll'
 import {
   compileClearSlot,
   compileCommitToSlot,
@@ -142,6 +143,28 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     el.scrollTop = el.scrollHeight
   }, [messages])
 
+  // Two-column mode makes each column an independent scroll pane sized
+  // to the viewport below the sticky title band (see .plan-left /
+  // .plan-right in index.css). The band's height isn't fixed — a long
+  // plan title wraps — so publish its measured height as
+  // --plan-header-h and let CSS compute the panes' top + height from it.
+  const planDetailRef = useRef<HTMLDivElement | null>(null)
+  const planHeaderRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const header = planHeaderRef.current
+    const container = planDetailRef.current
+    if (!header || !container) return
+    const publish = () =>
+      container.style.setProperty(
+        '--plan-header-h',
+        `${Math.ceil(header.getBoundingClientRect().height)}px`,
+      )
+    publish()
+    const ro = new ResizeObserver(publish)
+    ro.observe(header)
+    return () => ro.disconnect()
+  }, [plan])
+
   // Drag-and-drop state. Two distinct drag modes:
   //   - 'candidate': dragging an AI suggestion onto an empty service-
   //     order slot. Drop assigns + commits in one step.
@@ -209,6 +232,45 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dragGhostActive])
 
+  // Edge auto-scroll: while dragging, if the pointer nears the top or
+  // bottom of a scroll pane (.plan-left / .plan-right), scroll that pane
+  // so a drop target that's off-screen comes into reach. dragover only
+  // fires on movement, so a rAF loop reads the latest pointer position
+  // and keeps scrolling even when the cursor holds still in the edge
+  // band. No-ops in single-column mode where the panes are
+  // display:contents (zero-box, so the pointer never tests "inside").
+  useEffect(() => {
+    if (!dragGhostActive) return
+    const opts = { edge: 64, maxSpeed: 18 }
+    const pointer = { x: 0, y: 0 }
+    let raf = 0
+    const onMove = (e: DragEvent) => {
+      if (e.clientX === 0 && e.clientY === 0) return
+      pointer.x = e.clientX
+      pointer.y = e.clientY
+    }
+    const tick = () => {
+      const root = planDetailRef.current
+      if (root) {
+        for (const sel of ['.plan-left', '.plan-right'] as const) {
+          const pane = root.querySelector<HTMLElement>(sel)
+          if (!pane) continue
+          const r = pane.getBoundingClientRect()
+          if (pointer.x < r.left || pointer.x > r.right) continue
+          const delta = edgeScrollDelta(pointer.y, r.top, r.bottom, opts)
+          if (delta !== 0) pane.scrollTop += delta
+        }
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    document.addEventListener('dragover', onMove)
+    raf = requestAnimationFrame(tick)
+    return () => {
+      document.removeEventListener('dragover', onMove)
+      cancelAnimationFrame(raf)
+    }
+  }, [dragGhostActive])
+
   // Suppress the browser's default drag image so it doesn't compete
   // with our floating ghost (and so users on Chromium/Retina don't see
   // it render as a blank rectangle either). A 1×1 transparent canvas
@@ -238,7 +300,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   const rejected = candidates.filter((c) => c.decision === 'reject')
 
   return (
-    <div className="plan-detail">
+    <div className="plan-detail" ref={planDetailRef}>
       {dragGhost && (
         <div
           className="drag-ghost"
@@ -253,7 +315,7 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
           )}
         </div>
       )}
-      <div className="plan-header">
+      <div className="plan-header" ref={planHeaderRef}>
         <a
           className="back"
           href="#"

@@ -774,6 +774,33 @@ textarea {
     flex-direction: column;
     gap: 0.4rem;
     min-width: 0;
+    /* Each column is its own scroll pane sized to the viewport below
+       the sticky title band, so the long candidate list (right) and the
+       long service order + form + chat (left) scroll independently —
+       the schedule stays put for drag-and-drop while you browse
+       candidates. --plan-header-h is published by PlanDetail's
+       ResizeObserver (the band's height varies when a title wraps).
+       The var() fallback (96px) keeps the panes usable on first paint
+       before the observer fires; the measured value, set on
+       .plan-detail, inherits down and wins once published. */
+    position: sticky;
+    top: var(--plan-header-h, 96px);
+    height: calc(100vh - var(--plan-header-h, 96px));
+    overflow-y: auto;
+    /* Breathing room so the last card/section isn't flush to the edge. */
+    padding-bottom: 1.25rem;
+  }
+  /* Hide both panes' scrollbars — the left one would sit mid-screen
+     between the columns, and a bar on the right was called out as ugly
+     too. The panes still scroll via wheel/trackpad (and drag edge
+     auto-scroll handles the drag case). */
+  .plan-detail .plan-left,
+  .plan-detail .plan-right {
+    scrollbar-width: none;
+  }
+  .plan-detail .plan-left::-webkit-scrollbar,
+  .plan-detail .plan-right::-webkit-scrollbar {
+    display: none;
   }
   /* Two-column mode: keep natural DOM order — rejected pool sits at
      the bottom of the left column. */
