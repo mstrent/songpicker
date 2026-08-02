@@ -36,11 +36,14 @@ import {
 import { countSongs } from './pco/songSlots'
 import {
   DEFAULT_ROTATION_WINDOWS,
+  MAX_LOOK_AHEAD_DAYS,
   MAX_REDUCED_WEIGHT_DAYS,
   bucketRecentSongs,
   formatRecentlySung,
+  formatScheduledAhead,
   loadRecentSongs,
   loadRotationWindows,
+  loadUpcomingSongs,
   parseRotationWindows,
   saveRotationWindows,
 } from './recentSongs'
@@ -523,13 +526,18 @@ export const suggestSongs = onCall<
     // rather than failing the turn. Skipped entirely on auto-refresh,
     // which can't propose anything anyway.
     const rotation = await loadRotationWindows()
-    const [structure, role, recentSongs] = await Promise.all([
+    // One PCO client shared by both rotation lookups rather than two
+    // credential reads.
+    const rotationPco =
+      serviceTypeId && !autoRefresh ? await pcoForUser(uid) : null
+    const [structure, role, recentSongs, upcomingSongs] = await Promise.all([
       loadResolved(uid, 'structure', planId),
       loadResolved(uid, 'role', planId),
-      serviceTypeId && !autoRefresh
-        ? pcoForUser(uid).then((pco) =>
-            loadRecentSongs(uid, pco, serviceTypeId, rotation),
-          )
+      rotationPco && serviceTypeId
+        ? loadRecentSongs(uid, rotationPco, serviceTypeId, rotation)
+        : Promise.resolve([]),
+      rotationPco && serviceTypeId
+        ? loadUpcomingSongs(uid, rotationPco, serviceTypeId, rotation)
         : Promise.resolve([]),
     ])
 
@@ -552,6 +560,12 @@ export const suggestSongs = onCall<
           serviceOrder,
           planNotes,
           recentlySung: formatRecentlySung(recentSongs, new Date(), rotation),
+          scheduledAhead: formatScheduledAhead(
+            upcomingSongs,
+            planId,
+            new Date(),
+            rotation,
+          ),
           candidates,
           alreadyInPlan,
           history,
@@ -754,7 +768,9 @@ export const getRotationConfig = onCall(async (req) => {
     serviceTypeName: string | null
     blocked: number
     reduced: number
+    ahead: number
     block: string
+    aheadBlock: string
   }> = []
   let previewError: string | null = null
   try {
@@ -771,14 +787,21 @@ export const getRotationConfig = onCall(async (req) => {
     preview = await pMap(
       types,
       async (t) => {
-        const songs = await loadRecentSongs(uid, pco, t.id, windows)
-        const { blocked, reduced } = bucketRecentSongs(songs, new Date(), windows)
+        const now = new Date()
+        const [songs, upcoming] = await Promise.all([
+          loadRecentSongs(uid, pco, t.id, windows, now),
+          loadUpcomingSongs(uid, pco, t.id, windows, now),
+        ])
+        const { blocked, reduced } = bucketRecentSongs(songs, now, windows)
         return {
           serviceTypeId: t.id,
           serviceTypeName: t.name,
           blocked: blocked.length,
           reduced: reduced.length,
-          block: formatRecentlySung(songs, new Date(), windows),
+          ahead: upcoming.length,
+          block: formatRecentlySung(songs, now, windows),
+          // No plan to exclude here — the preview isn't scoped to one.
+          aheadBlock: formatScheduledAhead(upcoming, undefined, now, windows),
         }
       },
       2,
@@ -793,6 +816,7 @@ export const getRotationConfig = onCall(async (req) => {
     windows,
     defaults: DEFAULT_ROTATION_WINDOWS,
     maxReducedWeightDays: MAX_REDUCED_WEIGHT_DAYS,
+    maxLookAheadDays: MAX_LOOK_AHEAD_DAYS,
     preview,
     previewError,
   }
@@ -804,7 +828,7 @@ export const saveRotationConfig = onCall(async (req) => {
   if (!windows) {
     throw new HttpsError(
       'invalid-argument',
-      `Both values must be whole numbers of days, with the reduced-weight window larger than the hard-block window and no more than ${MAX_REDUCED_WEIGHT_DAYS}.`,
+      `All values must be whole numbers of days. The reduced-weight window must be larger than the hard-block window and no more than ${MAX_REDUCED_WEIGHT_DAYS}; the look-ahead must be between 0 and ${MAX_LOOK_AHEAD_DAYS} (0 turns it off).`,
     )
   }
   await saveRotationWindows(windows)

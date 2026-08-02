@@ -66,6 +66,9 @@ export function buildUserMessage(req: SuggestRequest): BuiltUserMessage {
   if (req.recentlySung && req.recentlySung.trim()) {
     stableParts.push(req.recentlySung.trim())
   }
+  if (req.scheduledAhead && req.scheduledAhead.trim()) {
+    stableParts.push(req.scheduledAhead.trim())
+  }
 
   const volatileParts: string[] = []
   if (req.candidates && req.candidates.length > 0) {

@@ -327,6 +327,7 @@ function RotationSection() {
   const [config, setConfig] = useState<RotationConfig | null>(null)
   const [hard, setHard] = useState('')
   const [reduced, setReduced] = useState('')
+  const [ahead, setAhead] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -337,12 +338,14 @@ function RotationSection() {
         setConfig(res.data)
         setHard(String(res.data.windows.hardBlockDays))
         setReduced(String(res.data.windows.reducedWeightDays))
+        setAhead(String(res.data.windows.lookAheadDays))
       })
       .catch((e: Error) => setError(e.message))
   }, [])
 
   const hardNum = Number(hard)
   const reducedNum = Number(reduced)
+  const aheadNum = Number(ahead)
   // Mirrors parseRotationWindows on the server so the admin gets the
   // reason inline instead of via a round trip. The server is still the
   // real gate.
@@ -355,12 +358,17 @@ function RotationSection() {
           ? 'Reduced-weight window must be larger than the hard-block window.'
           : config && reducedNum > config.maxReducedWeightDays
             ? `Reduced-weight window can be at most ${config.maxReducedWeightDays} days.`
-            : null
+            : !Number.isInteger(aheadNum) || aheadNum < 0
+              ? 'Look-ahead must be a whole number of days, or 0 to turn it off.'
+              : config && aheadNum > config.maxLookAheadDays
+                ? `Look-ahead can be at most ${config.maxLookAheadDays} days.`
+                : null
 
   const dirty =
     config !== null &&
     (hardNum !== config.windows.hardBlockDays ||
-      reducedNum !== config.windows.reducedWeightDays)
+      reducedNum !== config.windows.reducedWeightDays ||
+      aheadNum !== config.windows.lookAheadDays)
 
   async function save() {
     if (validation || !dirty) return
@@ -370,6 +378,7 @@ function RotationSection() {
       const res = await saveRotationConfig({
         hardBlockDays: hardNum,
         reducedWeightDays: reducedNum,
+        lookAheadDays: aheadNum,
       })
       setConfig((prev) => (prev ? { ...prev, windows: res.data.windows } : prev))
       setSaved(true)
@@ -416,6 +425,17 @@ function RotationSection() {
               />
               <span>days</span>
             </label>
+            <label>
+              <span>Bias against songs booked in the next</span>
+              <input
+                type="number"
+                min={0}
+                max={config.maxLookAheadDays}
+                value={ahead}
+                onChange={(e) => setAhead(e.target.value)}
+              />
+              <span>days (0 = off)</span>
+            </label>
           </div>
           {validation && <div className="error">{validation}</div>}
           <div className="rotation-actions">
@@ -446,15 +466,19 @@ function RotationSection() {
                 <div className="rotation-preview-head">
                   {p.serviceTypeName ?? p.serviceTypeId}
                   <span className="muted">
-                    {p.blocked} blocked, {p.reduced} reduced
+                    {p.blocked} blocked, {p.reduced} reduced, {p.ahead}{' '}
+                    booked ahead
                   </span>
                 </div>
-                {p.block ? (
-                  <pre>{p.block}</pre>
+                {p.block || p.aheadBlock ? (
+                  <>
+                    {p.block && <pre>{p.block}</pre>}
+                    {p.aheadBlock && <pre>{p.aheadBlock}</pre>}
+                  </>
                 ) : (
                   <p className="muted">
-                    Nothing in either band — no rotation context is sent for
-                    this service type.
+                    Nothing in any band — no rotation context is sent for this
+                    service type.
                   </p>
                 )}
               </div>

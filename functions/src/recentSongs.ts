@@ -23,17 +23,24 @@ export interface RotationWindows {
   /** Sung within this many days (but past hardBlockDays): allowed, but
    *  needs to clearly beat a fresher option. */
   reducedWeightDays: number
+  /** Already scheduled within this many days ahead: allowed, but
+   *  weighs against the song — putting it in this service too would
+   *  create a repeat. Always a soft bias, never a block: future plans
+   *  are provisional and get rearranged. */
+  lookAheadDays: number
 }
 
 export const DEFAULT_ROTATION_WINDOWS: RotationWindows = {
   hardBlockDays: 14,
   reducedWeightDays: 42,
+  lookAheadDays: 60,
 }
 
 // Upper bound on the configurable window. Past this the block starts
 // costing real prompt tokens for songs nobody was going to repeat
 // anyway, and the PCO scan gets expensive.
 export const MAX_REDUCED_WEIGHT_DAYS = 120
+export const MAX_LOOK_AHEAD_DAYS = 120
 
 // Plans are fetched to cover the configured window, plus margin for
 // midweek and holiday services that share a service type.
@@ -59,14 +66,35 @@ export function parseRotationWindows(raw: unknown): RotationWindows | null {
   const r = raw as Record<string, unknown>
   const hard = r.hardBlockDays
   const reduced = r.reducedWeightDays
-  if (typeof hard !== 'number' || typeof reduced !== 'number') return null
-  if (!Number.isInteger(hard) || !Number.isInteger(reduced)) return null
+  // Absent lookAheadDays reads as the default rather than a rejection:
+  // configs written before the look-ahead existed are still valid.
+  const ahead = r.lookAheadDays ?? DEFAULT_ROTATION_WINDOWS.lookAheadDays
+  if (
+    typeof hard !== 'number' ||
+    typeof reduced !== 'number' ||
+    typeof ahead !== 'number'
+  ) {
+    return null
+  }
+  if (
+    !Number.isInteger(hard) ||
+    !Number.isInteger(reduced) ||
+    !Number.isInteger(ahead)
+  ) {
+    return null
+  }
   if (hard < 1) return null
   // Equal windows would render an empty reduced band and read as a
   // configuration mistake; require the bands to be distinct.
   if (reduced <= hard) return null
   if (reduced > MAX_REDUCED_WEIGHT_DAYS) return null
-  return { hardBlockDays: hard, reducedWeightDays: reduced }
+  // Zero is meaningful here — it turns the look-ahead off entirely.
+  if (ahead < 0 || ahead > MAX_LOOK_AHEAD_DAYS) return null
+  return {
+    hardBlockDays: hard,
+    reducedWeightDays: reduced,
+    lookAheadDays: ahead,
+  }
 }
 
 /** Admin-configured windows, falling back to the defaults when unset
@@ -169,6 +197,156 @@ export function formatRecentlySung(
     )
   }
   return lines.join('\n')
+}
+
+/** A song already scheduled in an upcoming service. */
+export interface UpcomingSong {
+  title: string
+  author: string | null
+  /** ISO date of the service it's scheduled for. */
+  scheduledFor: string
+  /** The plan it's scheduled in, so the plan currently being edited
+   *  can be filtered out — its songs are already covered by
+   *  "Already in plan" and aren't a future conflict with themselves. */
+  planId: string
+}
+
+/** Render the look-ahead block. Always a soft bias — future plans get
+ *  rearranged, so a hard block on a provisional booking would be
+ *  wrong. Grouped by service date because proximity matters: a song
+ *  booked for next week conflicts far more than one booked in seven.
+ *  Returns '' when there's nothing to say. */
+export function formatScheduledAhead(
+  songs: readonly UpcomingSong[],
+  excludePlanId: string | undefined,
+  now: Date,
+  windows: RotationWindows = DEFAULT_ROTATION_WINDOWS,
+): string {
+  if (windows.lookAheadDays <= 0) return ''
+  const byDate = new Map<string, UpcomingSong[]>()
+  for (const s of songs) {
+    if (excludePlanId && s.planId === excludePlanId) continue
+    const daysAway = -daysBetween(s.scheduledFor, now)
+    if (daysAway < 0 || daysAway > windows.lookAheadDays) continue
+    const key = s.scheduledFor.slice(0, 10)
+    const bucket = byDate.get(key)
+    if (bucket) bucket.push(s)
+    else byDate.set(key, [s])
+  }
+  if (byDate.size === 0) return ''
+
+  const lines = [
+    `Already scheduled in the next ${windows.lookAheadDays} days — proposing one here would repeat it within weeks, so it needs to clearly beat an unscheduled option:`,
+  ]
+  for (const date of [...byDate.keys()].sort()) {
+    const songsForDate = byDate
+      .get(date)!
+      .map((s) => (s.author ? `${s.title} (${s.author})` : s.title))
+      .join(', ')
+    lines.push(`  ${date}: ${songsForDate}`)
+  }
+  return lines.join('\n')
+}
+
+interface UpcomingCacheDoc {
+  songs: UpcomingSong[]
+  fetchedAt: number
+  scannedDays: number
+}
+
+// Future plans are provisional and get edited — including by this app,
+// when the user commits a song to an adjacent week. A short TTL keeps
+// the look-ahead honest without refetching on every turn.
+const UPCOMING_CACHE_TTL_MS = 15 * 60 * 1000
+
+const upcomingRef = (uid: string, serviceTypeId: string) =>
+  getFirestore().doc(`${COLLECTION}/${uid}/upcoming/${serviceTypeId}`)
+
+/** Songs already booked into upcoming services for this service type.
+ *  The whole future window is cached regardless of which plan is being
+ *  edited; the current plan is filtered out at render time so the
+ *  cache key stays per-service-type. Same swallow-and-degrade posture
+ *  as loadRecentSongs. */
+export async function loadUpcomingSongs(
+  uid: string,
+  pco: PcoClient,
+  serviceTypeId: string,
+  windows: RotationWindows = DEFAULT_ROTATION_WINDOWS,
+  now: Date = new Date(),
+): Promise<UpcomingSong[]> {
+  if (windows.lookAheadDays <= 0) return []
+  const startedAt = Date.now()
+  const ref = upcomingRef(uid, serviceTypeId)
+  try {
+    const snap = await ref.get()
+    const cached = snap.exists ? (snap.data() as UpcomingCacheDoc) : null
+    if (
+      cached &&
+      now.getTime() - cached.fetchedAt < UPCOMING_CACHE_TTL_MS &&
+      (cached.scannedDays ?? 0) >= windows.lookAheadDays
+    ) {
+      const ageMin = Math.round((now.getTime() - cached.fetchedAt) / 60_000)
+      console.log(
+        `[upcomingSongs] cache hit: ${cached.songs.length} entries, scanned ${cached.scannedDays}d, ${ageMin}min old`,
+      )
+      return cached.songs
+    }
+  } catch {
+    // Degrade to a live fetch.
+  }
+
+  const perPage = Math.min(
+    MAX_PLANS_TO_SCAN,
+    Math.ceil(windows.lookAheadDays / 7) + PLAN_SCAN_MARGIN,
+  )
+
+  let songs: UpcomingSong[]
+  try {
+    const plans = await pco.listPlans(
+      { id: serviceTypeId, name: null },
+      { filter: 'future', perPage, order: 'sort_date' },
+    )
+    const inWindow = plans.filter(
+      (p) => p.sortDate && -daysBetween(p.sortDate, now) <= windows.lookAheadDays,
+    )
+    const perPlan = await pMap(
+      inWindow,
+      async (p) => {
+        const items = await pco.listPlanItems(serviceTypeId, p.id)
+        return items
+          .filter((it) => it.songId && it.songTitle)
+          .map(
+            (it): UpcomingSong => ({
+              title: it.songTitle!,
+              author: it.songAuthor,
+              scheduledFor: p.sortDate!,
+              planId: p.id,
+            }),
+          )
+      },
+      4,
+    )
+    songs = perPlan.flat()
+    const perService = inWindow
+      .map((p, i) => `${p.sortDate?.slice(0, 10)}(${perPlan[i].length})`)
+      .join(', ')
+    console.log(
+      `[upcomingSongs] fetched in ${Date.now() - startedAt}ms: ${plans.length} plans listed, ${inWindow.length} in window (${windows.lookAheadDays}d), ${songs.length} song slots`,
+    )
+    if (perService) console.log(`[upcomingSongs] services: ${perService}`)
+  } catch (err) {
+    console.warn('[upcomingSongs] fetch failed; continuing without it:', err)
+    return []
+  }
+
+  ref
+    .set({
+      songs,
+      fetchedAt: now.getTime(),
+      scannedDays: windows.lookAheadDays,
+    } satisfies UpcomingCacheDoc)
+    .catch(() => {})
+  return songs
 }
 
 interface CacheDoc {

@@ -5,8 +5,10 @@ import {
   MAX_REDUCED_WEIGHT_DAYS,
   bucketRecentSongs,
   formatRecentlySung,
+  formatScheduledAhead,
   parseRotationWindows,
   type RecentSong,
+  type UpcomingSong,
 } from './recentSongs'
 
 const HARD_BLOCK_DAYS = DEFAULT_ROTATION_WINDOWS.hardBlockDays
@@ -124,6 +126,7 @@ describe('formatRecentlySung', () => {
     const out = formatRecentlySung([sung('A', 3), sung('B', 20)], NOW, {
       hardBlockDays: 7,
       reducedWeightDays: 30,
+      lookAheadDays: 0,
     })
     expect(out).toContain('within the last 7 days')
     expect(out).toContain('Sung 8-30 days ago')
@@ -134,27 +137,142 @@ describe('formatRecentlySung', () => {
     expect(formatRecentlySung(songs, NOW, {
       hardBlockDays: 30,
       reducedWeightDays: 60,
+      lookAheadDays: 0,
     })).toMatch(/do NOT propose/)
     expect(formatRecentlySung(songs, NOW, {
       hardBlockDays: 7,
       reducedWeightDays: 30,
+      lookAheadDays: 0,
     })).toMatch(/propose only if clearly the best fit/)
   })
 })
 
+/** A song booked `days` after NOW, in plan `planId`. */
+function booked(
+  title: string,
+  days: number,
+  planId = 'other-plan',
+  author: string | null = null,
+): UpcomingSong {
+  const d = new Date(NOW.getTime() + days * 86_400_000)
+  return { title, author, scheduledFor: d.toISOString().slice(0, 10), planId }
+}
+
+const WINDOWS_60 = { ...DEFAULT_ROTATION_WINDOWS, lookAheadDays: 60 }
+
+describe('formatScheduledAhead', () => {
+  // The plan being edited is full of songs the user just committed.
+  // Without this filter they'd come back as "already scheduled ahead"
+  // — arguing against the very picks the user has made, and
+  // duplicating what "Already in plan" already says.
+  it('excludes the plan currently being edited', () => {
+    const out = formatScheduledAhead(
+      [booked('Mine', 0, 'this-plan'), booked('Theirs', 7, 'next-plan')],
+      'this-plan',
+      NOW,
+      WINDOWS_60,
+    )
+    expect(out).not.toContain('Mine')
+    expect(out).toContain('Theirs')
+  })
+
+  it('drops bookings past the look-ahead window', () => {
+    const out = formatScheduledAhead(
+      [booked('Soon', 10), booked('Far', 90)],
+      undefined,
+      NOW,
+      WINDOWS_60,
+    )
+    expect(out).toContain('Soon')
+    expect(out).not.toContain('Far')
+  })
+
+  // Past-dated entries would mean a stale future list; they belong to
+  // the recency path, not this one.
+  it('ignores anything already in the past', () => {
+    expect(
+      formatScheduledAhead([booked('Yesterday', -1)], undefined, NOW, WINDOWS_60),
+    ).toBe('')
+  })
+
+  // Proximity is the whole signal: a song booked next week conflicts
+  // far more than one booked in seven, so the model needs the dates.
+  it('groups by service date in chronological order', () => {
+    const out = formatScheduledAhead(
+      [booked('Later', 21), booked('Sooner', 7), booked('AlsoSooner', 7)],
+      undefined,
+      NOW,
+      WINDOWS_60,
+    )
+    const soonerAt = out.indexOf('Sooner')
+    const laterAt = out.indexOf('Later')
+    expect(soonerAt).toBeGreaterThan(-1)
+    expect(laterAt).toBeGreaterThan(soonerAt)
+    expect(out).toMatch(/Sooner, AlsoSooner|AlsoSooner, Sooner/)
+  })
+
+  it('is silent when the look-ahead is turned off', () => {
+    expect(
+      formatScheduledAhead([booked('Soon', 7)], undefined, NOW, {
+        ...DEFAULT_ROTATION_WINDOWS,
+        lookAheadDays: 0,
+      }),
+    ).toBe('')
+  })
+
+  // It's a bias, not a block — future plans get rearranged, so
+  // language that reads as prohibition would be wrong.
+  it('frames the list as a bias rather than a prohibition', () => {
+    const out = formatScheduledAhead([booked('Soon', 7)], undefined, NOW, WINDOWS_60)
+    expect(out).not.toMatch(/do NOT/)
+    expect(out).toMatch(/clearly beat/)
+  })
+})
+
 describe('parseRotationWindows', () => {
+  // Configs written before the look-ahead existed are still valid;
+  // absence reads as the default rather than a rejection.
+  it('defaults a missing lookAheadDays instead of rejecting', () => {
+    expect(
+      parseRotationWindows({ hardBlockDays: 7, reducedWeightDays: 30 }),
+    ).toEqual({
+      hardBlockDays: 7,
+      reducedWeightDays: 30,
+      lookAheadDays: DEFAULT_ROTATION_WINDOWS.lookAheadDays,
+    })
+  })
+
+  // Zero is meaningful — it turns the look-ahead off — so it must not
+  // be lumped in with the invalid values.
+  it('accepts zero look-ahead but rejects negative', () => {
+    expect(
+      parseRotationWindows({
+        hardBlockDays: 7,
+        reducedWeightDays: 30,
+        lookAheadDays: 0,
+      }),
+    ).not.toBeNull()
+    expect(
+      parseRotationWindows({
+        hardBlockDays: 7,
+        reducedWeightDays: 30,
+        lookAheadDays: -1,
+      }),
+    ).toBeNull()
+  })
+
   it('accepts a well-formed pair', () => {
-    expect(parseRotationWindows({ hardBlockDays: 7, reducedWeightDays: 30 })).toEqual(
-      { hardBlockDays: 7, reducedWeightDays: 30 },
+    expect(parseRotationWindows({ hardBlockDays: 7, reducedWeightDays: 30, lookAheadDays: 0 })).toEqual(
+      { hardBlockDays: 7, reducedWeightDays: 30, lookAheadDays: 0 },
     )
   })
 
   // Equal windows would render an empty reduced band, which reads as a
   // silently broken config rather than a deliberate choice.
   it.each([
-    ['reduced equal to hard', { hardBlockDays: 14, reducedWeightDays: 14 }],
-    ['reduced below hard', { hardBlockDays: 30, reducedWeightDays: 14 }],
-    ['zero hard block', { hardBlockDays: 0, reducedWeightDays: 30 }],
+    ['reduced equal to hard', { hardBlockDays: 14, reducedWeightDays: 14, lookAheadDays: 0 }],
+    ['reduced below hard', { hardBlockDays: 30, reducedWeightDays: 14, lookAheadDays: 0 }],
+    ['zero hard block', { hardBlockDays: 0, reducedWeightDays: 30, lookAheadDays: 0 }],
     ['negative hard block', { hardBlockDays: -1, reducedWeightDays: 30 }],
     ['fractional days', { hardBlockDays: 1.5, reducedWeightDays: 30 }],
     ['non-numeric', { hardBlockDays: '14', reducedWeightDays: 42 }],

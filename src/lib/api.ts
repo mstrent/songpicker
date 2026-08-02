@@ -522,6 +522,9 @@ export const saveAdminPromptConfig = httpsCallable<
 export interface RotationWindows {
   hardBlockDays: number
   reducedWeightDays: number
+  /** Bias against songs already booked this many days ahead. 0 turns
+   *  the look-ahead off. */
+  lookAheadDays: number
 }
 
 /** What the AI actually receives for one service type, built by the
@@ -531,15 +534,19 @@ export interface RotationPreview {
   serviceTypeName: string | null
   blocked: number
   reduced: number
+  ahead: number
   /** The rendered "Recently sung" block, verbatim. Empty when nothing
    *  falls in either band. */
   block: string
+  /** The rendered look-ahead block, verbatim. */
+  aheadBlock: string
 }
 
 export interface RotationConfig {
   windows: RotationWindows
   defaults: RotationWindows
   maxReducedWeightDays: number
+  maxLookAheadDays: number
   preview: RotationPreview[]
   /** Set when the preview couldn't be built (missing Planning Center
    *  credentials, rate limit). The windows stay editable regardless. */

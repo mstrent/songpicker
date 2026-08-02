@@ -74,6 +74,11 @@ export interface SuggestRequest {
    *  user message — it derives from PAST plans, so committing a song
    *  to the current one doesn't change it mid-session. */
   recentlySung?: string
+  /** Pre-formatted look-ahead: songs already booked into upcoming
+   *  services for this service type, excluding the plan being edited.
+   *  A soft bias — future plans are provisional. Same stable-half
+   *  placement as recentlySung. */
+  scheduledAhead?: string
   /** Full snapshot of the SPA's candidate pool. Supersedes the older
    *  flat shortlistedTitles / rejectedTitles / exclude arrays — the
    *  AI must not re-propose anything in this list. */
