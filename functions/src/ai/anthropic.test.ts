@@ -139,6 +139,16 @@ describe('suggestSongs request shape', () => {
     expect(params.thinking).toEqual({ type: 'adaptive' })
   })
 
+  // Sonnet 5 defaults to `high`, and left unset a suggest turn burned
+  // ~4,700 thinking tokens and 57 seconds on ten songs — all of it
+  // silent, because tool_use only decodes at content_block_stop. The
+  // level is tunable; having none at all is the regression.
+  it('sets an explicit effort level rather than taking the default', async () => {
+    const params = await runOnce()
+    const outputConfig = params.output_config as { effort?: string }
+    expect(outputConfig?.effort).toBeTruthy()
+  })
+
   // max_tokens is a shared ceiling over thinking + response text. Drop
   // it back toward the pre-Sonnet-5 4000 and a turn that thinks through
   // a multi-slot rearrangement truncates silently — no error, the
