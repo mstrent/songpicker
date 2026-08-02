@@ -145,6 +145,7 @@ export interface PersistedCandidate {
   id: string
   title: string
   author: string | null
+  reason: string | null
   chorusSnippet: string | null
   snippetSource: string | null
   slots: string[]

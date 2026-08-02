@@ -22,8 +22,17 @@ describe('song-selection guidance', () => {
     expect(TECHNICAL_REQUIREMENTS).not.toMatch(/well[- ]known/i)
   })
 
-  it('tells the model to favour less ubiquitous songs', () => {
-    expect(TECHNICAL_REQUIREMENTS).toMatch(/ubiquitous/i)
+  // The first cut of this guidance said "prefer the less ubiquitous"
+  // song, which aimed at the wrong target: it produced deep cuts a
+  // congregation has never heard. The goal is rotation across weeks,
+  // not novelty — familiarity is not the thing that causes fatigue.
+  it('rules out obscure songs rather than favouring them', () => {
+    expect(TECHNICAL_REQUIREMENTS).toMatch(/deep cuts/i)
+    expect(TECHNICAL_REQUIREMENTS).not.toMatch(/less ubiquitous/i)
+  })
+
+  it('frames variety as across weeks rather than away from familiarity', () => {
+    expect(TECHNICAL_REQUIREMENTS).toMatch(/across weeks/i)
   })
 
   it('requires a per-proposal justification', () => {
@@ -34,23 +43,22 @@ describe('song-selection guidance', () => {
     expect(TECHNICAL_REQUIREMENTS).toMatch(/vary the set/i)
   })
 
-  // Ordering is load-bearing: the "reach past the obvious" guidance
-  // explicitly defers to the don't-invent rule ("This never overrides
-  // the don't-invent rule above"). If the blocks are ever reordered
-  // that back-reference becomes a forward-reference to nothing, and
-  // the guardrail against hallucinated titles reads as optional.
-  it('states the don-t-invent rule before the reach-further guidance', () => {
+  // The don't-invent guard has to come before the selection guidance:
+  // the selection rules widen what the model reaches for, and the
+  // guard is what stops that widening from turning into plausible-
+  // sounding titles it can't actually place.
+  it('states the don-t-invent rule before the selection guidance', () => {
     const dontInvent = TECHNICAL_REQUIREMENTS.indexOf("don't invent songs")
-    const reachFurther = TECHNICAL_REQUIREMENTS.indexOf('Reach past the obvious')
+    const selection = TECHNICAL_REQUIREMENTS.indexOf('How to choose songs')
     expect(dontInvent).toBeGreaterThanOrEqual(0)
-    expect(reachFurther).toBeGreaterThan(dontInvent)
+    expect(selection).toBeGreaterThan(dontInvent)
   })
 
   // The selection rules have to survive a user or admin replacing the
   // role prompt, so they live in the non-editable technical block.
   it('survives a fully replaced role prompt', () => {
     const composed = composeSystemPrompt('You are a pirate.')
-    expect(composed).toMatch(/ubiquitous/i)
+    expect(composed).toMatch(/deep cuts/i)
     expect(composed).toMatch(/vary the set/i)
   })
 })

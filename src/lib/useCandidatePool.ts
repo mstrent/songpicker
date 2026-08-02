@@ -71,6 +71,7 @@ function toPersisted(c: CandidateMatch): PersistedCandidate {
     id: c.id,
     title: c.suggestion.title,
     author: c.suggestion.author ?? null,
+    reason: c.suggestion.reason ?? null,
     chorusSnippet: c.suggestion.chorusSnippet ?? null,
     snippetSource: c.suggestion.snippetSource ?? null,
     slots: c.suggestion.slots ?? [],
@@ -101,6 +102,7 @@ function fromPersisted(p: PersistedCandidate): CandidateMatch {
     suggestion: {
       title: p.title,
       author: p.author ?? undefined,
+      reason: p.reason ?? undefined,
       chorusSnippet: p.chorusSnippet ?? undefined,
       snippetSource:
         typeof p.snippetSource === 'string'
