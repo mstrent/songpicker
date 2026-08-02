@@ -37,3 +37,24 @@ jobs:
 
       - name: Build functions
         run: npm --prefix functions run build
+
+      # Cloud Run uploads functions/ alone, so lib/index.js resolves modules
+      # with no parent node_modules above it. Locally there IS one — the repo
+      # root — and it silently satisfies imports that functions/ never
+      # declared. That gap is invisible until deploy, where every container
+      # fails its healthcheck at once. Load the built entrypoint from a copy
+      # outside the repo, with production deps only, so the container's
+      # resolution is what CI actually exercises.
+      - name: Functions load in isolation (mirrors Cloud Run resolution)
+        run: |
+          iso="$(mktemp -d)"
+          cp functions/package.json functions/package-lock.json "$iso/"
+          cp -r functions/lib "$iso/lib"
+          cd "$iso"
+          npm ci --omit=dev
+          node -e "
+            const m = require('./lib/index.js');
+            const n = Object.keys(m).length;
+            if (n === 0) { console.error('no callables exported'); process.exit(1); }
+            console.log('entrypoint loaded; ' + n + ' callables exported');
+          "
