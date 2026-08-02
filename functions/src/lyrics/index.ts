@@ -164,17 +164,44 @@ export function defaultEnrichDeps(
 
     async callHaiku(
       prompt: string,
+      count: number,
     ): Promise<Record<string, string | null>> {
+      // Structured output instead of regex-scraping a JSON object out
+      // of prose. The keys are the numeric indices the prompt assigns
+      // each song, so the schema can enumerate them exactly; a snippet
+      // is a string, or null when the chorus couldn't be established.
+      const properties: Record<string, unknown> = {}
+      for (let i = 0; i < count; i++) {
+        properties[String(i)] = {
+          anyOf: [{ type: 'string' }, { type: 'null' }],
+        }
+      }
       const response = await client.messages.create({
         model: HAIKU_MODEL,
         max_tokens: 1024,
+        output_config: {
+          format: {
+            type: 'json_schema',
+            schema: {
+              type: 'object',
+              properties,
+              required: Object.keys(properties),
+              additionalProperties: false,
+            },
+          },
+        },
         messages: [{ role: 'user', content: prompt }],
       })
       const text =
         response.content[0]?.type === 'text' ? response.content[0].text : ''
-      const jsonMatch = text.match(/\{[\s\S]*\}/)
-      if (!jsonMatch) return {}
-      return JSON.parse(jsonMatch[0])
+      // The schema guarantees the shape, but a refusal or a truncated
+      // turn can still yield something unparseable — enrichSnippets
+      // treats {} as "no snippets" and falls back to LRCLIB lines.
+      try {
+        return JSON.parse(text)
+      } catch {
+        return {}
+      }
     },
 
     async writeSnippets(updates) {

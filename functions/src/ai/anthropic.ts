@@ -260,6 +260,35 @@ export class AnthropicProvider implements AiProvider {
         }
       }
       const finalMessage = await stream.finalMessage()
+
+      // A safety-classifier refusal is a *successful* HTTP 200 with
+      // empty or partial content — not an exception. Left unhandled it
+      // parses to zero actions and no prose, and fallbackMessage()
+      // renders "No changes this turn." into the chat log, which is a
+      // lie: the model declined, it didn't decide to do nothing.
+      // Retrying the same prompt won't help (unlike the content-filter
+      // path below), so surface it instead.
+      if (finalMessage.stop_reason === 'refusal') {
+        const category = finalMessage.stop_details?.category ?? null
+        console.warn(
+          `[anthropic] request refused by safety classifier (category: ${category ?? 'unspecified'})`,
+        )
+        throw new Error(
+          "Anthropic's safety system declined this request" +
+            (category ? ` (category: ${category})` : '') +
+            '. Worship content trips this occasionally as a false positive — try rephrasing your request.',
+        )
+      }
+
+      // Truncation is the other silent stop. The 16000 ceiling makes it
+      // unlikely, but if it happens the partial content is still worth
+      // returning — log it so it's diagnosable rather than invisible.
+      if (finalMessage.stop_reason === 'max_tokens') {
+        console.warn(
+          '[anthropic] response hit max_tokens — turn may be truncated',
+        )
+      }
+
       const { actions, message } = parseResponse(finalMessage.content)
       return {
         actions,

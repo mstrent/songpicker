@@ -3,8 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CLASSIFY_SONG_TOOL } from './anthropic'
 
 // Capture the params handed to messages.stream so we can assert on the
-// request shape without touching the network.
+// request shape without touching the network. `nextFinalMessage` lets a
+// test stage what the stream resolves to.
 const streamCalls: Array<Record<string, unknown>> = []
+const OK_MESSAGE = {
+  stop_reason: 'end_turn',
+  content: [{ type: 'text', text: 'ok' }],
+}
+let nextFinalMessage: Record<string, unknown> = OK_MESSAGE
 
 vi.mock('@anthropic-ai/sdk', () => {
   class FakeAnthropic {
@@ -13,11 +19,7 @@ vi.mock('@anthropic-ai/sdk', () => {
         streamCalls.push(params)
         return Object.assign(
           (async function* () {})(),
-          {
-            finalMessage: async () => ({
-              content: [{ type: 'text', text: 'ok' }],
-            }),
-          },
+          { finalMessage: async () => nextFinalMessage },
         )
       },
       create: async () => ({ content: [] }),
@@ -42,18 +44,23 @@ describe('tool schema regression', () => {
   })
 })
 
+async function suggest() {
+  const { AnthropicProvider } = await import('./anthropic')
+  return new AnthropicProvider('test-key').suggestSongs({
+    userMessage: 'something upbeat',
+    theme: 'hope',
+    systemPrompt: 'You are a worship planning assistant.',
+  })
+}
+
 describe('suggestSongs request shape', () => {
   beforeEach(() => {
     streamCalls.length = 0
+    nextFinalMessage = OK_MESSAGE
   })
 
   async function runOnce() {
-    const { AnthropicProvider } = await import('./anthropic')
-    await new AnthropicProvider('test-key').suggestSongs({
-      userMessage: 'something upbeat',
-      theme: 'hope',
-      systemPrompt: 'You are a worship planning assistant.',
-    })
+    await suggest()
     return streamCalls[0]
   }
 
@@ -84,5 +91,52 @@ describe('suggestSongs request shape', () => {
     const current = messages[messages.length - 1].content
     expect(current[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' })
     expect(current[1].cache_control).toBeUndefined()
+  })
+})
+
+describe('safety-classifier refusal', () => {
+  beforeEach(() => {
+    streamCalls.length = 0
+    nextFinalMessage = OK_MESSAGE
+  })
+
+  // A refusal is a successful HTTP 200 with no content. Before this was
+  // handled it parsed to zero actions and no prose, and the chat log
+  // rendered "No changes this turn." — asserting a decision the model
+  // never made.
+  it('throws instead of reporting an empty turn', async () => {
+    nextFinalMessage = {
+      stop_reason: 'refusal',
+      stop_details: { category: 'cyber' },
+      content: [],
+    }
+    await expect(suggest()).rejects.toThrow(/safety system declined/i)
+  })
+
+  it('names the policy category when the API supplies one', async () => {
+    nextFinalMessage = {
+      stop_reason: 'refusal',
+      stop_details: { category: 'general_harms' },
+      content: [],
+    }
+    await expect(suggest()).rejects.toThrow(/general_harms/)
+  })
+
+  it('still throws when stop_details is absent', async () => {
+    nextFinalMessage = { stop_reason: 'refusal', content: [] }
+    await expect(suggest()).rejects.toThrow(/safety system declined/i)
+  })
+
+  // The content-filter retry matches on message text; a refusal must not
+  // be mistaken for one, since re-sending the same prompt won't help.
+  it('is not retried as a content-filter block', async () => {
+    nextFinalMessage = { stop_reason: 'refusal', content: [] }
+    await expect(suggest()).rejects.toThrow()
+    expect(streamCalls).toHaveLength(1)
+  })
+
+  it('returns normally on a non-refusal turn', async () => {
+    const result = await suggest()
+    expect(result.message).toBe('ok')
   })
 })

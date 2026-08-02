@@ -20,7 +20,13 @@ export interface EnrichSnippetsDeps {
     queries: SnippetQuery[],
   ): Promise<Array<LyricsCacheEntry | null>>
   fetchAndCacheLyrics(query: SnippetQuery): Promise<LrclibResult>
-  callHaiku(prompt: string): Promise<Record<string, string | null>>
+  /** `count` is the number of songs in the prompt — the implementation
+   *  uses it to build a structured-output schema with exactly those
+   *  numeric keys, so the reply can't come back in an unexpected shape. */
+  callHaiku(
+    prompt: string,
+    count: number,
+  ): Promise<Record<string, string | null>>
   /** Persist extracted snippets back into the lyrics cache so future
    *  calls for the same songs skip the Haiku extraction entirely. */
   writeSnippets(
@@ -164,7 +170,10 @@ export async function enrichSnippets(
     const tHaikuStart = Date.now()
     let extracted: Array<string | null>
     try {
-      const raw = await deps.callHaiku(buildHaikuPrompt(haikuInput))
+      const raw = await deps.callHaiku(
+        buildHaikuPrompt(haikuInput),
+        needsHaiku.length,
+      )
       extracted = parseHaikuResponse(raw, needsHaiku.length)
       console.log(
         `${tag} haiku extraction: ${Date.now() - tHaikuStart}ms (~${promptTokensApprox} input tokens, ${needsHaiku.length}/${queries.length} songs)`,

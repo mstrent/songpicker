@@ -339,6 +339,25 @@ page.
   the `suggestSongs` callable wraps everything in
   `HttpsError('aborted', message)` so the client doesn't see
   `INTERNAL` for AI-side failures.
+- **Refusals are not errors — check `stop_reason`.** A safety-classifier
+  refusal comes back as a successful HTTP 200 with empty or partial
+  content. Unhandled it parses to zero actions and no prose, and
+  `fallbackMessage` renders "No changes this turn." — the chat log
+  asserting a decision the model never made. `runStream` checks
+  `finalMessage.stop_reason === 'refusal'` and throws with the
+  `stop_details.category` when present. Deliberately **not** retried:
+  unlike a content-filter block, re-sending the same prompt won't
+  clear it. A `max_tokens` stop is logged but still returns its
+  partial content.
+- **Ancillary Haiku calls use structured outputs**, not free-text
+  parsing. `callHaiku` (snippet extraction) builds a schema whose keys
+  are the numeric song indices from the prompt — hence the `count`
+  argument on the dep; `disambiguate` bounds its answer with an `enum`
+  over the candidates actually on offer. Both previously scraped a
+  value out of prose (a `{...}` regex, a `parseInt`) and collapsed
+  anything unexpected to a silent no-result. The slot classifier
+  predates these and uses a forced tool call, which is equivalent —
+  don't "unify" the three for its own sake.
 
 ## Tooling (installed MCP plugins)
 
