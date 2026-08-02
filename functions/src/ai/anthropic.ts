@@ -77,7 +77,7 @@ export const TOOLS: Anthropic.Tool[] = [
               reason: {
                 type: 'string',
                 description:
-                  'One short clause — 12 words or fewer — naming what connects this song to THIS service: a lyric, an image, or a scriptural echo tied to the theme, plan notes, or sermon direction. Not generic praise ("a great worship song", "a congregational favourite") and not a restatement of the theme. Keep it tight: it is collapsed behind a control on the candidate card, and every word here delays the whole suggestion list from appearing.',
+                  'One short clause — 12 words or fewer — naming what connects this song to THIS service: a lyric, an image, or a scriptural echo tied to the theme, plan notes, or sermon direction. Not generic praise ("a great worship song", "a congregational favourite") and not a restatement of the theme. Keep it tight: it is surfaced only as a hover tooltip on the candidate card, and every word here delays the whole suggestion list from appearing.',
               },
               slots: SONG_SLOTS_FIELD,
             },

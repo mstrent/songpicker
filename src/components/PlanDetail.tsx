@@ -114,10 +114,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   // concerns; nothing in this section talks to the model.
 
   const [openCommitMenuId, setOpenCommitMenuId] = useState<string | null>(null)
-  // Candidate ids whose AI "why this song" clause is expanded. Collapsed
-  // by default — the reason is a decision aid, not something to scan
-  // past on every card.
-  const [openReasonIds, setOpenReasonIds] = useState<Set<string>>(new Set())
   useEffect(() => {
     if (!openCommitMenuId) return
     const onDocDown = (e: MouseEvent) => {
@@ -995,14 +991,25 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                   }}
                   onDragEnd={endDrag}
                 >
-                  <div className="ctitle">
+                  {/* The AI's "why this song" clause rides as a native
+                      tooltip so it costs no layout at all — it's a
+                      debugging surface, not something to read on every
+                      card. Carried on the inner link too: a nested
+                      title shadows its parent's, so without this the
+                      reason would be unreachable on matched songs,
+                      where the link covers most of the row. */}
+                  <div className="ctitle" title={c.suggestion.reason}>
                     {matched ? (
                       <a
                         className="ctitle-link icon-text"
                         href={`https://services.planningcenteronline.com/songs/${c.song!.id}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        title="Open in Planning Center"
+                        title={
+                          c.suggestion.reason
+                            ? `${c.suggestion.reason}\n\nOpen in Planning Center`
+                            : 'Open in Planning Center'
+                        }
                         draggable={false}
                       >
                         {c.suggestion.title}
@@ -1111,38 +1118,6 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       </span>
                     )}
                   </div>
-                  {c.suggestion.reason && (
-                    <>
-                      <button
-                        type="button"
-                        className="reason-toggle"
-                        aria-expanded={openReasonIds.has(c.id)}
-                        onClick={() =>
-                          setOpenReasonIds((prev) => {
-                            const next = new Set(prev)
-                            if (next.has(c.id)) next.delete(c.id)
-                            else next.add(c.id)
-                            return next
-                          })
-                        }
-                      >
-                        <Icon
-                          name={
-                            openReasonIds.has(c.id)
-                              ? 'chevron-down'
-                              : 'chevron-right'
-                          }
-                          size={12}
-                        />
-                        why this song
-                      </button>
-                      {openReasonIds.has(c.id) && (
-                        <div className="candidate-reason">
-                          {c.suggestion.reason}
-                        </div>
-                      )}
-                    </>
-                  )}
                   {c.enrichmentPending && !c.suggestion.chorusSnippet ? (
                     <div className="snippet-shimmer" />
                   ) : c.suggestion.chorusSnippet ? (
