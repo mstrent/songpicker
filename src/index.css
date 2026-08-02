@@ -2345,6 +2345,26 @@ textarea {
   gap: 0.75rem;
   margin-top: 0.5rem;
 }
+.rotation-preview {
+  margin: 0.5rem 0;
+}
+.rotation-preview-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.rotation-preview pre {
+  margin: 0.25rem 0 0;
+  padding: 0.5rem 0.7rem;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
 
 .candidate .chorus-snippet {
   color: var(--fg);

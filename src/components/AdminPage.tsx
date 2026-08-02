@@ -432,6 +432,38 @@ function RotationSection() {
               {config.defaults.reducedWeightDays} days
             </span>
           </div>
+
+          <h4>What the AI currently sees</h4>
+          {config.previewError ? (
+            <p className="muted">
+              Couldn&rsquo;t read Planning Center: {config.previewError}
+            </p>
+          ) : config.preview.length === 0 ? (
+            <p className="muted">No service types found.</p>
+          ) : (
+            config.preview.map((p) => (
+              <div key={p.serviceTypeId} className="rotation-preview">
+                <div className="rotation-preview-head">
+                  {p.serviceTypeName ?? p.serviceTypeId}
+                  <span className="muted">
+                    {p.blocked} blocked, {p.reduced} reduced
+                  </span>
+                </div>
+                {p.block ? (
+                  <pre>{p.block}</pre>
+                ) : (
+                  <p className="muted">
+                    Nothing in either band — no rotation context is sent for
+                    this service type.
+                  </p>
+                )}
+              </div>
+            ))
+          )}
+          <p className="muted">
+            Rebuilt from Planning Center every 6 hours, or whenever the
+            windows widen. Saved changes show up here after a reload.
+          </p>
         </>
       )}
     </section>

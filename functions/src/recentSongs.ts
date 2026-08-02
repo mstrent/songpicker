@@ -195,6 +195,7 @@ export async function loadRecentSongs(
   windows: RotationWindows = DEFAULT_ROTATION_WINDOWS,
   now: Date = new Date(),
 ): Promise<RecentSong[]> {
+  const startedAt = Date.now()
   const ref = docRef(uid, serviceTypeId)
   try {
     const snap = await ref.get()
@@ -204,6 +205,10 @@ export async function loadRecentSongs(
       now.getTime() - cached.fetchedAt < CACHE_TTL_MS &&
       (cached.scannedDays ?? 0) >= windows.reducedWeightDays
     ) {
+      const ageMin = Math.round((now.getTime() - cached.fetchedAt) / 60_000)
+      console.log(
+        `[recentSongs] cache hit: ${cached.songs.length} entries, scanned ${cached.scannedDays}d, ${ageMin}min old`,
+      )
       return cached.songs
     }
   } catch {
@@ -248,6 +253,21 @@ export async function loadRecentSongs(
       4,
     )
     songs = perPlan.flat()
+    // The two counts that explain the size of the rendered block: how
+    // many services were scanned, and how much duplication collapses
+    // out. A block that looks bigger than expected is almost always
+    // more plans in the window than expected, or titles that differ
+    // enough that normalizeText won't collapse them.
+    const { blocked, reduced } = bucketRecentSongs(songs, now, windows)
+    console.log(
+      `[recentSongs] fetched in ${Date.now() - startedAt}ms: ${plans.length} plans listed, ${inWindow.length} in window (${windows.reducedWeightDays}d), ${songs.length} song slots → ${blocked.length + reduced.length} unique (${blocked.length} blocked, ${reduced.length} reduced)`,
+    )
+    if (inWindow.length > 0) {
+      const perService = inWindow
+        .map((p, i) => `${p.sortDate?.slice(0, 10)}(${perPlan[i].length})`)
+        .join(', ')
+      console.log(`[recentSongs] services: ${perService}`)
+    }
   } catch (err) {
     console.warn('[recentSongs] fetch failed; continuing without it:', err)
     return []

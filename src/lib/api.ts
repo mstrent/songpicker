@@ -524,10 +524,26 @@ export interface RotationWindows {
   reducedWeightDays: number
 }
 
+/** What the AI actually receives for one service type, built by the
+ *  same code path the suggest turn uses. */
+export interface RotationPreview {
+  serviceTypeId: string
+  serviceTypeName: string | null
+  blocked: number
+  reduced: number
+  /** The rendered "Recently sung" block, verbatim. Empty when nothing
+   *  falls in either band. */
+  block: string
+}
+
 export interface RotationConfig {
   windows: RotationWindows
   defaults: RotationWindows
   maxReducedWeightDays: number
+  preview: RotationPreview[]
+  /** Set when the preview couldn't be built (missing Planning Center
+   *  credentials, rate limit). The windows stay editable regardless. */
+  previewError: string | null
 }
 
 export const getRotationConfig = httpsCallable<void, RotationConfig>(

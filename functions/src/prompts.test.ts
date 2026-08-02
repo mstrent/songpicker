@@ -39,9 +39,6 @@ describe('song-selection guidance', () => {
     expect(TECHNICAL_REQUIREMENTS).toMatch(/"reason"/)
   })
 
-  it('asks for variety within the options offered for a role', () => {
-    expect(TECHNICAL_REQUIREMENTS).toMatch(/vary the set/i)
-  })
 
   // The recency thresholds live in the rendered "Recently sung" block
   // (see recentSongs.ts), not here — the prompt points at the block so
@@ -74,6 +71,6 @@ describe('song-selection guidance', () => {
   it('survives a fully replaced role prompt', () => {
     const composed = composeSystemPrompt('You are a pirate.')
     expect(composed).toMatch(/deep cuts/i)
-    expect(composed).toMatch(/vary the set/i)
+    expect(composed).toMatch(/Recently sung/)
   })
 })

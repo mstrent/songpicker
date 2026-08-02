@@ -37,6 +37,7 @@ import { countSongs } from './pco/songSlots'
 import {
   DEFAULT_ROTATION_WINDOWS,
   MAX_REDUCED_WEIGHT_DAYS,
+  bucketRecentSongs,
   formatRecentlySung,
   loadRecentSongs,
   loadRotationWindows,
@@ -733,11 +734,51 @@ export const getAdminPromptConfig = onCall(async (req) => {
 // the ceiling so the Admin page can label the inputs and validate
 // before a round trip.
 export const getRotationConfig = onCall(async (req) => {
-  await requireAdmin(req)
+  const { uid } = await requireAdmin(req)
+  const windows = await loadRotationWindows()
+
+  // Preview the block the model actually receives, per service type.
+  // Same code path as the suggest turn — a preview built any other way
+  // would be a second implementation that could drift from the real
+  // one. Reads the same 6h cache, so this is usually free.
+  let preview: Array<{
+    serviceTypeId: string
+    serviceTypeName: string | null
+    blocked: number
+    reduced: number
+    block: string
+  }> = []
+  let previewError: string | null = null
+  try {
+    const pco = await pcoForUser(uid)
+    const types = await pco.listServiceTypes()
+    preview = await pMap(
+      types,
+      async (t) => {
+        const songs = await loadRecentSongs(uid, pco, t.id, windows)
+        const { blocked, reduced } = bucketRecentSongs(songs, new Date(), windows)
+        return {
+          serviceTypeId: t.id,
+          serviceTypeName: t.name,
+          blocked: blocked.length,
+          reduced: reduced.length,
+          block: formatRecentlySung(songs, new Date(), windows),
+        }
+      },
+      2,
+    )
+  } catch (e) {
+    // Preview is diagnostic; missing PCO credentials or a rate-limit
+    // blip shouldn't stop an admin editing the windows.
+    previewError = (e as Error).message
+  }
+
   return {
-    windows: await loadRotationWindows(),
+    windows,
     defaults: DEFAULT_ROTATION_WINDOWS,
     maxReducedWeightDays: MAX_REDUCED_WEIGHT_DAYS,
+    preview,
+    previewError,
   }
 })
 
