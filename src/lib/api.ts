@@ -414,6 +414,10 @@ export interface SuggestRequest {
   theme: string
   userMessage: string
   planId?: string
+  /** Scopes the server's rotation lookup to this service type's past
+   *  plans. Omitted means the server skips it and suggests without
+   *  recency context. */
+  serviceTypeId?: string
   serviceOrder?: string
   planNotes?: string
   history?: ConversationTurn[]

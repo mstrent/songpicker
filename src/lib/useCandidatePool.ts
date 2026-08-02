@@ -980,6 +980,11 @@ export function useCandidatePool(
         theme: planData.theme,
         userMessage: turnUserMessage,
         planId,
+        // Scopes the server's rotation lookup to this service type's
+        // past plans. Always populated by the time a suggest can fire
+        // (the plan has to load first); the server just skips the
+        // lookup if it isn't.
+        serviceTypeId: planData.plan?.serviceTypeId,
         serviceOrder,
         planNotes: planData.notesText,
         history,

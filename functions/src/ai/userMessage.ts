@@ -59,6 +59,13 @@ export function formatPlanContextLines(req: {
 // state so the AI always reasons against current reality.
 export function buildUserMessage(req: SuggestRequest): BuiltUserMessage {
   const stableParts = formatPlanContextLines(req)
+  // Rotation context rides in the stable half: it derives from past
+  // plans, so it doesn't move when the user commits to this one.
+  // Deliberately not part of formatPlanContextLines — the slot
+  // classifier shares that formatter and has no use for it.
+  if (req.recentlySung && req.recentlySung.trim()) {
+    stableParts.push(req.recentlySung.trim())
+  }
 
   const volatileParts: string[] = []
   if (req.candidates && req.candidates.length > 0) {

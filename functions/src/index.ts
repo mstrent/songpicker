@@ -34,6 +34,7 @@ import {
   savePcoCredentialsForUser,
 } from './pco/credentials'
 import { countSongs } from './pco/songSlots'
+import { formatRecentlySung, loadRecentSongs } from './recentSongs'
 import type { NewItem } from './pco/types'
 import {
   TECHNICAL_REQUIREMENTS,
@@ -479,6 +480,7 @@ export const suggestSongs = onCall<
       theme,
       userMessage,
       planId,
+      serviceTypeId,
       serviceOrder,
       planNotes,
       history,
@@ -489,6 +491,7 @@ export const suggestSongs = onCall<
       theme?: string
       userMessage?: string
       planId?: string
+      serviceTypeId?: string
       serviceOrder?: string
       planNotes?: string
       history?: Array<{ role: 'user' | 'assistant'; content: string }>
@@ -498,9 +501,18 @@ export const suggestSongs = onCall<
     }
     if (!theme) throw new HttpsError('invalid-argument', 'theme required')
 
-    const [structure, role] = await Promise.all([
+    // Rotation context is best-effort: loadRecentSongs swallows its own
+    // failures and returns [], so a PCO hiccup degrades the suggestion
+    // rather than failing the turn. Skipped entirely on auto-refresh,
+    // which can't propose anything anyway.
+    const [structure, role, recentSongs] = await Promise.all([
       loadResolved(uid, 'structure', planId),
       loadResolved(uid, 'role', planId),
+      serviceTypeId && !autoRefresh
+        ? pcoForUser(uid).then((pco) =>
+            loadRecentSongs(uid, pco, serviceTypeId),
+          )
+        : Promise.resolve([]),
     ])
 
     const ai = getAiProvider(ANTHROPIC_API_KEY.value())
@@ -521,6 +533,7 @@ export const suggestSongs = onCall<
           systemPrompt: composeSystemPrompt(role.effective.value),
           serviceOrder,
           planNotes,
+          recentlySung: formatRecentlySung(recentSongs, new Date()),
           candidates,
           alreadyInPlan,
           history,
