@@ -54,7 +54,7 @@ title, arrangement, and key all set in one go.
   `functions/.env`, read-only break-glass roots) ∪ Firestore
   (`appConfig/access`, runtime-editable from the Admin page). Empty
   union fails closed.
-- **AI**: Anthropic Claude Sonnet 4.6 for the main suggestion engine.
+- **AI**: Anthropic Claude Sonnet 5 for the main suggestion engine.
   The `AiProvider` interface in `functions/src/ai/types.ts` is kept
   so another provider can slot in later, but only Anthropic is wired
   up today.
@@ -111,7 +111,7 @@ All hosted on Firebase free tier.
 | `listPlans`, `getPlanContext` | Plan list + detail (notes, items, leaders) |
 | `savePlanTheme`, `savePlanNotes` | Auto-saved per-plan overrides |
 | `searchSongs` | Song-library lookup (with parenthetical-stripped retry) |
-| `suggestSongs` | Streaming AI turn (Claude Sonnet 4.6 + tool use); SPA calls via `.stream()` |
+| `suggestSongs` | Streaming AI turn (Claude Sonnet 5 + tool use); SPA calls via `.stream()` |
 | `getPromptConfig`, `savePromptConfig` | Per-user persona + service-flow prompts |
 | `getAdminStatus`, `getAdminPromptConfig`, `saveAdminPromptConfig` | Admin global defaults |
 | `getAccessConfig`, `addAccessEntry`, `removeAccessEntry` | Admin-managed allowed/admin email lists (Firestore source of truth + env break-glass) |

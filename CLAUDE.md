@@ -277,7 +277,7 @@ page.
 
 ## AI provider
 
-- Anthropic Claude Sonnet 4.6 for the main `suggestSongs` flow, via
+- Anthropic Claude Sonnet 5 for the main `suggestSongs` flow, via
   `@anthropic-ai/sdk`. Single provider — we used to abstract over
   Gemini and OpenAI too, but trimmed those out. The `AiProvider`
   interface in `functions/src/ai/types.ts` is kept so a future
@@ -289,6 +289,16 @@ page.
   substantive content. Several-times cheaper and faster.
 - `suggestSongs` returns a `debug` payload via `buildUserMessage` so
   the SPA's debug panel always reflects what was actually sent.
+- **Adaptive thinking is on** (`thinking: {type: 'adaptive'}`), set
+  explicitly even though it's Sonnet 5's default when the field is
+  omitted. Two consequences worth knowing before you tune anything:
+  `max_tokens` is a shared ceiling over thinking *plus* response text
+  (hence 16000, not the old 4000 — a turn that overruns just stops,
+  with no error), and the stream carries `thinking` content blocks
+  that the event loop deliberately ignores. `display` stays at its
+  default (`omitted`) because we never render reasoning. Effort is
+  left at Sonnet 5's `high` default; `medium` is the step-down lever
+  if per-turn cost becomes a concern.
 - **Streaming via `messages.stream`** — the callable in
   `functions/src/index.ts` declares its third Stream generic and
   pipes per-chunk content (text deltas + completed tool_use blocks
@@ -315,9 +325,8 @@ page.
   of the user message (theme + plan notes + structure +
   serviceOrder). Volatile half (candidates + alreadyInPlan + user
   request) is fresh every turn. **1-hour TTL** via
-  `cache_control.ttl: '1h'` (the `extended-cache-ttl-2025-04-11`
-  beta header is set on the Anthropic client constructor so older
-  SDKs still pass it through; harmless once the feature GAs).
+  `cache_control.ttl: '1h'` (GA — no beta header, and the SDK types
+  `ttl` directly).
   Worship-leader planning sessions span 30-90 minutes of bursty
   work, so the default 5-min cache used to expire between turns
   and we paid full prefix cost repeatedly. 1h writes cost ~2x per
