@@ -20,9 +20,32 @@ export function createLyricsDisambiguator(
       )
       .join('\n')
 
+    // Structured output rather than parsing an integer out of prose.
+    // The enum bounds the answer to the candidates actually on offer
+    // (plus 0 for "none of these"), so an out-of-range or non-numeric
+    // reply isn't representable — the previous free-text parse silently
+    // collapsed anything unexpected to -1 (= no match).
     const response = await client.messages.create({
       model: MODEL,
-      max_tokens: 16,
+      max_tokens: 64,
+      output_config: {
+        format: {
+          type: 'json_schema',
+          schema: {
+            type: 'object',
+            properties: {
+              choice: {
+                type: 'integer',
+                enum: [0, ...candidates.map((_, i) => i + 1)],
+                description:
+                  'The 1-based number of the best-matching candidate, or 0 for none of them.',
+              },
+            },
+            required: ['choice'],
+            additionalProperties: false,
+          },
+        },
+      },
       messages: [
         {
           role: 'user',
@@ -34,18 +57,20 @@ Note: the recording artist shown next to each option often differs from the song
 
 Pick the number of the candidate that best matches a worship version of "${query.title}".
 
-Reply with 0 ONLY if these are clearly not the worship song the user wants — for example, all candidates are secular pop/rock songs that happen to share the title, OR they are several completely different worship songs whose lyrics share no recognizable theme.
-
-Reply with only the number, no other text.`,
+Reply with 0 ONLY if these are clearly not the worship song the user wants — for example, all candidates are secular pop/rock songs that happen to share the title, OR they are several completely different worship songs whose lyrics share no recognizable theme.`,
         },
       ],
     })
 
     const text =
       response.content[0]?.type === 'text' ? response.content[0].text : ''
-    const num = parseInt(text.trim(), 10)
+    let num: number
+    try {
+      num = (JSON.parse(text) as { choice: number }).choice
+    } catch {
+      return -1
+    }
     if (num >= 1 && num <= candidates.length) return num - 1
-    if (num === 0) return -1
     return -1
   }
 }

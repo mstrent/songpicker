@@ -16,7 +16,7 @@ import type {
   UnrejectAction,
 } from './types'
 
-const MODEL = 'claude-sonnet-4-6'
+const MODEL = 'claude-sonnet-5'
 
 // Chorus snippets are sourced from LRCLIB via enrichSnippets — the AI
 // is never asked to recall lyrics. The classifier only returns slot
@@ -49,10 +49,11 @@ export const CLASSIFY_SONG_SYSTEM = `You analyze worship songs for placement wit
 // sessions routinely span 30-90 minutes of bursty work — the default
 // 5-minute cache expires between turns and we pay full price on the
 // cached prefix repeatedly. 1h writes cost ~2x per token but reads are
-// the same, so any session with ≥2 turns in the hour wins. The SDK's
-// CacheControlEphemeral type doesn't yet include `ttl`; the API does.
-const CACHE_1H = { type: 'ephemeral' as const, ttl: '1h' } as unknown as
-  Anthropic.CacheControlEphemeral
+// the same, so any session with ≥2 turns in the hour wins.
+const CACHE_1H: Anthropic.CacheControlEphemeral = {
+  type: 'ephemeral',
+  ttl: '1h',
+}
 
 // Tools the model can invoke per turn (any combination, in any order,
 // or none). Schemas are intentionally permissive on optional fields so
@@ -154,14 +155,8 @@ export class AnthropicProvider implements AiProvider {
   private client: Anthropic
 
   constructor(apiKey: string) {
-    // Opt in to the extended cache-TTL beta so the `ttl: '1h'` on our
-    // cache_control breakpoints is honoured. Harmless if the feature
-    // has GA'd by the time you read this — Anthropic ignores beta flags
-    // for features that are already generally available.
-    this.client = new Anthropic({
-      apiKey,
-      defaultHeaders: { 'anthropic-beta': 'extended-cache-ttl-2025-04-11' },
-    })
+    // The 1-hour cache TTL is GA — no beta header needed.
+    this.client = new Anthropic({ apiKey })
   }
 
   async suggestSongs(
@@ -180,7 +175,20 @@ export class AnthropicProvider implements AiProvider {
     // session.
     const params: Anthropic.MessageCreateParams = {
       model: MODEL,
-      max_tokens: 4000,
+      // max_tokens caps thinking AND response text together. Adaptive
+      // thinking on a multi-slot rearrangement can run several thousand
+      // tokens, and the old 4000 left too little room for the prose
+      // reply + tool calls behind it — a truncated turn is silent, it
+      // just stops. Unused headroom is free (output bills per actual
+      // token) and we stream, so the large ceiling can't trip an HTTP
+      // timeout either.
+      max_tokens: 16000,
+      // Explicit rather than relying on the model default: Sonnet 5
+      // runs adaptive when `thinking` is omitted, but Sonnet 4.6 ran
+      // thinking-off, and spelling it out keeps the intent readable.
+      // `display` is left at its default (omitted) — we never render
+      // reasoning, so there's no reason to stream the text back.
+      thinking: { type: 'adaptive' },
       tools: TOOLS,
       tool_choice: { type: 'auto' },
       system: [
@@ -219,6 +227,12 @@ export class AnthropicProvider implements AiProvider {
       // input_json_delta events stream in as fragments and we have to
       // concatenate before parsing.
       const toolBuffers = new Map<number, { name: string; json: string }>()
+      // Adaptive thinking adds `thinking` content blocks to the stream
+      // (thinking_delta / signature_delta). Falling through them
+      // unhandled is deliberate — the chat log shows prose and actions
+      // only. Nothing downstream needs them: we don't replay assistant
+      // turns with tool_result, so thinking blocks are never echoed
+      // back and can't trip the "pass blocks back unchanged" rule.
       for await (const event of stream) {
         if (event.type === 'content_block_start') {
           if (event.content_block.type === 'tool_use') {
@@ -246,6 +260,35 @@ export class AnthropicProvider implements AiProvider {
         }
       }
       const finalMessage = await stream.finalMessage()
+
+      // A safety-classifier refusal is a *successful* HTTP 200 with
+      // empty or partial content — not an exception. Left unhandled it
+      // parses to zero actions and no prose, and fallbackMessage()
+      // renders "No changes this turn." into the chat log, which is a
+      // lie: the model declined, it didn't decide to do nothing.
+      // Retrying the same prompt won't help (unlike the content-filter
+      // path below), so surface it instead.
+      if (finalMessage.stop_reason === 'refusal') {
+        const category = finalMessage.stop_details?.category ?? null
+        console.warn(
+          `[anthropic] request refused by safety classifier (category: ${category ?? 'unspecified'})`,
+        )
+        throw new Error(
+          "Anthropic's safety system declined this request" +
+            (category ? ` (category: ${category})` : '') +
+            '. Worship content trips this occasionally as a false positive — try rephrasing your request.',
+        )
+      }
+
+      // Truncation is the other silent stop. The 16000 ceiling makes it
+      // unlikely, but if it happens the partial content is still worth
+      // returning — log it so it's diagnosable rather than invisible.
+      if (finalMessage.stop_reason === 'max_tokens') {
+        console.warn(
+          '[anthropic] response hit max_tokens — turn may be truncated',
+        )
+      }
+
       const { actions, message } = parseResponse(finalMessage.content)
       return {
         actions,
