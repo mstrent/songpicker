@@ -732,7 +732,18 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                   </span>
                   <div className="chat-content">
                     {m.content}
-                    {isStreaming && <span className="streaming-cursor" aria-hidden>▍</span>}
+                    {/* Before the first token lands the model is still
+                        thinking, which on a ten-song turn can run tens
+                        of seconds. A typing cursor there reads as
+                        "words are arriving now" and makes the wait feel
+                        like a hang, so say what's actually happening
+                        until there's real text to put a cursor after. */}
+                    {isStreaming &&
+                      (m.content ? (
+                        <span className="streaming-cursor" aria-hidden>▍</span>
+                      ) : (
+                        <span className="chat-thinking">Thinking…</span>
+                      ))}
                   </div>
                 </div>
               )
