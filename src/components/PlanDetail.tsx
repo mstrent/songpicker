@@ -114,6 +114,10 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
   // concerns; nothing in this section talks to the model.
 
   const [openCommitMenuId, setOpenCommitMenuId] = useState<string | null>(null)
+  // Candidate ids whose AI "why this song" clause is expanded. Collapsed
+  // by default — the reason is a decision aid, not something to scan
+  // past on every card.
+  const [openReasonIds, setOpenReasonIds] = useState<Set<string>>(new Set())
   useEffect(() => {
     if (!openCommitMenuId) return
     const onDocDown = (e: MouseEvent) => {
@@ -1097,9 +1101,36 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                     )}
                   </div>
                   {c.suggestion.reason && (
-                    <div className="candidate-reason">
-                      {c.suggestion.reason}
-                    </div>
+                    <>
+                      <button
+                        type="button"
+                        className="reason-toggle"
+                        aria-expanded={openReasonIds.has(c.id)}
+                        onClick={() =>
+                          setOpenReasonIds((prev) => {
+                            const next = new Set(prev)
+                            if (next.has(c.id)) next.delete(c.id)
+                            else next.add(c.id)
+                            return next
+                          })
+                        }
+                      >
+                        <Icon
+                          name={
+                            openReasonIds.has(c.id)
+                              ? 'chevron-down'
+                              : 'chevron-right'
+                          }
+                          size={12}
+                        />
+                        why this song
+                      </button>
+                      {openReasonIds.has(c.id) && (
+                        <div className="candidate-reason">
+                          {c.suggestion.reason}
+                        </div>
+                      )}
+                    </>
                   )}
                   {c.enrichmentPending && !c.suggestion.chorusSnippet ? (
                     <div className="snippet-shimmer" />

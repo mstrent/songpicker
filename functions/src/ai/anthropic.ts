@@ -77,7 +77,7 @@ export const TOOLS: Anthropic.Tool[] = [
               reason: {
                 type: 'string',
                 description:
-                  'One clause naming what connects this song to THIS service — a lyric, an image, or a scriptural echo tied to the theme, plan notes, or sermon direction. Shown to the user on the candidate card. Not generic praise ("a great worship song", "a congregational favourite") and not a restatement of the theme.',
+                  'One short clause — 12 words or fewer — naming what connects this song to THIS service: a lyric, an image, or a scriptural echo tied to the theme, plan notes, or sermon direction. Not generic praise ("a great worship song", "a congregational favourite") and not a restatement of the theme. Keep it tight: it is collapsed behind a control on the candidate card, and every word here delays the whole suggestion list from appearing.',
               },
               slots: SONG_SLOTS_FIELD,
             },
@@ -227,6 +227,15 @@ export class AnthropicProvider implements AiProvider {
       : undefined
 
     const runStream = async (): Promise<SuggestResult> => {
+      // Time-to-first-action is the number that matters for perceived
+      // latency: tool_use blocks are only decoded at content_block_stop
+      // (see below), so no candidate card can render until the entire
+      // propose_songs payload has finished generating. Anything that
+      // widens that payload — an extra per-song field, more songs —
+      // pushes every card back. Logged alongside token usage so a
+      // regression shows up as a number rather than a hunch.
+      const startedAt = Date.now()
+      let firstActionAt: number | null = null
       const stream = this.client.messages.stream(params)
       // Buffer partial tool_use inputs keyed by content-block index;
       // input_json_delta events stream in as fragments and we have to
@@ -259,8 +268,11 @@ export class AnthropicProvider implements AiProvider {
           const buf = toolBuffers.get(event.index)
           if (buf) {
             const action = safeBuildAction(buf.name, buf.json)
-            if (action && trackedOnChunk)
-              await trackedOnChunk({ kind: 'action', action })
+            if (action) {
+              firstActionAt ??= Date.now()
+              if (trackedOnChunk)
+                await trackedOnChunk({ kind: 'action', action })
+            }
           }
         }
       }
@@ -295,6 +307,7 @@ export class AnthropicProvider implements AiProvider {
       }
 
       const { actions, message } = parseResponse(finalMessage.content)
+      logTurn(finalMessage, actions, startedAt, firstActionAt)
       return {
         actions,
         message: message || fallbackMessage(actions),
@@ -392,6 +405,37 @@ function isContentFilterError(e: unknown): boolean {
     return isContentFilterError(err.cause)
   }
   return false
+}
+
+// One line per model turn, in the same shape as the [enrichSnippets]
+// logs. `first action` is the one to watch: it's when the SPA can
+// render the first candidate card, and it lags total generation by
+// however long the tool payload takes to finish streaming. Output
+// tokens per proposed song is the companion number — it's what widens
+// when a per-song field is added to propose_songs.
+function logTurn(
+  finalMessage: Anthropic.Message,
+  actions: AiAction[],
+  startedAt: number,
+  firstActionAt: number | null,
+): void {
+  const u = finalMessage.usage
+  const songs = actions.reduce(
+    (n, a) => (a.kind === 'propose' ? n + a.suggestions.length : n),
+    0,
+  )
+  const parts = [
+    `total ${Date.now() - startedAt}ms`,
+    firstActionAt
+      ? `first action ${firstActionAt - startedAt}ms`
+      : 'no actions',
+    `in ${u?.input_tokens ?? '?'} (cache read ${u?.cache_read_input_tokens ?? 0}, write ${u?.cache_creation_input_tokens ?? 0})`,
+    `out ${u?.output_tokens ?? '?'}`,
+    `${actions.length} action(s)`,
+    `${songs} song(s) proposed`,
+    `stop ${finalMessage.stop_reason ?? 'unknown'}`,
+  ]
+  console.log(`[suggestSongs] ${parts.join(', ')}`)
 }
 
 interface ParseOutput {

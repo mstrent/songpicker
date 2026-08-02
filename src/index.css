@@ -2310,14 +2310,30 @@ textarea {
   background: var(--accent-soft);
 }
 
-/* The AI's one-clause justification for proposing this song. Kept
-   visually quieter than the chorus snippet below it — the snippet is
-   the song's own words and earns the accent bar; this is commentary. */
+/* The AI's one-clause justification for proposing this song, collapsed
+   behind a toggle so it costs no room until asked for. Kept visually
+   quieter than the chorus snippet below it — the snippet is the song's
+   own words and earns the accent bar; this is commentary. */
+.candidate .reason-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  margin-top: 0.35rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.candidate .reason-toggle:hover {
+  color: var(--accent);
+}
 .candidate .candidate-reason {
   color: var(--muted);
   font-size: 0.85rem;
   line-height: 1.4;
-  margin-top: 0.35rem;
+  margin-top: 0.2rem;
 }
 
 .candidate .chorus-snippet {
