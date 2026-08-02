@@ -414,6 +414,10 @@ export interface SuggestRequest {
   theme: string
   userMessage: string
   planId?: string
+  /** Scopes the server's rotation lookup to this service type's past
+   *  plans. Omitted means the server skips it and suggests without
+   *  recency context. */
+  serviceTypeId?: string
   serviceOrder?: string
   planNotes?: string
   history?: ConversationTurn[]
@@ -511,6 +515,53 @@ export const saveAdminPromptConfig = httpsCallable<
   { type: PromptType; value: string },
   { ok: boolean }
 >(functions, 'saveAdminPromptConfig')
+
+/** How long a song stays blocked after being sung, and how long it
+ *  stays disfavoured after that. Admin-owned; feeds the "Recently
+ *  sung" block in the AI prompt. */
+export interface RotationWindows {
+  hardBlockDays: number
+  reducedWeightDays: number
+  /** Bias against songs already booked this many days ahead. 0 turns
+   *  the look-ahead off. */
+  lookAheadDays: number
+}
+
+/** What the AI actually receives for one service type, built by the
+ *  same code path the suggest turn uses. */
+export interface RotationPreview {
+  serviceTypeId: string
+  serviceTypeName: string | null
+  blocked: number
+  reduced: number
+  ahead: number
+  /** The rendered "Recently sung" block, verbatim. Empty when nothing
+   *  falls in either band. */
+  block: string
+  /** The rendered look-ahead block, verbatim. */
+  aheadBlock: string
+}
+
+export interface RotationConfig {
+  windows: RotationWindows
+  defaults: RotationWindows
+  maxReducedWeightDays: number
+  maxLookAheadDays: number
+  preview: RotationPreview[]
+  /** Set when the preview couldn't be built (missing Planning Center
+   *  credentials, rate limit). The windows stay editable regardless. */
+  previewError: string | null
+}
+
+export const getRotationConfig = httpsCallable<void, RotationConfig>(
+  functions,
+  'getRotationConfig',
+)
+
+export const saveRotationConfig = httpsCallable<
+  RotationWindows,
+  { ok: boolean; windows: RotationWindows }
+>(functions, 'saveRotationConfig')
 
 export const commitPlanItems = httpsCallable<
   { serviceTypeId: string; planId: string; items: CommitItem[] },

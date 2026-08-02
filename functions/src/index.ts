@@ -34,6 +34,19 @@ import {
   savePcoCredentialsForUser,
 } from './pco/credentials'
 import { countSongs } from './pco/songSlots'
+import {
+  DEFAULT_ROTATION_WINDOWS,
+  MAX_LOOK_AHEAD_DAYS,
+  MAX_REDUCED_WEIGHT_DAYS,
+  bucketRecentSongs,
+  formatRecentlySung,
+  formatScheduledAhead,
+  loadRecentSongs,
+  loadRotationWindows,
+  loadUpcomingSongs,
+  parseRotationWindows,
+  saveRotationWindows,
+} from './recentSongs'
 import type { NewItem } from './pco/types'
 import {
   TECHNICAL_REQUIREMENTS,
@@ -149,12 +162,20 @@ export const savePcoCredentials = onCall(async (req) => {
   return { ok: true }
 })
 
-export const listPlans = onCall(async (req) => {
-  const { uid } = await requireAllowed(req)
-  const allowed = INCLUDED_SERVICE_TYPES.value()
+/** Service-type names the app surfaces, from INCLUDED_SERVICE_TYPES.
+ *  Empty means no filter. Shared so the rotation preview scopes to the
+ *  same set the plan list does — otherwise it burns PCO calls scanning
+ *  service types the app never shows. */
+function allowedServiceTypeNames(): string[] {
+  return INCLUDED_SERVICE_TYPES.value()
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
+}
+
+export const listPlans = onCall(async (req) => {
+  const { uid } = await requireAllowed(req)
+  const allowed = allowedServiceTypeNames()
   const client = await pcoForUser(uid)
   // 4 past plans per service type (~1 month of weekly services) gives
   // recent-history context alongside the upcoming list.
@@ -479,6 +500,7 @@ export const suggestSongs = onCall<
       theme,
       userMessage,
       planId,
+      serviceTypeId,
       serviceOrder,
       planNotes,
       history,
@@ -489,6 +511,7 @@ export const suggestSongs = onCall<
       theme?: string
       userMessage?: string
       planId?: string
+      serviceTypeId?: string
       serviceOrder?: string
       planNotes?: string
       history?: Array<{ role: 'user' | 'assistant'; content: string }>
@@ -498,9 +521,24 @@ export const suggestSongs = onCall<
     }
     if (!theme) throw new HttpsError('invalid-argument', 'theme required')
 
-    const [structure, role] = await Promise.all([
+    // Rotation context is best-effort: loadRecentSongs swallows its own
+    // failures and returns [], so a PCO hiccup degrades the suggestion
+    // rather than failing the turn. Skipped entirely on auto-refresh,
+    // which can't propose anything anyway.
+    const rotation = await loadRotationWindows()
+    // One PCO client shared by both rotation lookups rather than two
+    // credential reads.
+    const rotationPco =
+      serviceTypeId && !autoRefresh ? await pcoForUser(uid) : null
+    const [structure, role, recentSongs, upcomingSongs] = await Promise.all([
       loadResolved(uid, 'structure', planId),
       loadResolved(uid, 'role', planId),
+      rotationPco && serviceTypeId
+        ? loadRecentSongs(uid, rotationPco, serviceTypeId, rotation)
+        : Promise.resolve([]),
+      rotationPco && serviceTypeId
+        ? loadUpcomingSongs(uid, rotationPco, serviceTypeId, rotation)
+        : Promise.resolve([]),
     ])
 
     const ai = getAiProvider(ANTHROPIC_API_KEY.value())
@@ -521,6 +559,13 @@ export const suggestSongs = onCall<
           systemPrompt: composeSystemPrompt(role.effective.value),
           serviceOrder,
           planNotes,
+          recentlySung: formatRecentlySung(recentSongs, new Date(), rotation),
+          scheduledAhead: formatScheduledAhead(
+            upcomingSongs,
+            planId,
+            new Date(),
+            rotation,
+          ),
           candidates,
           alreadyInPlan,
           history,
@@ -705,6 +750,89 @@ export const getAdminPromptConfig = onCall(async (req) => {
       sampleUserMessage: buildSampleUserMessage(),
     },
   }
+})
+
+// Admin-tunable rotation windows. Returned alongside the defaults and
+// the ceiling so the Admin page can label the inputs and validate
+// before a round trip.
+export const getRotationConfig = onCall(async (req) => {
+  const { uid } = await requireAdmin(req)
+  const windows = await loadRotationWindows()
+
+  // Preview the block the model actually receives, per service type.
+  // Same code path as the suggest turn — a preview built any other way
+  // would be a second implementation that could drift from the real
+  // one. Reads the same 6h cache, so this is usually free.
+  let preview: Array<{
+    serviceTypeId: string
+    serviceTypeName: string | null
+    blocked: number
+    reduced: number
+    ahead: number
+    block: string
+    aheadBlock: string
+  }> = []
+  let previewError: string | null = null
+  try {
+    const pco = await pcoForUser(uid)
+    const allowed = allowedServiceTypeNames()
+    const all = await pco.listServiceTypes()
+    // Scope to the same service types the plan list shows. Without
+    // this, a preview on an account with midweek / youth / special-
+    // event types spends a listPlans plus a listPlanItems-per-plan on
+    // each of them, for data the app never surfaces.
+    const types = allowed.length
+      ? all.filter((t) => t.name != null && allowed.includes(t.name))
+      : all
+    preview = await pMap(
+      types,
+      async (t) => {
+        const now = new Date()
+        const [songs, upcoming] = await Promise.all([
+          loadRecentSongs(uid, pco, t.id, windows, now),
+          loadUpcomingSongs(uid, pco, t.id, windows, now),
+        ])
+        const { blocked, reduced } = bucketRecentSongs(songs, now, windows)
+        return {
+          serviceTypeId: t.id,
+          serviceTypeName: t.name,
+          blocked: blocked.length,
+          reduced: reduced.length,
+          ahead: upcoming.length,
+          block: formatRecentlySung(songs, now, windows),
+          // No plan to exclude here — the preview isn't scoped to one.
+          aheadBlock: formatScheduledAhead(upcoming, undefined, now, windows),
+        }
+      },
+      2,
+    )
+  } catch (e) {
+    // Preview is diagnostic; missing PCO credentials or a rate-limit
+    // blip shouldn't stop an admin editing the windows.
+    previewError = (e as Error).message
+  }
+
+  return {
+    windows,
+    defaults: DEFAULT_ROTATION_WINDOWS,
+    maxReducedWeightDays: MAX_REDUCED_WEIGHT_DAYS,
+    maxLookAheadDays: MAX_LOOK_AHEAD_DAYS,
+    preview,
+    previewError,
+  }
+})
+
+export const saveRotationConfig = onCall(async (req) => {
+  await requireAdmin(req)
+  const windows = parseRotationWindows(req.data)
+  if (!windows) {
+    throw new HttpsError(
+      'invalid-argument',
+      `All values must be whole numbers of days. The reduced-weight window must be larger than the hard-block window and no more than ${MAX_REDUCED_WEIGHT_DAYS}; the look-ahead must be between 0 and ${MAX_LOOK_AHEAD_DAYS} (0 turns it off).`,
+    )
+  }
+  await saveRotationWindows(windows)
+  return { ok: true, windows }
 })
 
 export const saveAdminPromptConfig = onCall(async (req) => {

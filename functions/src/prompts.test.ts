@@ -39,8 +39,20 @@ describe('song-selection guidance', () => {
     expect(TECHNICAL_REQUIREMENTS).toMatch(/"reason"/)
   })
 
-  it('asks for variety within the options offered for a role', () => {
-    expect(TECHNICAL_REQUIREMENTS).toMatch(/vary the set/i)
+
+  // The recency thresholds live in the rendered "Recently sung" block
+  // (see recentSongs.ts), not here — the prompt points at the block so
+  // the two can't drift out of sync when the windows are retuned.
+  it('points at the recency block without restating its thresholds', () => {
+    expect(TECHNICAL_REQUIREMENTS).toMatch(/Recently sung/)
+    expect(TECHNICAL_REQUIREMENTS).not.toMatch(/two weeks|six weeks/i)
+  })
+
+  // Absence from the list is the common case — most of the catalogue
+  // isn't in it. Reading absence as endorsement would turn a rotation
+  // constraint into a suggestion engine of its own.
+  it('says absence from the recency list is not a recommendation', () => {
+    expect(TECHNICAL_REQUIREMENTS).toMatch(/not a recommendation/i)
   })
 
   // The don't-invent guard has to come before the selection guidance:
@@ -59,6 +71,6 @@ describe('song-selection guidance', () => {
   it('survives a fully replaced role prompt', () => {
     const composed = composeSystemPrompt('You are a pirate.')
     expect(composed).toMatch(/deep cuts/i)
-    expect(composed).toMatch(/vary the set/i)
+    expect(composed).toMatch(/Recently sung/)
   })
 })

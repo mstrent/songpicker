@@ -4,12 +4,15 @@ import {
   getAccessConfig,
   getAdminPromptConfig,
   getMetrics,
+  getRotationConfig,
   removeAccessEntry,
   saveAdminPromptConfig,
+  saveRotationConfig,
   type AccessConfig,
   type AccessList,
   type AdminPromptConfig,
   type PromptType,
+  type RotationConfig,
   type UserMetricsView,
 } from '../lib/api'
 import { Icon } from './Icon'
@@ -80,6 +83,8 @@ export function AdminPage() {
         config={config.structure}
         onSaved={() => void refresh()}
       />
+
+      <RotationSection />
 
       <MetricsSection />
 
@@ -308,6 +313,181 @@ function AccessSection() {
             storedEntries={config.stored.adminEmails}
             onStoredChange={applyStored}
           />
+        </>
+      )}
+    </section>
+  )
+}
+
+/** Song-rotation windows. Two numbers rather than a prompt, because
+ *  they also drive how far back Planning Center is scanned — the
+ *  suggester's "Recently sung" block is generated from them, so the
+ *  wording the model sees can't drift from the values set here. */
+function RotationSection() {
+  const [config, setConfig] = useState<RotationConfig | null>(null)
+  const [hard, setHard] = useState('')
+  const [reduced, setReduced] = useState('')
+  const [ahead, setAhead] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    getRotationConfig()
+      .then((res) => {
+        setConfig(res.data)
+        setHard(String(res.data.windows.hardBlockDays))
+        setReduced(String(res.data.windows.reducedWeightDays))
+        setAhead(String(res.data.windows.lookAheadDays))
+      })
+      .catch((e: Error) => setError(e.message))
+  }, [])
+
+  const hardNum = Number(hard)
+  const reducedNum = Number(reduced)
+  const aheadNum = Number(ahead)
+  // Mirrors parseRotationWindows on the server so the admin gets the
+  // reason inline instead of via a round trip. The server is still the
+  // real gate.
+  const validation =
+    !Number.isInteger(hardNum) || hardNum < 1
+      ? 'Hard-block window must be a whole number of days, at least 1.'
+      : !Number.isInteger(reducedNum)
+        ? 'Reduced-weight window must be a whole number of days.'
+        : reducedNum <= hardNum
+          ? 'Reduced-weight window must be larger than the hard-block window.'
+          : config && reducedNum > config.maxReducedWeightDays
+            ? `Reduced-weight window can be at most ${config.maxReducedWeightDays} days.`
+            : !Number.isInteger(aheadNum) || aheadNum < 0
+              ? 'Look-ahead must be a whole number of days, or 0 to turn it off.'
+              : config && aheadNum > config.maxLookAheadDays
+                ? `Look-ahead can be at most ${config.maxLookAheadDays} days.`
+                : null
+
+  const dirty =
+    config !== null &&
+    (hardNum !== config.windows.hardBlockDays ||
+      reducedNum !== config.windows.reducedWeightDays ||
+      aheadNum !== config.windows.lookAheadDays)
+
+  async function save() {
+    if (validation || !dirty) return
+    setSaving(true)
+    setError(null)
+    try {
+      const res = await saveRotationConfig({
+        hardBlockDays: hardNum,
+        reducedWeightDays: reducedNum,
+        lookAheadDays: aheadNum,
+      })
+      setConfig((prev) => (prev ? { ...prev, windows: res.data.windows } : prev))
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section className="admin-section">
+      <h3>Song rotation</h3>
+      <p className="muted">
+        How recently a song was sung before the AI stops suggesting it.
+        Applies to the whole service type&rsquo;s history in Planning
+        Center.
+      </p>
+      {error && <div className="error">{error}</div>}
+      {config === null ? (
+        <p className="muted">Loading…</p>
+      ) : (
+        <>
+          <div className="rotation-fields">
+            <label>
+              <span>Don&rsquo;t suggest within</span>
+              <input
+                type="number"
+                min={1}
+                value={hard}
+                onChange={(e) => setHard(e.target.value)}
+              />
+              <span>days</span>
+            </label>
+            <label>
+              <span>Suggest reluctantly within</span>
+              <input
+                type="number"
+                min={2}
+                max={config.maxReducedWeightDays}
+                value={reduced}
+                onChange={(e) => setReduced(e.target.value)}
+              />
+              <span>days</span>
+            </label>
+            <label>
+              <span>Bias against songs booked in the next</span>
+              <input
+                type="number"
+                min={0}
+                max={config.maxLookAheadDays}
+                value={ahead}
+                onChange={(e) => setAhead(e.target.value)}
+              />
+              <span>days (0 = off)</span>
+            </label>
+          </div>
+          {validation && <div className="error">{validation}</div>}
+          <div className="rotation-actions">
+            <button
+              type="button"
+              onClick={() => void save()}
+              disabled={saving || !dirty || validation !== null}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            {saved && <span className="muted">Saved</span>}
+            <span className="muted">
+              Defaults: {config.defaults.hardBlockDays} and{' '}
+              {config.defaults.reducedWeightDays} days
+            </span>
+          </div>
+
+          <h4>What the AI currently sees</h4>
+          {config.previewError ? (
+            <p className="muted">
+              Couldn&rsquo;t read Planning Center: {config.previewError}
+            </p>
+          ) : config.preview.length === 0 ? (
+            <p className="muted">No service types found.</p>
+          ) : (
+            config.preview.map((p) => (
+              <div key={p.serviceTypeId} className="rotation-preview">
+                <div className="rotation-preview-head">
+                  {p.serviceTypeName ?? p.serviceTypeId}
+                  <span className="muted">
+                    {p.blocked} blocked, {p.reduced} reduced, {p.ahead}{' '}
+                    booked ahead
+                  </span>
+                </div>
+                {p.block || p.aheadBlock ? (
+                  <>
+                    {p.block && <pre>{p.block}</pre>}
+                    {p.aheadBlock && <pre>{p.aheadBlock}</pre>}
+                  </>
+                ) : (
+                  <p className="muted">
+                    Nothing in any band — no rotation context is sent for this
+                    service type.
+                  </p>
+                )}
+              </div>
+            ))
+          )}
+          <p className="muted">
+            Rebuilt from Planning Center every 6 hours, or whenever the
+            windows widen. Saved changes show up here after a reload.
+          </p>
         </>
       )}
     </section>

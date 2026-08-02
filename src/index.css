@@ -2324,6 +2324,48 @@ textarea {
   background: var(--accent-soft);
 }
 
+.rotation-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 0.5rem 0;
+}
+.rotation-fields label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}
+.rotation-fields input {
+  width: 5rem;
+}
+.rotation-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+.rotation-preview {
+  margin: 0.5rem 0;
+}
+.rotation-preview-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.rotation-preview pre {
+  margin: 0.25rem 0 0;
+  padding: 0.5rem 0.7rem;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
 .candidate .chorus-snippet {
   color: var(--fg);
   font-size: 0.9rem;
