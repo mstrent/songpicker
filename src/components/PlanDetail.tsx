@@ -1096,6 +1096,11 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                       </span>
                     )}
                   </div>
+                  {c.suggestion.reason && (
+                    <div className="candidate-reason">
+                      {c.suggestion.reason}
+                    </div>
+                  )}
                   {c.enrichmentPending && !c.suggestion.chorusSnippet ? (
                     <div className="snippet-shimmer" />
                   ) : c.suggestion.chorusSnippet ? (

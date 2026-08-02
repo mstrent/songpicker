@@ -63,7 +63,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: 'propose_songs',
     description:
-      "Add one or more new song suggestions to the candidate pool. Each suggestion needs a title; author and slots are optional but recommended. The user sees these as new cards in the AI candidates list.",
+      "Add one or more new song suggestions to the candidate pool. Each suggestion needs a title and a reason; author and slots are optional but recommended. The user sees these as new cards in the AI candidates list.",
     input_schema: {
       type: 'object',
       properties: {
@@ -74,9 +74,14 @@ export const TOOLS: Anthropic.Tool[] = [
             properties: {
               title: { type: 'string' },
               author: { type: 'string' },
+              reason: {
+                type: 'string',
+                description:
+                  'One clause naming what connects this song to THIS service — a lyric, an image, or a scriptural echo tied to the theme, plan notes, or sermon direction. Shown to the user on the candidate card. Not generic praise ("a great worship song", "a congregational favourite") and not a restatement of the theme.',
+              },
               slots: SONG_SLOTS_FIELD,
             },
-            required: ['title'],
+            required: ['title', 'reason'],
           },
         },
       },
@@ -455,9 +460,17 @@ function parsePropose(obj: Record<string, unknown>): ProposeAction | null {
     if (!raw || typeof raw !== 'object') continue
     const r = raw as Record<string, unknown>
     if (typeof r.title !== 'string' || !r.title.trim()) continue
+    // `reason` is required in the schema but tolerated as missing here:
+    // the schema isn't strict-mode, so a model that skips it should
+    // still get its song into the pool rather than have the whole
+    // suggestion silently dropped.
     suggestions.push({
       title: r.title.trim(),
       author: typeof r.author === 'string' ? r.author : undefined,
+      reason:
+        typeof r.reason === 'string' && r.reason.trim()
+          ? r.reason.trim()
+          : undefined,
       slots: Array.isArray(r.slots)
         ? r.slots.filter((s): s is string => typeof s === 'string')
         : undefined,

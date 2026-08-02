@@ -2310,6 +2310,16 @@ textarea {
   background: var(--accent-soft);
 }
 
+/* The AI's one-clause justification for proposing this song. Kept
+   visually quieter than the chorus snippet below it — the snippet is
+   the song's own words and earns the accent bar; this is commentary. */
+.candidate .candidate-reason {
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.4;
+  margin-top: 0.35rem;
+}
+
 .candidate .chorus-snippet {
   color: var(--fg);
   font-size: 0.9rem;

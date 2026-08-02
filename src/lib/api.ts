@@ -65,6 +65,11 @@ export interface Song {
 export interface SongSuggestion {
   title: string
   author?: string
+  /** One clause from the AI tying this song to this specific service.
+   *  Rendered on the candidate card. Optional because the parser
+   *  tolerates a model that skips it, and because candidates minted
+   *  from slot eviction (not from an AI proposal) never have one. */
+  reason?: string
   chorusSnippet?: string
   snippetSource?: 'lrclib' | 'haiku-extract' | 'haiku-generate'
   slots?: string[]

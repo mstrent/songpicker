@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { CLASSIFY_SONG_TOOL } from './anthropic'
+import { CLASSIFY_SONG_TOOL, TOOLS } from './anthropic'
 
 // Capture the params handed to messages.stream so we can assert on the
 // request shape without touching the network. `nextFinalMessage` lets a
@@ -41,6 +41,75 @@ describe('tool schema regression', () => {
       }
     ).properties
     expect(props).not.toHaveProperty('chorusSnippet')
+  })
+})
+
+describe('propose_songs reason field', () => {
+  beforeEach(() => {
+    streamCalls.length = 0
+    nextFinalMessage = OK_MESSAGE
+  })
+
+  function proposeSchema() {
+    const tool = TOOLS.find((t) => t.name === 'propose_songs')!
+    const suggestions = (
+      tool.input_schema as {
+        properties: { suggestions: { items: Record<string, unknown> } }
+      }
+    ).properties.suggestions
+    return suggestions.items as {
+      properties: Record<string, unknown>
+      required: string[]
+    }
+  }
+
+  // The justification is what forces the theme to actually discriminate
+  // between songs — without it "fit" is unfalsifiable and nearly any
+  // worship song qualifies. Required in the schema so the model treats
+  // it as part of proposing, not an optional flourish.
+  it('is required by the schema', () => {
+    const item = proposeSchema()
+    expect(item.properties).toHaveProperty('reason')
+    expect(item.required).toContain('reason')
+  })
+
+  async function proposeWith(suggestion: Record<string, unknown>) {
+    nextFinalMessage = {
+      stop_reason: 'end_turn',
+      content: [
+        {
+          type: 'tool_use',
+          name: 'propose_songs',
+          input: { suggestions: [suggestion] },
+        },
+      ],
+    }
+    const result = await suggest()
+    const action = result.actions[0]
+    if (action.kind !== 'propose') throw new Error('expected a propose action')
+    return action.suggestions[0]
+  }
+
+  it('is carried through to the proposed suggestion', async () => {
+    const s = await proposeWith({
+      title: 'Cornerstone',
+      reason: 'the "my hope is built" verse echoes the sermon text',
+    })
+    expect(s.reason).toBe('the "my hope is built" verse echoes the sermon text')
+  })
+
+  // Schema-required is a nudge, not an enforcement (no strict mode), so
+  // a model that skips the field must still get its song into the pool
+  // rather than have the whole suggestion silently dropped.
+  it('does not drop a suggestion that omits it', async () => {
+    const s = await proposeWith({ title: 'Cornerstone' })
+    expect(s.title).toBe('Cornerstone')
+    expect(s.reason).toBeUndefined()
+  })
+
+  it('treats a blank reason as absent rather than empty', async () => {
+    const s = await proposeWith({ title: 'Cornerstone', reason: '   ' })
+    expect(s.reason).toBeUndefined()
   })
 })
 

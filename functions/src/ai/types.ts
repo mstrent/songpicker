@@ -1,6 +1,15 @@
 export interface SongSuggestion {
   title: string
   author?: string
+  /** One clause from the AI naming what ties this song to this
+   *  specific service. Required by the propose_songs schema (the
+   *  justification is what forces the theme to actually discriminate)
+   *  but optional on the type, since the parser tolerates a model that
+   *  omits it rather than dropping the suggestion. Rendered on the
+   *  candidate card; deliberately NOT echoed back in renderCandidates
+   *  — it did its work at proposal time and would only bloat the
+   *  volatile block on later turns. */
+  reason?: string
   chorusSnippet?: string
   snippetSource?: 'lrclib' | 'haiku-extract' | 'haiku-generate'
   slots?: string[]
