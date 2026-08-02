@@ -33,7 +33,10 @@ export interface RotationWindows {
 export const DEFAULT_ROTATION_WINDOWS: RotationWindows = {
   hardBlockDays: 14,
   reducedWeightDays: 42,
-  lookAheadDays: 60,
+  // Matches reducedWeightDays: the look-ahead and the reduced-weight
+  // band are the same idea in opposite directions, so a song six weeks
+  // behind and a song six weeks ahead weigh the same.
+  lookAheadDays: 42,
 }
 
 // Upper bound on the configurable window. Past this the block starts
@@ -255,9 +258,11 @@ interface UpcomingCacheDoc {
 }
 
 // Future plans are provisional and get edited — including by this app,
-// when the user commits a song to an adjacent week. A short TTL keeps
-// the look-ahead honest without refetching on every turn.
-const UPCOMING_CACHE_TTL_MS = 15 * 60 * 1000
+// when the user commits a song to an adjacent week — so this is
+// shorter than the 6h the past list gets. An hour still covers a
+// typical planning session without refetching, and bounds how long a
+// booking made elsewhere stays invisible.
+const UPCOMING_CACHE_TTL_MS = 60 * 60 * 1000
 
 const upcomingRef = (uid: string, serviceTypeId: string) =>
   getFirestore().doc(`${COLLECTION}/${uid}/upcoming/${serviceTypeId}`)
