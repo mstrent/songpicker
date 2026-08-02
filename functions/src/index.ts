@@ -159,12 +159,20 @@ export const savePcoCredentials = onCall(async (req) => {
   return { ok: true }
 })
 
-export const listPlans = onCall(async (req) => {
-  const { uid } = await requireAllowed(req)
-  const allowed = INCLUDED_SERVICE_TYPES.value()
+/** Service-type names the app surfaces, from INCLUDED_SERVICE_TYPES.
+ *  Empty means no filter. Shared so the rotation preview scopes to the
+ *  same set the plan list does — otherwise it burns PCO calls scanning
+ *  service types the app never shows. */
+function allowedServiceTypeNames(): string[] {
+  return INCLUDED_SERVICE_TYPES.value()
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
+}
+
+export const listPlans = onCall(async (req) => {
+  const { uid } = await requireAllowed(req)
+  const allowed = allowedServiceTypeNames()
   const client = await pcoForUser(uid)
   // 4 past plans per service type (~1 month of weekly services) gives
   // recent-history context alongside the upcoming list.
@@ -751,7 +759,15 @@ export const getRotationConfig = onCall(async (req) => {
   let previewError: string | null = null
   try {
     const pco = await pcoForUser(uid)
-    const types = await pco.listServiceTypes()
+    const allowed = allowedServiceTypeNames()
+    const all = await pco.listServiceTypes()
+    // Scope to the same service types the plan list shows. Without
+    // this, a preview on an account with midweek / youth / special-
+    // event types spends a listPlans plus a listPlanItems-per-plan on
+    // each of them, for data the app never surfaces.
+    const types = allowed.length
+      ? all.filter((t) => t.name != null && allowed.includes(t.name))
+      : all
     preview = await pMap(
       types,
       async (t) => {
