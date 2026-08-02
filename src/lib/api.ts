@@ -516,6 +516,30 @@ export const saveAdminPromptConfig = httpsCallable<
   { ok: boolean }
 >(functions, 'saveAdminPromptConfig')
 
+/** How long a song stays blocked after being sung, and how long it
+ *  stays disfavoured after that. Admin-owned; feeds the "Recently
+ *  sung" block in the AI prompt. */
+export interface RotationWindows {
+  hardBlockDays: number
+  reducedWeightDays: number
+}
+
+export interface RotationConfig {
+  windows: RotationWindows
+  defaults: RotationWindows
+  maxReducedWeightDays: number
+}
+
+export const getRotationConfig = httpsCallable<void, RotationConfig>(
+  functions,
+  'getRotationConfig',
+)
+
+export const saveRotationConfig = httpsCallable<
+  RotationWindows,
+  { ok: boolean; windows: RotationWindows }
+>(functions, 'saveRotationConfig')
+
 export const commitPlanItems = httpsCallable<
   { serviceTypeId: string; planId: string; items: CommitItem[] },
   { created: number }

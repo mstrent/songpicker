@@ -34,7 +34,15 @@ import {
   savePcoCredentialsForUser,
 } from './pco/credentials'
 import { countSongs } from './pco/songSlots'
-import { formatRecentlySung, loadRecentSongs } from './recentSongs'
+import {
+  DEFAULT_ROTATION_WINDOWS,
+  MAX_REDUCED_WEIGHT_DAYS,
+  formatRecentlySung,
+  loadRecentSongs,
+  loadRotationWindows,
+  parseRotationWindows,
+  saveRotationWindows,
+} from './recentSongs'
 import type { NewItem } from './pco/types'
 import {
   TECHNICAL_REQUIREMENTS,
@@ -505,12 +513,13 @@ export const suggestSongs = onCall<
     // failures and returns [], so a PCO hiccup degrades the suggestion
     // rather than failing the turn. Skipped entirely on auto-refresh,
     // which can't propose anything anyway.
+    const rotation = await loadRotationWindows()
     const [structure, role, recentSongs] = await Promise.all([
       loadResolved(uid, 'structure', planId),
       loadResolved(uid, 'role', planId),
       serviceTypeId && !autoRefresh
         ? pcoForUser(uid).then((pco) =>
-            loadRecentSongs(uid, pco, serviceTypeId),
+            loadRecentSongs(uid, pco, serviceTypeId, rotation),
           )
         : Promise.resolve([]),
     ])
@@ -533,7 +542,7 @@ export const suggestSongs = onCall<
           systemPrompt: composeSystemPrompt(role.effective.value),
           serviceOrder,
           planNotes,
-          recentlySung: formatRecentlySung(recentSongs, new Date()),
+          recentlySung: formatRecentlySung(recentSongs, new Date(), rotation),
           candidates,
           alreadyInPlan,
           history,
@@ -718,6 +727,31 @@ export const getAdminPromptConfig = onCall(async (req) => {
       sampleUserMessage: buildSampleUserMessage(),
     },
   }
+})
+
+// Admin-tunable rotation windows. Returned alongside the defaults and
+// the ceiling so the Admin page can label the inputs and validate
+// before a round trip.
+export const getRotationConfig = onCall(async (req) => {
+  await requireAdmin(req)
+  return {
+    windows: await loadRotationWindows(),
+    defaults: DEFAULT_ROTATION_WINDOWS,
+    maxReducedWeightDays: MAX_REDUCED_WEIGHT_DAYS,
+  }
+})
+
+export const saveRotationConfig = onCall(async (req) => {
+  await requireAdmin(req)
+  const windows = parseRotationWindows(req.data)
+  if (!windows) {
+    throw new HttpsError(
+      'invalid-argument',
+      `Both values must be whole numbers of days, with the reduced-weight window larger than the hard-block window and no more than ${MAX_REDUCED_WEIGHT_DAYS}.`,
+    )
+  }
+  await saveRotationWindows(windows)
+  return { ok: true, windows }
 })
 
 export const saveAdminPromptConfig = onCall(async (req) => {

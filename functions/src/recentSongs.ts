@@ -13,18 +13,32 @@ export interface RecentSong {
   lastSungAt: string
 }
 
-// The rotation rule, in days: repeating inside two weeks is a hard
-// no; inside six weeks it should weigh against a song without ruling
-// it out. Anything older carries no restriction at all, so it is
-// dropped from the payload entirely rather than spending tokens
-// telling the model a song is fine.
-export const HARD_BLOCK_DAYS = 14
-export const REDUCED_WEIGHT_DAYS = 42
+/** How long a song stays off the table after being sung, and how long
+ *  it stays disfavoured after that. Admin-tunable — worship rotations
+ *  differ, and these two numbers are exactly the kind of thing that
+ *  wants a dial rather than a deploy. */
+export interface RotationWindows {
+  /** Sung within this many days: do not propose at all. */
+  hardBlockDays: number
+  /** Sung within this many days (but past hardBlockDays): allowed, but
+   *  needs to clearly beat a fresher option. */
+  reducedWeightDays: number
+}
 
-// How many past plans to pull before filtering by date. A Sunday-only
-// service type runs ~6 plans in the reduced-weight window; 10 leaves
-// room for midweek extras and holiday services without a second page.
-const PAST_PLANS_TO_SCAN = 10
+export const DEFAULT_ROTATION_WINDOWS: RotationWindows = {
+  hardBlockDays: 14,
+  reducedWeightDays: 42,
+}
+
+// Upper bound on the configurable window. Past this the block starts
+// costing real prompt tokens for songs nobody was going to repeat
+// anyway, and the PCO scan gets expensive.
+export const MAX_REDUCED_WEIGHT_DAYS = 120
+
+// Plans are fetched to cover the configured window, plus margin for
+// midweek and holiday services that share a service type.
+const PLAN_SCAN_MARGIN = 4
+const MAX_PLANS_TO_SCAN = 40
 
 // Past plans change once a week at most, so this can be stale for
 // hours without consequence. Six hours keeps a planning session on one
@@ -32,9 +46,47 @@ const PAST_PLANS_TO_SCAN = 10
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000
 
 const COLLECTION = 'recentSongs'
+const ADMIN_DOC = 'appConfig/global'
 
 const docRef = (uid: string, serviceTypeId: string) =>
   getFirestore().doc(`${COLLECTION}/${uid}/serviceTypes/${serviceTypeId}`)
+
+/** Validate stored or user-supplied windows. Pure, and returns null
+ *  rather than throwing so the read path can fall back to defaults
+ *  while the write path can turn null into a clear error. */
+export function parseRotationWindows(raw: unknown): RotationWindows | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const hard = r.hardBlockDays
+  const reduced = r.reducedWeightDays
+  if (typeof hard !== 'number' || typeof reduced !== 'number') return null
+  if (!Number.isInteger(hard) || !Number.isInteger(reduced)) return null
+  if (hard < 1) return null
+  // Equal windows would render an empty reduced band and read as a
+  // configuration mistake; require the bands to be distinct.
+  if (reduced <= hard) return null
+  if (reduced > MAX_REDUCED_WEIGHT_DAYS) return null
+  return { hardBlockDays: hard, reducedWeightDays: reduced }
+}
+
+/** Admin-configured windows, falling back to the defaults when unset
+ *  or unparseable. Stored alongside the admin prompt overrides in
+ *  appConfig/global. */
+export async function loadRotationWindows(): Promise<RotationWindows> {
+  try {
+    const snap = await getFirestore().doc(ADMIN_DOC).get()
+    const raw = snap.exists
+      ? (snap.data() as { rotation?: unknown }).rotation
+      : null
+    return parseRotationWindows(raw) ?? DEFAULT_ROTATION_WINDOWS
+  } catch {
+    return DEFAULT_ROTATION_WINDOWS
+  }
+}
+
+export async function saveRotationWindows(w: RotationWindows): Promise<void> {
+  await getFirestore().doc(ADMIN_DOC).set({ rotation: w }, { merge: true })
+}
 
 function daysBetween(fromIso: string, now: Date): number {
   const then = new Date(fromIso).getTime()
@@ -43,21 +95,23 @@ function daysBetween(fromIso: string, now: Date): number {
 }
 
 export interface RecentSongBuckets {
-  /** Sung inside HARD_BLOCK_DAYS — off the table. */
+  /** Sung inside hardBlockDays — off the table. */
   blocked: RecentSong[]
-  /** Sung between HARD_BLOCK_DAYS and REDUCED_WEIGHT_DAYS — allowed,
-   *  but needs to clearly beat a fresher option. */
+  /** Sung between hardBlockDays and reducedWeightDays — allowed, but
+   *  needs to clearly beat a fresher option. */
   reduced: RecentSong[]
 }
 
 /** Split into the two recency bands, dropping anything older than the
  *  reduced-weight window. A song sung more than once lands in the band
  *  for its MOST RECENT outing — singing something last week and also
- *  four months ago makes it blocked, not fine. Pure: `now` is injected
- *  so the bands are testable without freezing the clock. */
+ *  four months ago makes it blocked, not fine. Pure: `now` and the
+ *  windows are injected so the bands are testable without freezing the
+ *  clock or reaching for Firestore. */
 export function bucketRecentSongs(
   songs: readonly RecentSong[],
   now: Date,
+  windows: RotationWindows = DEFAULT_ROTATION_WINDOWS,
 ): RecentSongBuckets {
   const mostRecent = new Map<string, RecentSong>()
   for (const s of songs) {
@@ -72,8 +126,8 @@ export function bucketRecentSongs(
   const reduced: RecentSong[] = []
   for (const s of mostRecent.values()) {
     const age = daysBetween(s.lastSungAt, now)
-    if (age <= HARD_BLOCK_DAYS) blocked.push(s)
-    else if (age <= REDUCED_WEIGHT_DAYS) reduced.push(s)
+    if (age <= windows.hardBlockDays) blocked.push(s)
+    else if (age <= windows.reducedWeightDays) reduced.push(s)
   }
   const byRecency = (a: RecentSong, b: RecentSong) =>
     b.lastSungAt.localeCompare(a.lastSungAt)
@@ -88,25 +142,30 @@ function renderSong(s: RecentSong): string {
 
 /** Render the block the model sees. The thresholds are baked into the
  *  labels rather than restated in the system prompt — the data says
- *  what to do with each band, so the prompt only has to point here.
+ *  what to do with each band, so the prompt only has to point here,
+ *  and retuning the windows can't leave the prompt describing the old
+ *  ones. Labels are in days rather than prose ("two weeks") precisely
+ *  because the windows are configurable: a generated phrase would
+ *  drift from the number it describes.
  *  Returns '' when there is nothing to say, so the caller can omit the
  *  section entirely rather than emitting an empty header. */
 export function formatRecentlySung(
   songs: readonly RecentSong[],
   now: Date,
+  windows: RotationWindows = DEFAULT_ROTATION_WINDOWS,
 ): string {
-  const { blocked, reduced } = bucketRecentSongs(songs, now)
+  const { blocked, reduced } = bucketRecentSongs(songs, now, windows)
   if (blocked.length === 0 && reduced.length === 0) return ''
 
   const lines = ['Recently sung by this congregation:']
   if (blocked.length > 0) {
     lines.push(
-      `  Within the last two weeks — do NOT propose these: ${blocked.map(renderSong).join(', ')}`,
+      `  Sung within the last ${windows.hardBlockDays} days — do NOT propose these: ${blocked.map(renderSong).join(', ')}`,
     )
   }
   if (reduced.length > 0) {
     lines.push(
-      `  Two to six weeks ago — propose only if clearly the best fit for the theme: ${reduced.map(renderSong).join(', ')}`,
+      `  Sung ${windows.hardBlockDays + 1}-${windows.reducedWeightDays} days ago — propose only if clearly the best fit for the theme: ${reduced.map(renderSong).join(', ')}`,
     )
   }
   return lines.join('\n')
@@ -115,31 +174,47 @@ export function formatRecentlySung(
 interface CacheDoc {
   songs: RecentSong[]
   fetchedAt: number
+  /** The reduced-weight window this snapshot was scanned for. A cache
+   *  written for a narrower window can't answer a wider one, so
+   *  widening the admin setting has to force a refetch rather than
+   *  silently returning a short list. */
+  scannedDays: number
 }
 
 /** Collect the songs used in this service type's recent past plans.
- *  Cached per user + service type because it costs ~13 PCO calls and
- *  changes weekly at most. Deliberately not folded into
- *  getPlanContext — that would spend those calls on every plan open.
- *  Failures are swallowed: rotation context is an enhancement, and a
- *  PCO hiccup here should degrade the suggestion rather than break it. */
+ *  Cached per user + service type because it costs a PCO call per plan
+ *  in the window and changes weekly at most. Deliberately not folded
+ *  into getPlanContext — that would spend those calls on every plan
+ *  open. Failures are swallowed: rotation context is an enhancement,
+ *  and a PCO hiccup here should degrade the suggestion rather than
+ *  break it. */
 export async function loadRecentSongs(
   uid: string,
   pco: PcoClient,
   serviceTypeId: string,
+  windows: RotationWindows = DEFAULT_ROTATION_WINDOWS,
   now: Date = new Date(),
 ): Promise<RecentSong[]> {
   const ref = docRef(uid, serviceTypeId)
   try {
     const snap = await ref.get()
     const cached = snap.exists ? (snap.data() as CacheDoc) : null
-    if (cached && now.getTime() - cached.fetchedAt < CACHE_TTL_MS) {
+    if (
+      cached &&
+      now.getTime() - cached.fetchedAt < CACHE_TTL_MS &&
+      (cached.scannedDays ?? 0) >= windows.reducedWeightDays
+    ) {
       return cached.songs
     }
   } catch {
     // Fall through to a live fetch; a cache read failure shouldn't
     // cost the caller its rotation context.
   }
+
+  const perPage = Math.min(
+    MAX_PLANS_TO_SCAN,
+    Math.ceil(windows.reducedWeightDays / 7) + PLAN_SCAN_MARGIN,
+  )
 
   let songs: RecentSong[]
   try {
@@ -148,12 +223,13 @@ export async function loadRecentSongs(
     // resolving it.
     const plans = await pco.listPlans(
       { id: serviceTypeId, name: null },
-      { filter: 'past', perPage: PAST_PLANS_TO_SCAN, order: '-sort_date' },
+      { filter: 'past', perPage, order: '-sort_date' },
     )
     // Only fetch items for plans that could land in either band. Older
     // plans carry no restriction, so their items are wasted calls.
     const inWindow = plans.filter(
-      (p) => p.sortDate && daysBetween(p.sortDate, now) <= REDUCED_WEIGHT_DAYS,
+      (p) =>
+        p.sortDate && daysBetween(p.sortDate, now) <= windows.reducedWeightDays,
     )
     const perPlan = await pMap(
       inWindow,
@@ -178,7 +254,11 @@ export async function loadRecentSongs(
   }
 
   ref
-    .set({ songs, fetchedAt: now.getTime() } satisfies CacheDoc)
+    .set({
+      songs,
+      fetchedAt: now.getTime(),
+      scannedDays: windows.reducedWeightDays,
+    } satisfies CacheDoc)
     .catch(() => {})
   return songs
 }

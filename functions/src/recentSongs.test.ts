@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  HARD_BLOCK_DAYS,
-  REDUCED_WEIGHT_DAYS,
+  DEFAULT_ROTATION_WINDOWS,
+  MAX_REDUCED_WEIGHT_DAYS,
   bucketRecentSongs,
   formatRecentlySung,
+  parseRotationWindows,
   type RecentSong,
 } from './recentSongs'
+
+const HARD_BLOCK_DAYS = DEFAULT_ROTATION_WINDOWS.hardBlockDays
+const REDUCED_WEIGHT_DAYS = DEFAULT_ROTATION_WINDOWS.reducedWeightDays
 
 const NOW = new Date('2026-08-02T00:00:00Z')
 
@@ -92,18 +96,87 @@ describe('formatRecentlySung', () => {
   // system prompt, so the prompt only has to point at this block.
   it('labels each band with its own instruction', () => {
     const out = formatRecentlySung([sung('A', 3), sung('B', 30)], NOW)
-    expect(out).toMatch(/last two weeks — do NOT propose/)
-    expect(out).toMatch(/Two to six weeks ago — propose only if clearly the best fit/)
+    expect(out).toMatch(
+      new RegExp(`last ${HARD_BLOCK_DAYS} days — do NOT propose`),
+    )
+    expect(out).toMatch(
+      new RegExp(
+        `Sung ${HARD_BLOCK_DAYS + 1}-${REDUCED_WEIGHT_DAYS} days ago — propose only if clearly the best fit`,
+      ),
+    )
   })
 
   it('omits a band that has no songs', () => {
     const out = formatRecentlySung([sung('B', 30)], NOW)
     expect(out).not.toMatch(/do NOT propose/)
-    expect(out).toMatch(/Two to six weeks ago/)
+    expect(out).toMatch(/propose only if clearly the best fit/)
   })
 
   it('carries the author as a disambiguator', () => {
     const out = formatRecentlySung([sung('Surrender', 3, 'Marc James')], NOW)
     expect(out).toContain('Surrender (Marc James)')
+  })
+
+  // The labels are generated from the configured windows rather than
+  // written as prose, so an admin retuning them can't leave the block
+  // telling the model "two weeks" while the cutoff is thirty days.
+  it('labels the bands from the configured windows', () => {
+    const out = formatRecentlySung([sung('A', 3), sung('B', 20)], NOW, {
+      hardBlockDays: 7,
+      reducedWeightDays: 30,
+    })
+    expect(out).toContain('within the last 7 days')
+    expect(out).toContain('Sung 8-30 days ago')
+  })
+
+  it('rebands the same songs when the windows change', () => {
+    const songs = [sung('Edge', 20)]
+    expect(formatRecentlySung(songs, NOW, {
+      hardBlockDays: 30,
+      reducedWeightDays: 60,
+    })).toMatch(/do NOT propose/)
+    expect(formatRecentlySung(songs, NOW, {
+      hardBlockDays: 7,
+      reducedWeightDays: 30,
+    })).toMatch(/propose only if clearly the best fit/)
+  })
+})
+
+describe('parseRotationWindows', () => {
+  it('accepts a well-formed pair', () => {
+    expect(parseRotationWindows({ hardBlockDays: 7, reducedWeightDays: 30 })).toEqual(
+      { hardBlockDays: 7, reducedWeightDays: 30 },
+    )
+  })
+
+  // Equal windows would render an empty reduced band, which reads as a
+  // silently broken config rather than a deliberate choice.
+  it.each([
+    ['reduced equal to hard', { hardBlockDays: 14, reducedWeightDays: 14 }],
+    ['reduced below hard', { hardBlockDays: 30, reducedWeightDays: 14 }],
+    ['zero hard block', { hardBlockDays: 0, reducedWeightDays: 30 }],
+    ['negative hard block', { hardBlockDays: -1, reducedWeightDays: 30 }],
+    ['fractional days', { hardBlockDays: 1.5, reducedWeightDays: 30 }],
+    ['non-numeric', { hardBlockDays: '14', reducedWeightDays: 42 }],
+    ['missing a field', { hardBlockDays: 14 }],
+    ['not an object', 42],
+    ['null', null],
+  ])('rejects %s', (_label, raw) => {
+    expect(parseRotationWindows(raw)).toBeNull()
+  })
+
+  it('rejects a reduced window past the ceiling', () => {
+    expect(
+      parseRotationWindows({
+        hardBlockDays: 14,
+        reducedWeightDays: MAX_REDUCED_WEIGHT_DAYS + 1,
+      }),
+    ).toBeNull()
+    expect(
+      parseRotationWindows({
+        hardBlockDays: 14,
+        reducedWeightDays: MAX_REDUCED_WEIGHT_DAYS,
+      }),
+    ).not.toBeNull()
   })
 })
