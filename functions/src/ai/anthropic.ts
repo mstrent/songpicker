@@ -63,7 +63,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: 'propose_songs',
     description:
-      "Add one or more new song suggestions to the candidate pool. Each suggestion needs a title; author and slots are optional but recommended. The user sees these as new cards in the AI candidates list.",
+      "Add one or more new song suggestions to the candidate pool. Each suggestion needs a title and a reason; author and slots are optional but recommended. The user sees these as new cards in the AI candidates list.",
     input_schema: {
       type: 'object',
       properties: {
@@ -74,9 +74,14 @@ export const TOOLS: Anthropic.Tool[] = [
             properties: {
               title: { type: 'string' },
               author: { type: 'string' },
+              reason: {
+                type: 'string',
+                description:
+                  'One short clause — 12 words or fewer — naming what connects this song to THIS service: a lyric, an image, or a scriptural echo tied to the theme, plan notes, or sermon direction. Not generic praise ("a great worship song", "a congregational favourite") and not a restatement of the theme. Keep it tight: it is surfaced only as a hover tooltip on the candidate card, and every word here delays the whole suggestion list from appearing.',
+              },
               slots: SONG_SLOTS_FIELD,
             },
-            required: ['title'],
+            required: ['title', 'reason'],
           },
         },
       },
@@ -189,6 +194,15 @@ export class AnthropicProvider implements AiProvider {
       // `display` is left at its default (omitted) — we never render
       // reasoning, so there's no reason to stream the text back.
       thinking: { type: 'adaptive' },
+      // Sonnet 5 defaults to `high`. Left unset, a suggest turn spent
+      // ~4,700 of its ~5,200 output tokens on thinking and took 57s to
+      // produce ten songs — the whole wait is silent, since tool_use
+      // blocks only decode at content_block_stop. `medium` on Sonnet 5
+      // is roughly Sonnet 4.6 at `high`. This is a dial, not a
+      // constant: the selection guidance in TECHNICAL_REQUIREMENTS is
+      // deliberately deliberation-heavy, so if suggestion quality
+      // drops noticeably, step back up before touching the prompt.
+      output_config: { effort: 'medium' },
       tools: TOOLS,
       tool_choice: { type: 'auto' },
       system: [
@@ -222,6 +236,15 @@ export class AnthropicProvider implements AiProvider {
       : undefined
 
     const runStream = async (): Promise<SuggestResult> => {
+      // Time-to-first-action is the number that matters for perceived
+      // latency: tool_use blocks are only decoded at content_block_stop
+      // (see below), so no candidate card can render until the entire
+      // propose_songs payload has finished generating. Anything that
+      // widens that payload — an extra per-song field, more songs —
+      // pushes every card back. Logged alongside token usage so a
+      // regression shows up as a number rather than a hunch.
+      const startedAt = Date.now()
+      let firstActionAt: number | null = null
       const stream = this.client.messages.stream(params)
       // Buffer partial tool_use inputs keyed by content-block index;
       // input_json_delta events stream in as fragments and we have to
@@ -254,8 +277,11 @@ export class AnthropicProvider implements AiProvider {
           const buf = toolBuffers.get(event.index)
           if (buf) {
             const action = safeBuildAction(buf.name, buf.json)
-            if (action && trackedOnChunk)
-              await trackedOnChunk({ kind: 'action', action })
+            if (action) {
+              firstActionAt ??= Date.now()
+              if (trackedOnChunk)
+                await trackedOnChunk({ kind: 'action', action })
+            }
           }
         }
       }
@@ -290,6 +316,7 @@ export class AnthropicProvider implements AiProvider {
       }
 
       const { actions, message } = parseResponse(finalMessage.content)
+      logTurn(finalMessage, actions, startedAt, firstActionAt)
       return {
         actions,
         message: message || fallbackMessage(actions),
@@ -389,6 +416,37 @@ function isContentFilterError(e: unknown): boolean {
   return false
 }
 
+// One line per model turn, in the same shape as the [enrichSnippets]
+// logs. `first action` is the one to watch: it's when the SPA can
+// render the first candidate card, and it lags total generation by
+// however long the tool payload takes to finish streaming. Output
+// tokens per proposed song is the companion number — it's what widens
+// when a per-song field is added to propose_songs.
+function logTurn(
+  finalMessage: Anthropic.Message,
+  actions: AiAction[],
+  startedAt: number,
+  firstActionAt: number | null,
+): void {
+  const u = finalMessage.usage
+  const songs = actions.reduce(
+    (n, a) => (a.kind === 'propose' ? n + a.suggestions.length : n),
+    0,
+  )
+  const parts = [
+    `total ${Date.now() - startedAt}ms`,
+    firstActionAt
+      ? `first action ${firstActionAt - startedAt}ms`
+      : 'no actions',
+    `in ${u?.input_tokens ?? '?'} (cache read ${u?.cache_read_input_tokens ?? 0}, write ${u?.cache_creation_input_tokens ?? 0})`,
+    `out ${u?.output_tokens ?? '?'}`,
+    `${actions.length} action(s)`,
+    `${songs} song(s) proposed`,
+    `stop ${finalMessage.stop_reason ?? 'unknown'}`,
+  ]
+  console.log(`[suggestSongs] ${parts.join(', ')}`)
+}
+
 interface ParseOutput {
   actions: AiAction[]
   message: string
@@ -455,9 +513,17 @@ function parsePropose(obj: Record<string, unknown>): ProposeAction | null {
     if (!raw || typeof raw !== 'object') continue
     const r = raw as Record<string, unknown>
     if (typeof r.title !== 'string' || !r.title.trim()) continue
+    // `reason` is required in the schema but tolerated as missing here:
+    // the schema isn't strict-mode, so a model that skips it should
+    // still get its song into the pool rather than have the whole
+    // suggestion silently dropped.
     suggestions.push({
       title: r.title.trim(),
       author: typeof r.author === 'string' ? r.author : undefined,
+      reason:
+        typeof r.reason === 'string' && r.reason.trim()
+          ? r.reason.trim()
+          : undefined,
       slots: Array.isArray(r.slots)
         ? r.slots.filter((s): s is string => typeof s === 'string')
         : undefined,

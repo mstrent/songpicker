@@ -14,6 +14,10 @@ export interface PersistedCandidate {
   id: string
   title: string
   author: string | null
+  /** The AI's one-clause justification from propose_songs. Distinct
+   *  from the legacy `reasoning` field below, which was an earlier
+   *  incarnation of the chorus snippet and still migrates into it. */
+  reason: string | null
   chorusSnippet: string | null
   snippetSource: string | null
   slots: string[]
@@ -66,6 +70,7 @@ function sanitizeCandidate(raw: unknown): PersistedCandidate | null {
     id: c.id,
     title: c.title,
     author: typeof c.author === 'string' ? c.author : null,
+    reason: typeof c.reason === 'string' ? c.reason : null,
     chorusSnippet:
       typeof c.chorusSnippet === 'string'
         ? c.chorusSnippet

@@ -1561,6 +1561,20 @@ textarea {
   border-image: var(--ai-gradient) 1;
   border-image-slice: 1;
 }
+/* Shown in place of the typing cursor while the model is still
+   thinking and has produced no text yet. Pulses rather than blinks —
+   a blink reads as an imminent keystroke, a pulse reads as work. */
+.chat-thinking {
+  color: var(--muted);
+  font-style: italic;
+  animation: chat-thinking-pulse 1.6s ease-in-out infinite;
+}
+@keyframes chat-thinking-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
 .streaming-cursor {
   display: inline-block;
   margin-left: 1px;

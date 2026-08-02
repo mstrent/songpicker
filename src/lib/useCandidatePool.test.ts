@@ -85,6 +85,7 @@ describe('useCandidatePool: initial load', () => {
             id: 'c1',
             title: 'Surrender',
             author: null,
+            reason: null,
             chorusSnippet: null,
             snippetSource: null,
             slots: [],
@@ -121,6 +122,69 @@ describe('useCandidatePool: initial load', () => {
     expect(result.current.candidates).toHaveLength(1)
     expect(result.current.candidates[0].id).toBe('c1')
     expect(result.current.messages).toHaveLength(1)
+  })
+
+  // The persisted candidate shape is an explicit whitelist at both
+  // ends. When `reason` was added to propose_songs it was threaded
+  // through the AI parser and the card but not through persistence,
+  // so it survived in memory and vanished on the next saveSession /
+  // loadSession round trip — the tooltip was simply empty on every
+  // card once a session had been rehydrated.
+  it('round-trips the AI reason through persistence', async () => {
+    ;vi.mocked(api.loadSession).mockResolvedValue({
+      data: {
+        candidates: [
+          {
+            id: 'c1',
+            title: 'Surrender',
+            author: null,
+            reason: 'echoes the sermon text on surrender',
+            chorusSnippet: null,
+            snippetSource: null,
+            slots: [],
+            matchStatus: 'matched',
+            song: {
+              id: 'song-x',
+              title: 'Surrender',
+              lastScheduledAt: null,
+              lastScheduledShortDates: null,
+            },
+            error: null,
+            decision: 'pending',
+            addedAt: 0,
+            assignedSlotItemId: null,
+            committedAt: null,
+            priorSlotTitle: null,
+          },
+        ],
+        messages: [],
+      },
+    })
+    const { result } = renderHook(() =>
+      useCandidatePool('plan-1', stubPlanData()),
+    )
+    await waitFor(() => expect(result.current.sessionLoaded).toBe(true))
+
+    // Hydration keeps it...
+    expect(result.current.candidates[0].suggestion.reason).toBe(
+      'echoes the sermon text on surrender',
+    )
+
+    // ...and a save triggered by a real state change writes it back
+    // out rather than dropping it on the way to Firestore.
+    act(() => {
+      result.current.setDecision('c1', 'reject')
+    })
+    await waitFor(() => {
+      const persisted = vi
+        .mocked(api.saveSession)
+        .mock.calls.map((c) => c[0])
+        .filter((arg) => (arg?.session.candidates.length ?? 0) > 0)
+        .at(-1)
+      expect(persisted?.session.candidates[0].reason).toBe(
+        'echoes the sermon text on surrender',
+      )
+    })
   })
 })
 
@@ -167,6 +231,7 @@ describe('useCandidatePool: setDecision', () => {
             id: 'c1',
             title: 'Surrender',
             author: null,
+            reason: null,
             chorusSnippet: null,
             snippetSource: null,
             slots: [],
@@ -210,6 +275,7 @@ describe('useCandidatePool: setDecision', () => {
             id: 'c1',
             title: 'Surrender',
             author: null,
+            reason: null,
             chorusSnippet: null,
             snippetSource: null,
             slots: [],
@@ -250,6 +316,7 @@ describe('useCandidatePool: setDecision', () => {
             id: 'c1',
             title: 'Surrender',
             author: null,
+            reason: null,
             chorusSnippet: null,
             snippetSource: null,
             slots: [],
@@ -386,6 +453,7 @@ describe('useCandidatePool: handleSuggest (AI driver)', () => {
             id: 'c1',
             title: 'Build My Life',
             author: null,
+            reason: null,
             chorusSnippet: null,
             snippetSource: null,
             slots: [],
@@ -452,6 +520,7 @@ describe('useCandidatePool: clearCandidates', () => {
             id: 'c1',
             title: 'X',
             author: null,
+            reason: null,
             chorusSnippet: null,
             snippetSource: null,
             slots: [],
@@ -497,6 +566,7 @@ describe('useCandidatePool: recheckCandidate', () => {
     id: 'c1',
     title: 'Surrender',
     author: 'Marc James',
+    reason: null,
     chorusSnippet: null,
     snippetSource: null,
     slots: [],
@@ -920,6 +990,7 @@ describe('useCandidatePool: ensureCandidate (eviction enrichment)', () => {
             id: 'c-existing',
             title: 'Way Maker',
             author: null,
+            reason: null,
             chorusSnippet: null,
             snippetSource: null,
             slots: [],

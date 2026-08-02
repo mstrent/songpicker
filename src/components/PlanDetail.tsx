@@ -728,7 +728,18 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                   </span>
                   <div className="chat-content">
                     {m.content}
-                    {isStreaming && <span className="streaming-cursor" aria-hidden>▍</span>}
+                    {/* Before the first token lands the model is still
+                        thinking, which on a ten-song turn can run tens
+                        of seconds. A typing cursor there reads as
+                        "words are arriving now" and makes the wait feel
+                        like a hang, so say what's actually happening
+                        until there's real text to put a cursor after. */}
+                    {isStreaming &&
+                      (m.content ? (
+                        <span className="streaming-cursor" aria-hidden>▍</span>
+                      ) : (
+                        <span className="chat-thinking">Thinking…</span>
+                      ))}
                   </div>
                 </div>
               )
@@ -980,14 +991,25 @@ export function PlanDetail({ serviceTypeId, planId }: Props) {
                   }}
                   onDragEnd={endDrag}
                 >
-                  <div className="ctitle">
+                  {/* The AI's "why this song" clause rides as a native
+                      tooltip so it costs no layout at all — it's a
+                      debugging surface, not something to read on every
+                      card. Carried on the inner link too: a nested
+                      title shadows its parent's, so without this the
+                      reason would be unreachable on matched songs,
+                      where the link covers most of the row. */}
+                  <div className="ctitle" title={c.suggestion.reason}>
                     {matched ? (
                       <a
                         className="ctitle-link icon-text"
                         href={`https://services.planningcenteronline.com/songs/${c.song!.id}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        title="Open in Planning Center"
+                        title={
+                          c.suggestion.reason
+                            ? `${c.suggestion.reason}\n\nOpen in Planning Center`
+                            : 'Open in Planning Center'
+                        }
                         draggable={false}
                       >
                         {c.suggestion.title}
