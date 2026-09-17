@@ -16,7 +16,7 @@
     "deploy": "npm run lint && npm test && npm run build && firebase deploy"
   },
   "dependencies": {
-    "firebase": "^12.14.0",
+    "firebase": "^12.19.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.7"
   },
