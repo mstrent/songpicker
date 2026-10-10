@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 
 import type { DisambiguationCandidate, LrclibQuery, LyricsDisambiguator } from './lrclib'
 
-const MODEL = 'claude-haiku-4-5-20251001'
+const MODEL = 'claude-haiku-5-5'
 
 export function createLyricsDisambiguator(
   apiKey: string,

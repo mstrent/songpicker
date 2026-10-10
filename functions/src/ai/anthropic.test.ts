@@ -135,7 +135,7 @@ describe('suggestSongs request shape', () => {
 
   it('runs on Sonnet 5 with adaptive thinking', async () => {
     const params = await runOnce()
-    expect(params.model).toBe('claude-sonnet-5')
+    expect(params.model).toBe('claude-sonnet-5-5')
     expect(params.thinking).toEqual({ type: 'adaptive' })
   })
 

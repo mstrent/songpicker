@@ -16,12 +16,12 @@ import type {
   UnrejectAction,
 } from './types'
 
-const MODEL = 'claude-sonnet-5'
+const MODEL = 'claude-sonnet-5-5'
 
 // Chorus snippets are sourced from LRCLIB via enrichSnippets — the AI
 // is never asked to recall lyrics. The classifier only returns slot
 // labels, so Haiku is sufficient.
-const CLASSIFIER_MODEL = 'claude-haiku-4-5-20251001'
+const CLASSIFIER_MODEL = 'claude-haiku-5-5'
 
 const SONG_SLOTS_FIELD = {
   type: 'array' as const,

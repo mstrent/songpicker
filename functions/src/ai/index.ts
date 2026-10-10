@@ -1,7 +1,7 @@
 import { AnthropicProvider } from './anthropic'
 import type { AiProvider } from './types'
 
-// Single-provider for now (Anthropic / Claude Sonnet 4.6). The AiProvider
+// Single-provider for now (Anthropic / Claude Sonnet 5.5). The AiProvider
 // abstraction is kept intentionally so a future provider can be added
 // without rewiring callers — wire it up here when that day comes.
 export function getAiProvider(apiKey: string): AiProvider {

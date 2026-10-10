@@ -277,13 +277,13 @@ page.
 
 ## AI provider
 
-- Anthropic Claude Sonnet 5 for the main `suggestSongs` flow, via
+- Anthropic Claude Sonnet 5.5 for the main `suggestSongs` flow, via
   `@anthropic-ai/sdk`. Single provider — we used to abstract over
   Gemini and OpenAI too, but trimmed those out. The `AiProvider`
   interface in `functions/src/ai/types.ts` is kept so a future
   provider can slot in, but `getAiProvider()` just returns
   `AnthropicProvider`.
-- **Default any future ancillary AI calls to Haiku 4.5**, not Sonnet.
+- **Default any future ancillary AI calls to Haiku 5.5**, not Sonnet.
   Keep Sonnet for the main suggestion engine; use Haiku for short
   classifier / short-label tasks where the model isn't generating
   substantive content. Several-times cheaper and faster.
