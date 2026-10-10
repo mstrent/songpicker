@@ -1,0 +1,86 @@
+name: TypeScript 7 readiness
+
+# Weekly probe: has typescript-eslint started accepting TypeScript 7 at the
+# root? Opens (or keeps) one tracking issue when it has. Never changes code.
+# Scheduled runs only fire from the default branch.
+
+on:
+  schedule:
+    - cron: '0 14 * * 1'  # Mondays 14:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Read typescript-eslint's TypeScript peer range
+        id: range
+        run: |
+          RANGE=$(npm view typescript-eslint@latest peerDependencies.typescript)
+          echo "range=$RANGE" >> "$GITHUB_OUTPUT"
+          echo "typescript-eslint peer range: $RANGE"
+
+      - name: Does the range accept TypeScript 7?
+        id: accepts
+        env:
+          RANGE: ${{ steps.range.outputs.range }}
+        run: |
+          if [ -n "$(npx --yes -p semver@7 semver -r "$RANGE" 7.0.2)" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "Range still excludes TypeScript 7. Nothing to do."
+          fi
+
+      # The range check alone is a weak signal, so when it passes we also
+      # probe the real thing. --legacy-peer-deps is used ONLY here, to
+      # install TypeScript 7 past the peer conflict, and nothing is committed.
+      - name: Probe lint and build with TypeScript 7 (no commit)
+        if: steps.accepts.outputs.ok == 'true'
+        id: probe
+        run: |
+          npm ci
+          npm install --no-save --legacy-peer-deps typescript@7.0.2
+          npx tsc -v
+          npm run lint
+          npm run build
+          echo "passed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the tracking issue
+        if: steps.accepts.outputs.ok == 'true' && steps.probe.outputs.passed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RANGE: ${{ steps.range.outputs.range }}
+        run: |
+          gh label create ts7-ready --color 0e8a16 --description "Root TypeScript 7 readiness" --force
+          EXISTING=$(gh issue list --label ts7-ready --state open --json number -q '.[0].number')
+          if [ -n "$EXISTING" ]; then
+            echo "Tracking issue #$EXISTING already open."
+            exit 0
+          fi
+          gh issue create --label ts7-ready --title "typescript-eslint accepts TypeScript 7; root can move to 7" --body "$(cat <<EOF
+          The weekly probe found that \`typescript-eslint\` now accepts TypeScript 7.
+
+          - Peer range: \`$RANGE\`
+          - Probe: lint and \`npm run build\` passed with TypeScript 7.0.2 installed via \`--legacy-peer-deps\` (run only in CI, nothing committed).
+
+          **Before moving root TypeScript to 7:**
+
+          1. **Remove the \`typescript\` ignore** from the root npm entry in \`.github/dependabot.yml\`. While it stays, Dependabot will keep skipping root TypeScript.
+          2. **Expect a real install to still fail until the range covers 7.** Dependabot's PR will hit the same ERESOLVE unless \`typescript-eslint\` has moved. Re-check the peer range, and do not add \`legacy-peer-deps\` to the repo.
+          3. **The probe is weak evidence.** It passed lint and build with peer checks bypassed, so run the real Dependabot PR's CI and read its lint output before merging. Also check the type-aware lint rules still run, not just exit 0.
+          4. **Close this issue** when root TypeScript is on 7, or when the probe starts failing again.
+
+          Opened by the \`typescript7-watch\` workflow. Scheduled runs only fire from the default branch, and this issue stays open until closed by hand.
+          EOF
+          )"
