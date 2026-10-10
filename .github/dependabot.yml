@@ -5,6 +5,10 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # typescript-eslint's peer range stops at TypeScript 6.x, so root
+    # TypeScript stays on 6 until that range moves. Functions is independent.
+    ignore:
+      - dependency-name: "typescript"
     groups:
       dev-dependencies:
         dependency-type: development
