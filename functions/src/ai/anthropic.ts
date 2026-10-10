@@ -194,12 +194,15 @@ export class AnthropicProvider implements AiProvider {
       // `display` is left at its default (omitted) — we never render
       // reasoning, so there's no reason to stream the text back.
       thinking: { type: 'adaptive' },
-      // Effort is left at the model default (`high` on Sonnet 5.5).
-      // Watch suggest-turn latency: on Sonnet 5, a `high` turn spent
-      // ~4,700 of ~5,200 output tokens on thinking and took 57s to
-      // produce ten songs, and the wait is silent since tool_use
-      // blocks only decode at content_block_stop. If that repeats,
-      // `output_config: { effort: 'medium' }` is the step-down.
+      // Sonnet 5 defaults to `high`. Left unset, a suggest turn spent
+      // ~4,700 of its ~5,200 output tokens on thinking and took 57s to
+      // produce ten songs — the whole wait is silent, since tool_use
+      // blocks only decode at content_block_stop. `medium` keeps turns
+      // fast; it is a dial, not a constant: the selection guidance in
+      // TECHNICAL_REQUIREMENTS is deliberately deliberation-heavy, so if
+      // suggestion quality drops noticeably, step back up before touching
+      // the prompt.
+      output_config: { effort: 'medium' },
       tools: TOOLS,
       tool_choice: { type: 'auto' },
       system: [

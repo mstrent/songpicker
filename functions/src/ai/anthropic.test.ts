@@ -139,13 +139,14 @@ describe('suggestSongs request shape', () => {
     expect(params.thinking).toEqual({ type: 'adaptive' })
   })
 
-  // Effort is deliberately left at the model default (`high` on Sonnet
-  // 5.5). Pinning it is a tuning decision: a `high` turn on Sonnet 5
-  // burned ~4,700 thinking tokens and 57 seconds on ten songs, so if
-  // that comes back, set `effort: 'medium'` and update this test.
-  it('leaves effort at the model default', async () => {
+  // Sonnet 5 defaults to `high`, and left unset a suggest turn burned
+  // ~4,700 thinking tokens and 57 seconds on ten songs — all of it
+  // silent, because tool_use only decodes at content_block_stop. The
+  // level is tunable; having none at all is the regression.
+  it('sets an explicit effort level rather than taking the default', async () => {
     const params = await runOnce()
-    expect(params.output_config).toBeUndefined()
+    const outputConfig = params.output_config as { effort?: string }
+    expect(outputConfig?.effort).toBe('medium')
   })
 
   // max_tokens is a shared ceiling over thinking + response text. Drop
