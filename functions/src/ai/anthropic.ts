@@ -16,12 +16,12 @@ import type {
   UnrejectAction,
 } from './types'
 
-const MODEL = 'claude-sonnet-5'
+const MODEL = 'claude-sonnet-5-5'
 
 // Chorus snippets are sourced from LRCLIB via enrichSnippets — the AI
 // is never asked to recall lyrics. The classifier only returns slot
 // labels, so Haiku is sufficient.
-const CLASSIFIER_MODEL = 'claude-haiku-4-5-20251001'
+const CLASSIFIER_MODEL = 'claude-haiku-5-5'
 
 const SONG_SLOTS_FIELD = {
   type: 'array' as const,
@@ -197,11 +197,11 @@ export class AnthropicProvider implements AiProvider {
       // Sonnet 5 defaults to `high`. Left unset, a suggest turn spent
       // ~4,700 of its ~5,200 output tokens on thinking and took 57s to
       // produce ten songs — the whole wait is silent, since tool_use
-      // blocks only decode at content_block_stop. `medium` on Sonnet 5
-      // is roughly Sonnet 4.6 at `high`. This is a dial, not a
-      // constant: the selection guidance in TECHNICAL_REQUIREMENTS is
-      // deliberately deliberation-heavy, so if suggestion quality
-      // drops noticeably, step back up before touching the prompt.
+      // blocks only decode at content_block_stop. `medium` keeps turns
+      // fast; it is a dial, not a constant: the selection guidance in
+      // TECHNICAL_REQUIREMENTS is deliberately deliberation-heavy, so if
+      // suggestion quality drops noticeably, step back up before touching
+      // the prompt.
       output_config: { effort: 'medium' },
       tools: TOOLS,
       tool_choice: { type: 'auto' },

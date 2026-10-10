@@ -135,7 +135,7 @@ describe('suggestSongs request shape', () => {
 
   it('runs on Sonnet 5 with adaptive thinking', async () => {
     const params = await runOnce()
-    expect(params.model).toBe('claude-sonnet-5')
+    expect(params.model).toBe('claude-sonnet-5-5')
     expect(params.thinking).toEqual({ type: 'adaptive' })
   })
 
@@ -146,7 +146,7 @@ describe('suggestSongs request shape', () => {
   it('sets an explicit effort level rather than taking the default', async () => {
     const params = await runOnce()
     const outputConfig = params.output_config as { effort?: string }
-    expect(outputConfig?.effort).toBeTruthy()
+    expect(outputConfig?.effort).toBe('medium')
   })
 
   // max_tokens is a shared ceiling over thinking + response text. Drop
